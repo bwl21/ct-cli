@@ -23,9 +23,9 @@ export function authCommand(): Command {
       }
       const client = new CtClient(config);
       const me = await client.authenticate(token);
-      const path = await storeToken(config.host, token);
+      const location = await storeToken(token);
       success(`Logged in to ${config.host} as ${me.firstName ?? ""} ${me.lastName ?? ""} (#${me.id})`.trim());
-      info(`Token stored at ${path} (mode 0600).`);
+      info(`Token stored in ${location}.`);
 
       const ctInfo = await client.get<CtInfo>("/info");
       if (ctInfo.version) {
