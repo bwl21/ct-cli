@@ -67,7 +67,11 @@ default-exports a function receiving the DSL:
 ```ts
 export default (ct) => {
   ct.campus({ key: "mainz", name: "Mainz", shortName: "MZ" });
-  ct.group({ key: "mainz_kids_lead", name: "Mainz · Kids Leitung", parent: "mainz_area" });
+  ct.group({ key: "mainz_area", name: "Mainz · Bereiche", groupTypeId: 2 });
+  // Hierarchy is opt-in and multi-parent: `parents` are managed group keys, each declared
+  // in this config. Omit it to leave a group's hierarchy unmanaged; edges to unmanaged
+  // groups stay invisible. (`parent:` is unrelated — an ordering hint only, not hierarchy.)
+  ct.group({ key: "mainz_kids_lead", name: "Mainz · Kids Leitung", groupTypeId: 2, parents: ["mainz_area"] });
 };
 ```
 

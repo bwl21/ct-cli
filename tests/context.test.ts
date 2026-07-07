@@ -30,6 +30,64 @@ describe("config context", () => {
     expect(resources[0]?.dependsOn).toEqual(["type_x", "lead"]);
   });
 
+  it("captures multiple parents (hierarchy is a DAG) as an opt-in set, not in fields", () => {
+    const { ct, resources } = createContext();
+    ct.group({ key: "team", name: "Team", parents: ["area_a", "area_b"] });
+    expect(resources[0]?.parents).toEqual(["area_a", "area_b"]);
+    expect(resources[0]?.dependsOn).toEqual(["area_a", "area_b"]);
+    expect(resources[0]?.fields).not.toHaveProperty("parents");
+  });
+
+  it("treats parents as opt-in: omitted → undefined, explicit [] → managed-empty", () => {
+    const { ct, resources } = createContext();
+    ct.group({ key: "no_hierarchy", name: "N" });
+    ct.group({ key: "empty_hierarchy", name: "E", parents: [] });
+    expect(resources[0]?.parents).toBeUndefined();
+    expect(resources[1]?.parents).toEqual([]);
+  });
+
+  it("de-duplicates the `parents` set", () => {
+    const { ct, resources } = createContext();
+    ct.group({ key: "team", name: "T", parents: ["lead", "other", "lead"] });
+    expect(resources[0]?.parents).toEqual(["lead", "other"]);
+  });
+
+  it("keeps `parent` out of managed hierarchy: it is an ordering edge only, never in `parents`", () => {
+    const { ct, resources } = createContext();
+    ct.group({ key: "team", name: "T", parent: "lead", parents: ["other"] });
+    expect(resources[0]?.parent).toBe("lead");
+    expect(resources[0]?.parents).toEqual(["other"]); // `lead` is NOT folded into managed parents
+    expect(resources[0]?.dependsOn).toEqual(["lead", "other"]); // both still contribute ordering edges
+  });
+
+  it("treats a falsy `parent` as absent, not as opt-in to managed-empty hierarchy", () => {
+    const { ct, resources } = createContext();
+    ct.group({ key: "g", name: "G", parent: "" });
+    expect(resources[0]?.parents).toBeUndefined(); // no hierarchy management
+    expect(resources[0]?.dependsOn).toEqual([]);
+  });
+
+  it("rejects a non-array / non-string `parents`", () => {
+    const { ct } = createContext();
+    expect(() => ct.group({ key: "g", name: "G", parents: "area" as never })).toThrow(/array of string/);
+    expect(() => ct.group({ key: "h", name: "H", parents: [1] as never })).toThrow(/array of string/);
+  });
+
+  it("rejects a hierarchy parent that is not a declared group", async () => {
+    await expect(
+      evaluateConfig((ct) => {
+        ct.campus({ key: "mz", name: "Mainz" });
+        ct.group({ key: "kids", name: "Kids", parents: ["mz"] }); // mz is a campus
+      }),
+    ).rejects.toThrow(/is a campus, not a group/);
+
+    await expect(
+      evaluateConfig((ct) => {
+        ct.group({ key: "kids", name: "Kids", parents: ["ghost"] }); // never declared
+      }),
+    ).rejects.toThrow(/not declared in this config/);
+  });
+
   it("rejects a duplicate logical key", () => {
     const { ct } = createContext();
     ct.campus({ key: "mainz", name: "A" });
