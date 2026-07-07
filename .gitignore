@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Env & secrets — tokens live in the OS keychain or an untracked .env, never in git
+.env
+.env.*
+!.env.example
+
+# Local ChurchTools state / adopted config (belongs in eqrm/ct-structure, never here)
+*.ctstate.json
+
+# Generated typed client (regenerated from the live OpenAPI spec)
+src/api/schema.d.ts
+
+# Test/coverage output
+coverage/
+.vitest/
