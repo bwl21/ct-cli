@@ -13,6 +13,8 @@
  */
 import type { DesiredResource, DynamicSpec, DynamicStatus } from "../engine/types.js";
 
+const DYNAMIC_STATUSES = ["active", "inactive", "manual", "none"] as const;
+
 export interface ResourceInput {
   key: string;
   /** Ordering hint: apply this resource after `parent`. A dependency edge only — NOT managed hierarchy. */
@@ -54,12 +56,14 @@ function toDesired(type: string, input: ResourceInput): DesiredResource {
   }
   // `dynamic` is a synthetic field for auto-groups, handled separately from the plain diffed
   // field bag. Opt-in: `undefined` means "not a dynamic group" (mirrors `parents`).
-  const DYNAMIC_STATUSES = ["active", "inactive", "manual", "none"] as const;
   let dynamicSpec: DynamicSpec | undefined;
   if (dynamic !== undefined) {
     if (type !== "group") throw new Error(`${type} "${key}": "dynamic" is only valid on a group.`);
+    if (dynamic == null || typeof dynamic !== "object") {
+      throw new Error(`group "${key}": "dynamic" must be an object with { status, ruleset }.`);
+    }
     const d = dynamic as Record<string, unknown>;
-    if (!DYNAMIC_STATUSES.includes(d.status as never))
+    if (!DYNAMIC_STATUSES.includes(d.status as DynamicStatus))
       throw new Error(`group "${key}": "dynamic.status" must be one of ${DYNAMIC_STATUSES.join(", ")}.`);
     if (d.ruleset == null || typeof d.ruleset !== "object")
       throw new Error(`group "${key}": "dynamic.ruleset" must be a RuleSet object or a { ref } reference.`);

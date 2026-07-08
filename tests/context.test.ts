@@ -150,6 +150,12 @@ describe("dynamic block", () => {
       ct.campus({ key: "c", name: "C", dynamic: { status: "manual", ruleset: {} } } as never),
     ).toThrow(/dynamic.*only.*group/i);
   });
+
+  it("rejects a null dynamic block with a clean error", async () => {
+    const { ct } = createContext();
+    expect(() => ct.group({ key: "g", name: "G", dynamic: null } as never))
+      .toThrow(/dynamic/i);
+  });
 });
 
 describe("preventDestroy lifecycle flag", () => {
