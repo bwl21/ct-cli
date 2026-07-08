@@ -10,6 +10,7 @@ import type { State } from "../state/state.js";
 import type { DesiredResource, FieldChange } from "./types.js";
 import { applyHierarchy, parentIdsByGroupId, type HierarchyEntry } from "./hierarchy.js";
 import { assertNotPeople } from "./guard.js";
+import { warn } from "../ui.js";
 
 export interface SyntheticFoldCtx {
   client: Pick<CtClient, "get">;
@@ -47,6 +48,7 @@ const parentsField: SyntheticField = {
       return { desired: applyHierarchy(desired, state, actual, parentIds), errors: [] };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      warn(`Failed to fetch group hierarchies: ${message}`);
       // Leave `parents` undiffed rather than fabricate "add all parents" from an empty map.
       return { desired, errors: [`group hierarchies: ${message}`] };
     }
