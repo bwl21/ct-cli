@@ -4,8 +4,9 @@
  * touches this file. State is saved after each successful action, so a crash
  * mid-apply leaves a consistent, resumable state file.
  *
- * apply NEVER deletes: delete items are recorded and skipped. Group hierarchy is
- * reconciled through the parents endpoints, not the group body.
+ * apply NEVER deletes: delete items are recorded and skipped. Synthetic
+ * sub-resource fields (group hierarchy's `parents`, …) are reconciled through
+ * their own dedicated endpoints, not the owning resource's body — see synthetic.ts.
  */
 import type { CtClient } from "../api/ctClient.js";
 import type { State } from "../state/state.js";
@@ -13,6 +14,7 @@ import { upsert, saveState } from "../state/state.js";
 import type { FieldChange, Plan } from "./types.js";
 import { RESOURCES } from "../resources/registry.js";
 import { assertNotPeople } from "./guard.js";
+import { isSyntheticField, syntheticField } from "./synthetic.js";
 
 export interface ExecuteDeps {
   client: Pick<CtClient, "request">;
@@ -29,58 +31,20 @@ export interface ExecuteResult {
   failed?: { key: string; message: string };
 }
 
-/** The managed field snapshot after a write: base ∪ changed fields, minus the hierarchy `parents` set-field. */
-function snapshotFromChanges(
-  base: Record<string, unknown>,
-  changes: FieldChange[],
-): Record<string, unknown> {
+/** The managed field snapshot after a write: base ∪ changed fields, minus any synthetic sub-resource fields. */
+function snapshotFromChanges(base: Record<string, unknown>, changes: FieldChange[]): Record<string, unknown> {
   const snap = { ...base };
-  for (const c of changes) {
-    if (c.field !== "parents") {
-      snap[c.field] = c.to;
-    }
-  }
-  delete snap.parents;
+  for (const c of changes) if (!isSyntheticField(c.field)) snap[c.field] = c.to;
+  for (const f of Object.keys(snap)) if (isSyntheticField(f)) delete snap[f];
   return snap;
 }
 
-function parentEdges(from: unknown, to: unknown): { added: string[]; removed: string[] } {
-  const f = new Set(Array.isArray(from) ? (from as string[]) : []);
-  const t = new Set(Array.isArray(to) ? (to as string[]) : []);
-  return {
-    added: [...t].filter((k) => !f.has(k)),
-    removed: [...f].filter((k) => !t.has(k)),
-  };
-}
-
-function resolveId(state: State, key: string): number {
-  const managed = state.resources[key];
-  if (!managed) {
-    throw new Error(`Cannot resolve parent "${key}" — not under management yet.`);
-  }
-  return managed.id;
-}
-
-async function applyParentEdges(
-  client: Pick<CtClient, "request">,
-  state: State,
-  childId: number,
-  changes: FieldChange[],
+async function applySyntheticFields(
+  client: Pick<CtClient, "request">, state: State, id: number, changes: FieldChange[],
 ): Promise<void> {
-  const change = changes.find((c) => c.field === "parents");
-  if (!change) {
-    return;
-  }
-  const { added, removed } = parentEdges(change.from, change.to);
-  for (const key of added) {
-    const path = `/groups/${childId}/parents/${resolveId(state, key)}`;
-    assertNotPeople(path);
-    await client.request("PUT", path);
-  }
-  for (const key of removed) {
-    const path = `/groups/${childId}/parents/${resolveId(state, key)}`;
-    assertNotPeople(path);
-    await client.request("DELETE", path);
+  for (const c of changes) {
+    const f = syntheticField(c.field);
+    if (f) await f.apply({ client, state, id, change: c });
   }
 }
 
@@ -125,7 +89,7 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         delete state.resources[item.key];
         upsert(state, { type: item.type, id: res.id, key: item.key, fields: body }, now());
         await save(statePath, state);
-        await applyParentEdges(client, state, res.id, item.changes);
+        await applySyntheticFields(client, state, res.id, item.changes);
         created.push(item.key);
       } else {
         const id = item.id;
@@ -134,7 +98,7 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         }
         const base = state.resources[item.key]?.fields ?? {};
         const snapshot = snapshotFromChanges(base, item.changes);
-        const hasFieldChange = item.changes.some((c) => c.field !== "parents");
+        const hasFieldChange = item.changes.some((c) => !isSyntheticField(c.field));
         if (hasFieldChange) {
           const path = spec.itemPath(id);
           assertNotPeople(path);
@@ -142,7 +106,7 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         }
         upsert(state, { type: item.type, id, key: item.key, fields: snapshot }, now());
         await save(statePath, state);
-        await applyParentEdges(client, state, id, item.changes);
+        await applySyntheticFields(client, state, id, item.changes);
         updated.push(item.key);
       }
     } catch (err) {
