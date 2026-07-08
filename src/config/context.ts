@@ -12,6 +12,10 @@
  * and loops, and the whole thing is trivially testable without file I/O.
  */
 import type { DesiredResource, DynamicSpec, DynamicStatus } from "../engine/types.js";
+// Re-exported so a config file can pull the query DSL from the same module as
+// `ConfigContext`: `import { q, churchQuery } from "../../src/config/context.js"`.
+export { q, churchQuery } from "./query.js";
+export type { QueryNode, ChurchQueryOptions } from "./query.js";
 
 const DYNAMIC_STATUSES = ["active", "inactive", "manual", "none"] as const;
 
