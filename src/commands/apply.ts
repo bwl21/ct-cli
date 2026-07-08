@@ -11,6 +11,9 @@ import { writeBackup } from "../engine/backup.js";
 import { renderPlan } from "../engine/render.js";
 import { summarize, type Plan } from "../engine/types.js";
 import { assertNotPeople } from "../engine/guard.js";
+import { buildPermissionPlan } from "../permissions/plan.js";
+import { renderPermissionPlan } from "../permissions/render.js";
+import { applyPermissionPlan } from "../permissions/apply.js";
 import { confirm } from "../ui/prompt.js";
 import { info, warn, success, error } from "../ui.js";
 
@@ -90,21 +93,23 @@ export function applyCommand(): Command {
       const configPath = resolveConfigPath(opts.config);
       const statePath = resolveStatePath(opts.state);
       const { resources: desired, permissions } = await loadConfig(configPath);
-      void permissions; // threaded for a later phase; not yet consumed here
       const state = await loadState(statePath, config.host);
 
       const { client } = await authedSession();
       const { plan, actual, fetchErrors } = await buildPlan(client, state, desired);
+      const { items: permItems, fetchErrors: permFetchErrors } = await buildPermissionPlan(client, state, permissions);
 
-      if (fetchErrors.length > 0) {
+      const allFetchErrors = [...fetchErrors, ...permFetchErrors];
+      if (allFetchErrors.length > 0) {
         error(
-          `Aborting: ${fetchErrors.length} resource(s) could not be fetched — the plan is incomplete. Re-run when resolved.`,
+          `Aborting: ${allFetchErrors.length} resource(s) could not be fetched — the plan is incomplete. Re-run when resolved.`,
         );
         process.exitCode = 1;
         return;
       }
 
       process.stdout.write(`${renderPlan(plan)}\n`);
+      process.stdout.write(`\n${renderPermissionPlan(permItems)}\n`);
 
       const deletes = plan.items.filter((i) => i.action === "delete");
       if (deletes.length > 0) {
@@ -115,7 +120,11 @@ export function applyCommand(): Command {
       }
 
       const s = summarize(plan);
-      const changeCount = s.create + s.update;
+      const permChangeCount = permItems.reduce(
+        (n, i) => n + i.diff.toPut.length + i.diff.toDelete.length,
+        0,
+      );
+      const changeCount = s.create + s.update + permChangeCount;
       if (changeCount === 0) {
         success("No changes to apply.");
         return;
@@ -143,6 +152,11 @@ export function applyCommand(): Command {
         );
         process.exitCode = 1;
         return;
+      }
+
+      const permResult = await applyPermissionPlan(permItems, client);
+      if (permResult.granted > 0 || permResult.deleted > 0) {
+        success(`Permissions applied: ${permResult.granted} granted, ${permResult.deleted} deleted.`);
       }
 
       if (opts.refresh) {
