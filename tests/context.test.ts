@@ -123,6 +123,35 @@ describe("config context", () => {
   });
 });
 
+describe("dynamic block", () => {
+  it("attaches a validated dynamic spec to the group and drops it from plain fields", async () => {
+    const { ct, resources } = createContext();
+    ct.group({
+      key: "all_mainz",
+      name: "Alle Mainz",
+      groupTypeId: 1,
+      dynamic: { status: "manual", ruleset: { description: "x", method: "ChurchQuery", params: {} } },
+    });
+    const g = resources.find((r) => r.key === "all_mainz")!;
+    expect(g.dynamic).toEqual({ status: "manual", ruleset: { description: "x", method: "ChurchQuery", params: {} } });
+    expect(g.fields).not.toHaveProperty("dynamic"); // never a plain diffed field
+  });
+
+  it("rejects an invalid status", async () => {
+    const { ct } = createContext();
+    expect(() => ct.group({ key: "g", name: "G", dynamic: { status: "bogus", ruleset: {} } as never })).toThrow(
+      /dynamic.*status/i,
+    );
+  });
+
+  it("rejects dynamic on a non-group", async () => {
+    const { ct } = createContext();
+    expect(() =>
+      ct.campus({ key: "c", name: "C", dynamic: { status: "manual", ruleset: {} } } as never),
+    ).toThrow(/dynamic.*only.*group/i);
+  });
+});
+
 describe("preventDestroy lifecycle flag", () => {
   it("is carried on the resource but kept out of managed fields", async () => {
     const resources = await evaluateConfig((ct) => {

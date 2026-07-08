@@ -11,7 +11,7 @@
  * The context is injected (no global state), so blueprints are just functions
  * and loops, and the whole thing is trivially testable without file I/O.
  */
-import type { DesiredResource } from "../engine/types.js";
+import type { DesiredResource, DynamicSpec, DynamicStatus } from "../engine/types.js";
 
 export interface ResourceInput {
   key: string;
@@ -41,7 +41,7 @@ export interface ConfigContext {
 export type ConfigModule = (ct: ConfigContext) => void | Promise<void>;
 
 function toDesired(type: string, input: ResourceInput): DesiredResource {
-  const { key, parent, parents, dependsOn = [], preventDestroy, ...fields } = input;
+  const { key, parent, parents, dependsOn = [], preventDestroy, dynamic, ...fields } = input;
   if (!key || typeof key !== "string") {
     throw new Error(`${type} declaration is missing a string "key".`);
   }
@@ -52,13 +52,35 @@ function toDesired(type: string, input: ResourceInput): DesiredResource {
   if (parents !== undefined && (!Array.isArray(parents) || parents.some((p) => typeof p !== "string"))) {
     throw new Error(`${type} "${key}": "parents" must be an array of string group keys.`);
   }
+  // `dynamic` is a synthetic field for auto-groups, handled separately from the plain diffed
+  // field bag. Opt-in: `undefined` means "not a dynamic group" (mirrors `parents`).
+  const DYNAMIC_STATUSES = ["active", "inactive", "manual", "none"] as const;
+  let dynamicSpec: DynamicSpec | undefined;
+  if (dynamic !== undefined) {
+    if (type !== "group") throw new Error(`${type} "${key}": "dynamic" is only valid on a group.`);
+    const d = dynamic as Record<string, unknown>;
+    if (!DYNAMIC_STATUSES.includes(d.status as never))
+      throw new Error(`group "${key}": "dynamic.status" must be one of ${DYNAMIC_STATUSES.join(", ")}.`);
+    if (d.ruleset == null || typeof d.ruleset !== "object")
+      throw new Error(`group "${key}": "dynamic.ruleset" must be a RuleSet object or a { ref } reference.`);
+    dynamicSpec = { status: d.status as DynamicStatus, ruleset: d.ruleset };
+  }
   // `parent` is an ordering hint only — a dependency edge, never a diffed/managed field
   // (its pre-hierarchy meaning; a `parent` may point at a campus). Group hierarchy is
   // managed opt-in via `parents`: `undefined` → unmanaged, `[]` → managed with no parents.
   const parentKey = typeof parent === "string" && parent !== "" ? parent : undefined;
   const parentKeys = parents !== undefined ? [...new Set(parents)] : undefined;
   const edges = [...new Set([...dependsOn, ...(parentKey ? [parentKey] : []), ...(parentKeys ?? [])])];
-  return { type, key, fields, parent: parentKey, parents: parentKeys, dependsOn: edges, preventDestroy };
+  return {
+    type,
+    key,
+    fields,
+    parent: parentKey,
+    parents: parentKeys,
+    dynamic: dynamicSpec,
+    dependsOn: edges,
+    preventDestroy,
+  };
 }
 
 /**
