@@ -1,14 +1,16 @@
 import { dirname, join } from "node:path";
 import { Command } from "commander";
+import type { CtClient } from "../api/ctClient.js";
 import { authedSession } from "../api/session.js";
 import { resolveConfig } from "../config.js";
-import { loadState, resolveStatePath, saveState } from "../state/state.js";
+import { loadState, resolveStatePath, saveState, type State } from "../state/state.js";
 import { loadConfig, resolveConfigPath } from "../config/load.js";
 import { buildPlan } from "../engine/build.js";
 import { executePlan } from "../engine/execute.js";
 import { writeBackup } from "../engine/backup.js";
 import { renderPlan } from "../engine/render.js";
-import { summarize } from "../engine/types.js";
+import { summarize, type Plan } from "../engine/types.js";
+import { assertNotPeople } from "../engine/guard.js";
 import { confirm } from "../ui/prompt.js";
 import { info, warn, success, error } from "../ui.js";
 
@@ -17,6 +19,42 @@ interface ApplyOptions {
   state?: string;
   backupDir?: string;
   autoApprove?: boolean;
+  refresh?: boolean;
+}
+
+interface RefreshResult {
+  created: number;
+  updated: number;
+  deleted: number;
+}
+
+/**
+ * Post-apply dynamic-group refresh (opt-in via `--refresh`). For each applied
+ * item whose changes touched the `dynamic` synthetic field, POST the
+ * per-group `/dynamicgroups/{id}/refresh` endpoint to materialize computed
+ * membership. Deliberately per-group only — the all-groups
+ * `/dynamicgroups/refresh` endpoint has a huge blast radius and must never be
+ * called from here.
+ *
+ * The id is read from state (post-apply, so creates have their real id) using
+ * an explicit `undefined` check — CT ids can legitimately be `0`.
+ */
+export async function refreshChangedDynamicGroups(
+  plan: Plan,
+  state: State,
+  client: Pick<CtClient, "request">,
+): Promise<void> {
+  for (const item of plan.items) {
+    if (item.action === "no-op" || item.action === "delete") continue;
+    if (!item.changes.some((c) => c.field === "dynamic")) continue;
+    const id = state.resources[item.key]?.id;
+    if (id === undefined) continue;
+    const path = `/dynamicgroups/${id}/refresh`;
+    assertNotPeople(path);
+    const res = await client.request<RefreshResult[]>("POST", path);
+    const r = res?.[0];
+    if (r) info(`refreshed ${item.key}: +${r.created} ~${r.updated} -${r.deleted}`);
+  }
 }
 
 /** backups/ dir: explicit flag → CT_BACKUP_DIR → `backups/` beside the state file. */
@@ -35,6 +73,10 @@ export function applyCommand(): Command {
     .option("-s, --state <path>", "state file (or set CT_STATE)")
     .option("--backup-dir <path>", "directory for the pre-apply backup (or set CT_BACKUP_DIR)")
     .option("-y, --auto-approve", "skip the confirmation prompt")
+    .option(
+      "--refresh",
+      "after a successful apply, POST /dynamicgroups/{id}/refresh for each changed dynamic group (per-group only)",
+    )
     .action(async (opts: ApplyOptions) => {
       const config = await resolveConfig();
       const configPath = resolveConfigPath(opts.config);
@@ -91,6 +133,11 @@ export function applyCommand(): Command {
           `Stopped at ${result.failed.key}: ${result.failed.message}. State saved up to this point — re-run to resume.`,
         );
         process.exitCode = 1;
+        return;
+      }
+
+      if (opts.refresh) {
+        await refreshChangedDynamicGroups(plan, state, client);
       }
     });
 }
