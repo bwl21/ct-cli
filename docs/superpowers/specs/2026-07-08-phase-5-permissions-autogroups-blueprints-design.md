@@ -29,7 +29,15 @@ The instance is a **write-safe dev box**, so round-trip integration tests may ge
   - `group_type_role` rows carry `authId: 10101` (> 10000). **This falsifies issue #13's claim that `authId < 10000` for `group_type_role`.** Domain rules will be derived empirically, not from the issue text.
   - `meta.modifiedPid: -1` = system-authored baseline grant (seen live on `group_type_role` domainId 8). These re-add themselves.
 - **Effective/internal endpoints** (`/permissions/internal/{persons,groups}/{id}`) return `module → { "+right": value }` with **no `authId`** — they are read-only computed views, **not** the name↔authId bridge. The bridge is the legacy churchcore auth masterdata (`masterData.auth`), to be resolved as implementation step 1.
-- **No dynamic groups exist** on the instance (`GET /dynamicgroups` → `[]`). A fixture dynamic group must be created on eqrm-dev during implementation to capture the exact GET-vs-PUT `process` nesting and seed the round-trip test.
+- **No dynamic groups exist** on the instance (`GET /dynamicgroups` → `[]`). A fixture dynamic group must be created on eqrm-dev during implementation to capture the `query.params.filter` JSONLogic internals and `handleMembership` contents (which OpenAPI leaves opaque) and seed the round-trip test.
+
+### Authoritative OpenAPI shapes (pulled 2026-07-08 from `/system/runtime/swagger/openapi.json`)
+
+- **`PermissionRequest`** (PUT/DELETE body, single object, not an array): `{ authId: int (required), dataId?: int[], isInherited?: bool, type?: "grant"|"revoke", reason?: string }`. `GET /permissions/{domainType}[/{domainId}]` → `{ data: Permission[] }` where `Permission.dataId` is a **single `int|null`**. ⇒ **GET returns `dataId` scalar, PUT sends `dataId` array** — normalize on read.
+- The `authId < 10000` rule for `status`/`person`/`group_type_role` **is documented on the write body** (`PermissionRequest.authId`), and `authId 10127` is explicitly unsupported. The live `group_type_role` row with `authId 10101` is a `modifiedPid:-1` system baseline — excluded by the baseline rule below, so the write-side constraint and the read-side data do not conflict. `type:"revoke"` and `isInherited:true` are documented as valid only for the two role domains (revoke: `group_role` only).
+- **Ruleset:** `GET /dynamicgroups/{id}/ruleset` → `{ data: DynamicGroupRule }` (bare). `PUT` body is **wrapped**: `{ dynamicGroupRuleSet: DynamicGroupRule }`. `DELETE` → 204. `DynamicGroupRule = { description, importance, personIdFieldName, process, query, shorty? }`. `query` is a **ChurchQuery** envelope `{ description, method: "ChurchQuery", params: { filter: {…JSONLogic…}, responseFields, … } }` — the JSONLogic tree lives in the opaque `params.filter`. ⇒ the **GET-vs-PUT difference is the `dynamicGroupRuleSet` envelope**, resolved by the normalizer.
+- **Status:** `GET /dynamicgroups/{id}/status` → `{ dynamicGroupStatus: "active"|"inactive"|"manual"|"none" }`. `PUT` body `{ dynamicGroupStatus: string }`.
+- **Refresh:** `POST /dynamicgroups/{id}/refresh` → `{ data: [{ groupId, created, updated, deleted, unprocessed }] }`.
 
 ## Architecture — synthetic sub-resource fields
 
@@ -169,7 +177,8 @@ One branch. Implement **#14 → #13 → #7**. #14 and #13 are independent; #7 la
 
 ## Open items to resolve during implementation (all live-resolvable on eqrm-dev)
 
-1. Name↔authId bridge (churchcore auth masterdata) — permissions step 1.
-2. `group_role` `domainId` semantics (role-def id vs per-(group,role) id) — freeze DSL after.
-3. Empirical per-domain validation rules (`authId` range, `revoke`, `isInherited`).
-4. Dynamic-group GET-vs-PUT `process` nesting transform — pinned against a created fixture.
+1. **Name↔authId bridge** (churchcore auth masterdata) — permissions step 1. **Still open:** no REST endpoint (`/permissions/masterdata`, `/permissions` both 404; legacy `?q=churchcore/ajax&func=getMasterData` needs correct params). Resolve via the legacy churchcore masterdata call or `cc_authview.js`'s source.
+2. `group_role` `domainId` semantics (role-def id vs per-(group,role) id) — freeze permission DSL after. **Still open.**
+3. `query.params.filter` JSONLogic internals + `handleMembership` contents — **fixture-only** (OpenAPI leaves them opaque); captured by the #14 fixture task.
+
+**Resolved by the 2026-07-08 OpenAPI probe** (see "Authoritative OpenAPI shapes" above): domain validation rules (`authId<10000`, `revoke`/`isInherited` domains); `dataId` GET-scalar-vs-PUT-array; ruleset GET-bare-vs-PUT-`dynamicGroupRuleSet`-wrapped envelope; status/refresh bodies.
