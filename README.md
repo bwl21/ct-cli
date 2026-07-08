@@ -28,8 +28,9 @@ Early scaffold. See the [epic (#1)](https://github.com/eqrm/ct-cli/issues/1) and
 - ✅ **Phase 2 — Read/Adopt** ([#4](https://github.com/eqrm/ct-cli/issues/4)): `ct adopt` + JSON state file.
 - ✅ **Phase 3 — Declarative engine** ([#5](https://github.com/eqrm/ct-cli/issues/5)): config DSL, `plan`/diff, dependency graph, group hierarchy.
 - ✅ **Phase 4 — Apply + guardrails** ([#6](https://github.com/eqrm/ct-cli/issues/6)): `ct apply` / `ct destroy`, confirmation, backup, `preventDestroy`.
-- 🚧 Phase 5: blueprints. Auto-groups (dynamic groups) landed — see
-  [Auto-groups](#auto-groups) below.
+- 🚧 Phase 5: blueprints. Auto-groups (dynamic groups) and permissions
+  (group-role / group-type-role grants) landed — see
+  [Auto-groups](#auto-groups) and [Permissions](#permissions) below.
 
 ## Requirements
 
@@ -116,6 +117,33 @@ recompute for every dynamic group that changed. See
 `status` states, the three ways to supply a ruleset, the typed query DSL,
 and how drift normalization avoids cosmetic false diffs) and
 [`examples/dynamic-group.config.ts`](examples/dynamic-group.config.ts) for a
+runnable example.
+
+### Permissions
+
+`ct.groupRole` / `ct.groupTypeRole` declare ChurchTools permission grants
+(group-role and group-type-role rights) as code, reconciled with the same
+`plan`/`apply` workflow:
+
+```ts
+ct.groupTypeRole({
+  key: "leiter_tpl",
+  id: 1, // the domainId — the group type's own id for group_type_role
+  grants: [
+    "churchgroup:view",                                          // unscoped
+    { right: "churchgroup:view group", scope: ["kids_area"] },   // scoped to a managed group
+  ],
+});
+```
+
+Right names (`"module:right"`) are validated against a static, offline
+catalog — discover them with `ct get permissions-catalog`. Grants you remove
+from the config are diffed as deletions and reconciled via `ct apply`, same
+as any other resource; system-default and inherited grants are never touched
+or surfaced. See [`docs/permissions.md`](docs/permissions.md) for the full
+guide (domainId semantics, scope resolution, domain rules, the
+baseline-tolerance model) and
+[`examples/permissions.config.ts`](examples/permissions.config.ts) for a
 runnable example.
 
 ## Auth model

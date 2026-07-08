@@ -1,21 +1,20 @@
 /**
  * The permission catalog: the static name→authId bridge (see src/permissions/README.md).
  * The catalog is reference data captured from the instance's churchauth masterdata; it is
- * NOT available via the REST API, so it is shipped as JSON and read from disk once.
+ * NOT available via the REST API, so it is shipped as JSON.
+ *
+ * Imported (not `readFileSync`'d) so tsup/esbuild inlines it into the bundle at build time —
+ * `dist/index.js` needs no sibling `catalog.json` on disk, avoiding an ENOENT in the packaged
+ * binary (tsup does not copy non-entry assets into `dist/` on its own).
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import catalogData from "./catalog.json" with { type: "json" };
 
 export interface CatalogEntry { authId: number; scopeField: string | null; revocable: boolean; desc: string }
 
-let cache: Record<string, CatalogEntry> | null = null;
+const catalog = catalogData as Record<string, CatalogEntry>;
 
 export function loadCatalog(): Record<string, CatalogEntry> {
-  if (cache) return cache;
-  const here = dirname(fileURLToPath(import.meta.url));
-  cache = JSON.parse(readFileSync(join(here, "catalog.json"), "utf8")) as Record<string, CatalogEntry>;
-  return cache;
+  return catalog;
 }
 
 export function resolveAuthId(name: string): CatalogEntry {
