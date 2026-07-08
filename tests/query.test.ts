@@ -16,10 +16,20 @@ describe("typed query builder", () => {
     expect(q.isnull("person.isArchived")).toEqual({ isnull: [{ var: "person.isArchived" }] });
   });
 
+  it("q.not array-wraps the operand, matching the real ruleset's `!` shape", () => {
+    const operand = q.isnull("person.dateOfDeath");
+    expect(q.not(operand)).toEqual({ "!": [{ isnull: [{ var: "person.dateOfDeath" }] }] });
+  });
+
+  it("q.or", () => {
+    const a = q.eq("ctgroup.campusId", 1);
+    const b = q.eq("person.isArchived", false);
+    expect(q.or(a, b)).toEqual({ or: [a, b] });
+  });
+
   it("churchQuery wraps the filter in the real ChurchQuery envelope shape", () => {
-    const cq = churchQuery(q.eq("ctgroup.campusId", 1), { description: "Mainz" });
+    const cq = churchQuery(q.eq("ctgroup.campusId", 1));
     expect(cq).toEqual({
-      description: "Mainz",
       method: "ChurchQuery",
       params: {
         groupBy: ["person.id"],
@@ -30,14 +40,13 @@ describe("typed query builder", () => {
     });
   });
 
-  it("churchQuery defaults description to empty string and allows overriding envelope defaults", () => {
+  it("churchQuery allows overriding envelope defaults", () => {
     const cq = churchQuery(q.isnull("person.dateOfDeath"), {
       groupBy: ["person.id", "ctgroup.id"],
       primaryEntityAlias: "ctgroup",
       responseFields: ["ctgroup.id"],
     });
     expect(cq).toEqual({
-      description: "",
       method: "ChurchQuery",
       params: {
         groupBy: ["person.id", "ctgroup.id"],
@@ -56,7 +65,7 @@ describe("typed query builder", () => {
 
   it("matches the shape of a real production ruleset's query envelope keys", () => {
     const cq = churchQuery(q.eq("ctgroup.campusId", 1));
-    expect(Object.keys(cq).sort()).toEqual(["description", "method", "params"]);
+    expect(Object.keys(cq).sort()).toEqual(["method", "params"]);
     expect(Object.keys(cq.params as Record<string, unknown>).sort()).toEqual([
       "filter",
       "groupBy",
