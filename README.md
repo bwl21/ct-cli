@@ -28,9 +28,13 @@ Early scaffold. See the [epic (#1)](https://github.com/eqrm/ct-cli/issues/1) and
 - ✅ **Phase 2 — Read/Adopt** ([#4](https://github.com/eqrm/ct-cli/issues/4)): `ct adopt` + JSON state file.
 - ✅ **Phase 3 — Declarative engine** ([#5](https://github.com/eqrm/ct-cli/issues/5)): config DSL, `plan`/diff, dependency graph, group hierarchy.
 - ✅ **Phase 4 — Apply + guardrails** ([#6](https://github.com/eqrm/ct-cli/issues/6)): `ct apply` / `ct destroy`, confirmation, backup, `preventDestroy`.
-- 🚧 Phase 5: blueprints. Auto-groups (dynamic groups) and permissions
-  (group-role / group-type-role grants) landed — see
-  [Auto-groups](#auto-groups) and [Permissions](#permissions) below.
+- ✅ **Phase 5 — Blueprints** ([#7](https://github.com/eqrm/ct-cli/issues/7)):
+  all three planned features landed — auto-groups / dynamic groups
+  ([#14](https://github.com/eqrm/ct-cli/issues/14)), permissions
+  ([#13](https://github.com/eqrm/ct-cli/issues/13)), and blueprints
+  ([#7](https://github.com/eqrm/ct-cli/issues/7)) — see
+  [Auto-groups](#auto-groups), [Permissions](#permissions), and
+  [Blueprints](#blueprints) below.
 
 ## Requirements
 
@@ -96,6 +100,19 @@ export default (ct) => {
 
 Machine-readable output goes to **stdout** (pipe/`jq` it); human status lines go
 to **stderr**.
+
+### Blueprints
+
+A "blueprint" is a plain function over the injected `ConfigContext` — no
+special machinery. Pull a repeated structure (e.g. a campus's Kids area)
+into a function and call it once per campus, prefixing every key with
+`${campus}_` to keep each instantiation's resources unique and its managed
+hierarchy (`parents`) scoped to that campus. `ct plan`/`ct apply` order
+campuses → groups → hierarchy automatically via the dependency graph, and
+an undeclared `parents` reference throws at config-load time (typo guard).
+See [`docs/blueprints.md`](docs/blueprints.md) for the full guide and
+[`examples/campus-blueprint.config.ts`](examples/campus-blueprint.config.ts)
+for a runnable example.
 
 ### Auto-groups
 
