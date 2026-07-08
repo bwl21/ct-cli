@@ -28,8 +28,8 @@ describe("resourceType", () => {
     expect(() => resourceType("nope")).toThrow(/Adoptable types/);
   });
 
-  it("derives a key from campus shortName", () => {
-    expect(RESOURCES.campus?.deriveKey({ name: "Mainz", shortName: "MZ" })).toBe("mz");
+  it("derives a key from campus shorty", () => {
+    expect(RESOURCES.campus?.deriveKey({ name: "Mainz", shorty: "MZ" })).toBe("mz");
   });
 
   it("snapshots group ids whether they are nested under information or top-level", () => {
@@ -61,5 +61,51 @@ describe("configSnippet", () => {
     expect(configSnippet("group", "team", { name: "Team", groupTypeId: undefined })).toBe(
       'group({ key: "team", name: "Team" });',
     );
+  });
+});
+
+describe("write specs", () => {
+  it("campus creates via POST /campuses and updates via PUT", () => {
+    expect(RESOURCES.campus?.collectionPath).toBe("/campuses");
+    expect(RESOURCES.campus?.updateMethod).toBe("PUT");
+  });
+
+  it("group updates via PATCH", () => {
+    expect(RESOURCES.group?.collectionPath).toBe("/groups");
+    expect(RESOURCES.group?.updateMethod).toBe("PATCH");
+  });
+
+  it("registers the new writable types with their collection + item paths", () => {
+    expect(RESOURCES["age-group"]?.collectionPath).toBe("/group/agegroups");
+    expect(RESOURCES["target-group"]?.collectionPath).toBe("/group/targetgroups");
+    expect(RESOURCES["relationship-type"]?.collectionPath).toBe("/person/relationshiptypes");
+    expect(RESOURCES["group-role"]?.collectionPath).toBe("/group/roles");
+    expect(RESOURCES["age-group"]?.itemPath(3)).toBe("/group/agegroups/3");
+  });
+
+  // Field sets verified live against eqrm.church.tools (2026-07-08).
+  it("snapshots real relationship-type degree fields (degreeNameA/B, not degreeForward/Reverse)", () => {
+    const raw = {
+      name: "relationship.couple",
+      nameTranslated: "Couple",
+      degreeNameA: "spouse",
+      degreeNameB: "spouse",
+      securityLevelId: 1,
+    };
+    expect(RESOURCES["relationship-type"]?.managedFields(raw)).toEqual({
+      name: "relationship.couple",
+      nameTranslated: "Couple",
+      degreeNameA: "spouse",
+      degreeNameB: "spouse",
+    });
+  });
+
+  it("snapshots age-group / group-role fields that exist on the live payload", () => {
+    expect(
+      RESOURCES["age-group"]?.managedFields({ name: "NextGen", nameTranslated: "NextGen", sortKey: 8 }),
+    ).toEqual({ name: "NextGen", nameTranslated: "NextGen", sortKey: 8 });
+    expect(
+      RESOURCES["group-role"]?.managedFields({ name: "Mitglied", nameTranslated: "Mitglied", groupTypeId: 2 }),
+    ).toEqual({ name: "Mitglied", nameTranslated: "Mitglied", groupTypeId: 2 });
   });
 });
