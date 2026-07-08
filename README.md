@@ -28,7 +28,8 @@ Early scaffold. See the [epic (#1)](https://github.com/eqrm/ct-cli/issues/1) and
 - ✅ **Phase 2 — Read/Adopt** ([#4](https://github.com/eqrm/ct-cli/issues/4)): `ct adopt` + JSON state file.
 - ✅ **Phase 3 — Declarative engine** ([#5](https://github.com/eqrm/ct-cli/issues/5)): config DSL, `plan`/diff, dependency graph, group hierarchy.
 - ✅ **Phase 4 — Apply + guardrails** ([#6](https://github.com/eqrm/ct-cli/issues/6)): `ct apply` / `ct destroy`, confirmation, backup, `preventDestroy`.
-- ⬜ Phase 5: blueprints.
+- 🚧 Phase 5: blueprints. Auto-groups (dynamic groups) landed — see
+  [Auto-groups](#auto-groups) below.
 
 ## Requirements
 
@@ -94,6 +95,28 @@ export default (ct) => {
 
 Machine-readable output goes to **stdout** (pipe/`jq` it); human status lines go
 to **stderr**.
+
+### Auto-groups
+
+A group can opt in to a `dynamic` block to manage its ChurchTools "dynamic
+group" (auto-group) ruleset + status alongside its plain fields:
+
+```ts
+ct.group({
+  key: "all_mainz",
+  name: "Alle Mainz",
+  groupTypeId: 1,
+  dynamic: { status: "manual", ruleset: churchQueryRuleset /* inline object | { ref } | q + churchQuery */ },
+});
+```
+
+`ct apply --refresh` opts in to a post-apply, per-group membership
+recompute for every dynamic group that changed. See
+[`docs/dynamic-groups.md`](docs/dynamic-groups.md) for the full guide (the
+`status` states, the three ways to supply a ruleset, the typed query DSL,
+and how drift normalization avoids cosmetic false diffs) and
+[`examples/dynamic-group.config.ts`](examples/dynamic-group.config.ts) for a
+runnable example.
 
 ## Auth model
 
