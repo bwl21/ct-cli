@@ -41,7 +41,7 @@ function dropReadOnly(rule: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-/** Canonicalise a ruleset for diffing: unwrap array/PUT envelope, drop timestamps, strip labels, coerce scalars. */
+/** Canonicalise a ruleset for diffing: unwrap array/PUT envelope, drop timestamps; strip labels + coerce scalars WITHIN the query subtree only. */
 export function normalizeRuleset(rule: unknown): Record<string, unknown> {
   let r: unknown = rule ?? {};
   if (Array.isArray(r)) r = r[0] ?? {};                       // GET returns a single-element [RuleSet]
@@ -49,7 +49,14 @@ export function normalizeRuleset(rule: unknown): Record<string, unknown> {
   if (obj.dynamicGroupRuleSet && typeof obj.dynamicGroupRuleSet === "object") {
     obj = obj.dynamicGroupRuleSet as Record<string, unknown>; // unwrap the PUT envelope
   }
-  return coerceScalars(stripCosmeticLabels(dropReadOnly(obj))) as Record<string, unknown>;
+  const base = dropReadOnly(obj);
+  // Cosmetic dterm labels and int/string id inconsistencies live inside `query`. Normalize only
+  // that subtree, so a RuleSet-level string field that looks numeric (a "2024" description/shorty)
+  // is never silently retyped to a number and corrupted on write-back.
+  if (base.query !== undefined) {
+    base.query = coerceScalars(stripCosmeticLabels(base.query));
+  }
+  return base;
 }
 
 export interface NormalizedDynamic { status: DynamicStatus; ruleset: Record<string, unknown> }

@@ -40,6 +40,15 @@ describe("normalizeRuleset", () => {
     expect(normalizeRuleset(arr)).toEqual(normalizeRuleset(arr[0]));
   });
 
+  it("coerces filter operands but leaves numeric-looking RuleSet-level fields as strings", () => {
+    const r = { description: "2024", shorty: "007", personIdFieldName: "person.id",
+      query: { "==": [{ var: "ctgroup.id" }, "112"] }, process: {} };
+    const out = normalizeRuleset(r);
+    expect(out.description).toBe("2024"); // stays a string, not 2024
+    expect(out.shorty).toBe("007");       // stays a string, not 7
+    expect(out.query).toEqual({ "==": [{ var: "ctgroup.id" }, 112] }); // filter operand coerced
+  });
+
   it("read-then-normalize of every live fixture is stable and label-free", () => {
     for (const name of ["ruleset-683", "ruleset-2022", "ruleset-1092"]) {
       const raw = JSON.parse(readFileSync(`tests/fixtures/dynamic/${name}.get.json`, "utf8")); // array shape
