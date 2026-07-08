@@ -7,9 +7,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 describe("loadConfig", () => {
   it("loads a .ts config that default-exports a function", async () => {
-    const resources = await loadConfig(join(here, "fixtures/sample.config.ts"));
+    const { resources, permissions } = await loadConfig(join(here, "fixtures/sample.config.ts"));
     expect(resources.map((r) => r.key)).toEqual(["mainz", "kids_lead"]);
     expect(resources[1]).toMatchObject({ type: "group", parent: "mainz", dependsOn: ["mainz"] });
+    expect(permissions).toEqual([]);
   });
 
   it("rejects a config that does not default-export a function", async () => {

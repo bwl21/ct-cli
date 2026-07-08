@@ -12,6 +12,8 @@
  * and loops, and the whole thing is trivially testable without file I/O.
  */
 import type { DesiredResource, DynamicSpec, DynamicStatus } from "../engine/types.js";
+import type { DomainType } from "../permissions/grants.js";
+import type { DesiredPermission, Grant } from "../permissions/types.js";
 // Re-exported so a config file can pull the query DSL from the same module as
 // `ConfigContext`: `import { q, churchQuery } from "../../src/config/context.js"`.
 export { q, churchQuery } from "./query.js";
@@ -35,6 +37,12 @@ export interface ResourceInput {
   [field: string]: unknown;
 }
 
+export interface PermissionInput {
+  key: string;
+  id: number;
+  grants: Grant[];
+}
+
 export interface ConfigContext {
   campus(input: ResourceInput): void;
   group(input: ResourceInput): void;
@@ -42,6 +50,8 @@ export interface ConfigContext {
   ageGroup(input: ResourceInput): void;
   targetGroup(input: ResourceInput): void;
   relationshipType(input: ResourceInput): void;
+  groupRole(input: PermissionInput): void;
+  groupTypeRole(input: PermissionInput): void;
 }
 
 export type ConfigModule = (ct: ConfigContext) => void | Promise<void>;
@@ -117,8 +127,13 @@ function validateReferences(resources: DesiredResource[]): void {
   }
 }
 
-export function createContext(): { ct: ConfigContext; resources: DesiredResource[] } {
+export function createContext(): {
+  ct: ConfigContext;
+  resources: DesiredResource[];
+  permissions: DesiredPermission[];
+} {
   const resources: DesiredResource[] = [];
+  const permissions: DesiredPermission[] = [];
   const seen = new Set<string>();
   const define =
     (type: string) =>
@@ -130,6 +145,25 @@ export function createContext(): { ct: ConfigContext; resources: DesiredResource
       seen.add(resource.key);
       resources.push(resource);
     };
+  const definePermission =
+    (domainType: DomainType) =>
+    (input: PermissionInput): void => {
+      if (typeof input.key !== "string" || !input.key)
+        throw new Error(`${domainType} declaration missing a string "key".`);
+      if (typeof input.id !== "number")
+        throw new Error(`${domainType} "${input.key}": "id" must be a number (the domainId).`);
+      if (!Array.isArray(input.grants)) throw new Error(`${domainType} "${input.key}": "grants" must be an array.`);
+      for (const g of input.grants) {
+        const right = typeof g === "string" ? g : g?.right;
+        if (typeof right !== "string" || !right.includes(":"))
+          throw new Error(`${domainType} "${input.key}": each grant must be a "module:right" string or { right, scope }.`);
+        if (typeof g === "object" && !Array.isArray(g.scope))
+          throw new Error(`${domainType} "${input.key}": scoped grant needs "scope": string[].`);
+      }
+      if (seen.has(input.key)) throw new Error(`Duplicate logical key "${input.key}" in config.`);
+      seen.add(input.key);
+      permissions.push({ key: input.key, domainType, domainId: input.id, grants: input.grants });
+    };
   // Every type emitted here MUST have an apply tier in engine/graph.ts TYPE_TIER
   // (locked by tests/context.test.ts), else computePlan rejects it at plan time.
   const ct: ConfigContext = {
@@ -139,14 +173,18 @@ export function createContext(): { ct: ConfigContext; resources: DesiredResource
     ageGroup: define("age-group"),
     targetGroup: define("target-group"),
     relationshipType: define("relationship-type"),
+    groupRole: definePermission("group_role"),
+    groupTypeRole: definePermission("group_type_role"),
   };
-  return { ct, resources };
+  return { ct, resources, permissions };
 }
 
-/** Run a loaded config module against a fresh context and collect its resources. */
-export async function evaluateConfig(mod: ConfigModule): Promise<DesiredResource[]> {
-  const { ct, resources } = createContext();
+/** Run a loaded config module against a fresh context and collect its resources + permissions. */
+export async function evaluateConfig(
+  mod: ConfigModule,
+): Promise<{ resources: DesiredResource[]; permissions: DesiredPermission[] }> {
+  const { ct, resources, permissions } = createContext();
   await mod(ct);
   validateReferences(resources);
-  return resources;
+  return { resources, permissions };
 }

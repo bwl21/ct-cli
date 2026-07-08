@@ -89,7 +89,8 @@ export function applyCommand(): Command {
       const config = await resolveConfig();
       const configPath = resolveConfigPath(opts.config);
       const statePath = resolveStatePath(opts.state);
-      const desired = await loadConfig(configPath);
+      const { resources: desired, permissions } = await loadConfig(configPath);
+      void permissions; // threaded for a later phase; not yet consumed here
       const state = await loadState(statePath, config.host);
 
       const { client } = await authedSession();

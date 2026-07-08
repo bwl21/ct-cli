@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createContext, evaluateConfig } from "../src/config/context.js";
+import { createContext, evaluateConfig, type ConfigContext } from "../src/config/context.js";
 import { isKnownType } from "../src/engine/graph.js";
 
 describe("config context", () => {
@@ -113,7 +113,7 @@ describe("config context", () => {
   });
 
   it("evaluateConfig runs a module against a fresh context (blueprints + loops)", async () => {
-    const resources = await evaluateConfig((ct) => {
+    const { resources } = await evaluateConfig((ct) => {
       for (const c of ["mainz", "berlin"]) {
         ct.campus({ key: c, name: c });
         ct.group({ key: `${c}_kids`, name: `${c} kids`, parent: c });
@@ -160,7 +160,7 @@ describe("dynamic block", () => {
 
 describe("preventDestroy lifecycle flag", () => {
   it("is carried on the resource but kept out of managed fields", async () => {
-    const resources = await evaluateConfig((ct) => {
+    const { resources } = await evaluateConfig((ct) => {
       ct.group({ key: "kids_lead", name: "Kids Leitung", preventDestroy: true });
     });
     const group = resources.find((r) => r.key === "kids_lead")!;
@@ -169,9 +169,33 @@ describe("preventDestroy lifecycle flag", () => {
   });
 
   it("defaults to undefined when not declared", async () => {
-    const resources = await evaluateConfig((ct) => {
+    const { resources } = await evaluateConfig((ct) => {
       ct.campus({ key: "mainz", name: "Mainz", shortName: "MZ" });
     });
     expect(resources[0]!.preventDestroy).toBeUndefined();
+  });
+});
+
+describe("permission declarations", () => {
+  it("collects groupRole / groupTypeRole with validated grants", async () => {
+    const mod = (ct: ConfigContext) => {
+      ct.groupTypeRole({ key: "leiter_tpl", id: 8, grants: [
+        "churchgroup:view group",
+        { right: "churchdb:view group", scope: ["kids_area"] },
+      ]});
+      ct.groupRole({ key: "kids_lead", id: 2882, grants: ["churchgroup:edit group members"] });
+    };
+    const { permissions } = await evaluateConfig(mod); // evaluateConfig now returns {resources, permissions}
+    expect(permissions).toHaveLength(2);
+    expect(permissions[0]).toMatchObject({ key: "leiter_tpl", domainType: "group_type_role", domainId: 8 });
+    expect(permissions[1]).toMatchObject({ key: "kids_lead", domainType: "group_role", domainId: 2882 });
+  });
+  it("rejects a non-numeric id and an empty right name", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) => ct.groupRole({ key: "x", id: "nope", grants: [] } as never)),
+    ).rejects.toThrow(/id.*number/i);
+    await expect(
+      evaluateConfig((ct: ConfigContext) => ct.groupRole({ key: "x", id: 1, grants: [""] })),
+    ).rejects.toThrow(/grant/i);
   });
 });

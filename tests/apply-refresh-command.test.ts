@@ -44,7 +44,7 @@ vi.mock("../src/api/session.js", () => ({
 vi.mock("../src/config/load.js", () => ({
   DEFAULT_CONFIG_PATH: "ct.config.ts",
   resolveConfigPath: (explicit?: string) => explicit ?? "ct.config.ts",
-  loadConfig: vi.fn(async () => []),
+  loadConfig: vi.fn(async () => ({ resources: [], permissions: [] })),
 }));
 
 vi.mock("../src/engine/build.js", () => ({

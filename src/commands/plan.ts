@@ -22,7 +22,8 @@ export function planCommand(): Command {
     .action(async (opts: PlanOptions) => {
       const config = await resolveConfig();
       const configPath = resolveConfigPath(opts.config);
-      const desired = await loadConfig(configPath);
+      const { resources: desired, permissions } = await loadConfig(configPath);
+      void permissions; // threaded for a later phase; not yet consumed here
       const state = await loadState(resolveStatePath(opts.state), config.host);
       if (state.host !== config.host) {
         throw new Error(`State host (${state.host}) does not match CT_HOST (${config.host}).`);

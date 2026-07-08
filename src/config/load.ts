@@ -11,6 +11,7 @@ import { resolve } from "node:path";
 import { createJiti } from "jiti";
 import { evaluateConfig, type ConfigModule } from "./context.js";
 import type { DesiredResource } from "../engine/types.js";
+import type { DesiredPermission } from "../permissions/types.js";
 
 export const DEFAULT_CONFIG_PATH = "ct.config.ts";
 
@@ -18,7 +19,9 @@ export function resolveConfigPath(explicit?: string, env: NodeJS.ProcessEnv = pr
   return explicit?.trim() || env.CT_CONFIG?.trim() || DEFAULT_CONFIG_PATH;
 }
 
-export async function loadConfig(path: string): Promise<DesiredResource[]> {
+export async function loadConfig(
+  path: string,
+): Promise<{ resources: DesiredResource[]; permissions: DesiredPermission[] }> {
   const resolved = resolve(path);
   // Surface a friendly message rather than jiti's raw ERR_MODULE_NOT_FOUND stack.
   try {
