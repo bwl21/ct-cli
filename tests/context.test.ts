@@ -198,4 +198,27 @@ describe("permission declarations", () => {
       evaluateConfig((ct: ConfigContext) => ct.groupRole({ key: "x", id: 1, grants: [""] })),
     ).rejects.toThrow(/grant/i);
   });
+
+  it("rejects a non-finite id (NaN)", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) => ct.groupRole({ key: "x", id: NaN, grants: [] })),
+    ).rejects.toThrow(/id.*number/i);
+  });
+
+  it("rejects two declarations targeting the same (domainType, domainId)", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) => {
+        ct.groupTypeRole({ key: "leiter_tpl", id: 8, grants: ["churchgroup:view group"] });
+        ct.groupTypeRole({ key: "x", id: 8, grants: ["churchdb:view group members"] });
+      }),
+    ).rejects.toThrow(/Duplicate permission target.*group_type_role #8.*"leiter_tpl".*"x"/s);
+  });
+
+  it("allows the same domainId across different domainTypes (no false-positive dedup)", async () => {
+    const { permissions } = await evaluateConfig((ct: ConfigContext) => {
+      ct.groupTypeRole({ key: "a", id: 8, grants: ["churchgroup:view group"] });
+      ct.groupRole({ key: "b", id: 8, grants: ["churchgroup:view group"] });
+    });
+    expect(permissions).toHaveLength(2);
+  });
 });

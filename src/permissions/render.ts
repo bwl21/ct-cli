@@ -28,7 +28,7 @@ export function renderPermissionPlan(items: PermissionPlanItem[]): string {
     totalGrant += grantCount;
     totalRevoke += revokeCount;
     lines.push(
-      `  ${item.domainType} #${item.domainId} (${item.key}): ${pc.green(`+${grantCount} grant(s)`)}, ${pc.red(`-${revokeCount} revoke(s)`)}`,
+      `  ${item.domainType} #${item.domainId} (${item.key}): ${pc.green(`+${grantCount} grant(s)`)}, ${pc.red(`-${revokeCount} remove(s)`)}`,
     );
     for (const t of item.diff.toPut) {
       lines.push(`      ${pc.green("+")} ${fmtTuple(t)}`);
@@ -39,6 +39,6 @@ export function renderPermissionPlan(items: PermissionPlanItem[]): string {
   }
 
   lines.push("");
-  lines.push(pc.bold(`Permission plan: ${totalGrant} to grant, ${totalRevoke} to revoke.`));
+  lines.push(pc.bold(`Permission plan: ${totalGrant} to grant, ${totalRevoke} to remove.`));
   return lines.join("\n");
 }

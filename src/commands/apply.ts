@@ -109,7 +109,9 @@ export function applyCommand(): Command {
       }
 
       process.stdout.write(`${renderPlan(plan)}\n`);
-      process.stdout.write(`\n${renderPermissionPlan(permItems)}\n`);
+      if (permItems.length > 0) {
+        process.stdout.write(`\n${renderPermissionPlan(permItems)}\n`);
+      }
 
       const deletes = plan.items.filter((i) => i.action === "delete");
       if (deletes.length > 0) {

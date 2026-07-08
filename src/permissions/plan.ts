@@ -14,15 +14,25 @@ import type { DesiredPermission } from "./types.js";
 
 export interface PermissionPlanItem { key: string; domainType: DomainType; domainId: number; diff: GrantDiff }
 
+/**
+ * Fan out each grant to (authId, dataId) tuples. ChurchTools reads a scoped grant back as
+ * ONE ROW PER dataId with a scalar `dataId` (see `normalizeActual`), so a desired tuple with
+ * `dataId.length >= 2` can never equal any actual tuple and would churn forever. To match the
+ * scalar read shape, a scoped grant `{right, scope:[a,b]}` becomes TWO single-dataId tuples,
+ * not one two-element tuple.
+ */
 export function desiredTuples(p: DesiredPermission, state: State): GrantTuple[] {
-  return p.grants.map((g) => {
+  return p.grants.flatMap((g) => {
     const name = typeof g === "string" ? g : g.right;
     const entry = resolveAuthId(name);
     if (p.domainType === "group_type_role" && entry.authId >= 10000) {
       throw new Error(`${p.domainType} "${p.key}": "${name}" (authId ${entry.authId}) is not writable — ${p.domainType} requires authId < 10000.`);
     }
-    const dataId = typeof g === "string" ? [] : resolveScope(g.scope, state);
-    return { authId: entry.authId, dataId, type: "grant" as const };
+    if (typeof g === "string") return [{ authId: entry.authId, dataId: [], type: "grant" as const }];
+    if (entry.scopeField == null) {
+      throw new Error(`${p.domainType} "${p.key}": "${name}" is not a scoped right (no scopeField) — remove "scope" or use a scoped right.`);
+    }
+    return resolveScope(g.scope, state).map((id) => ({ authId: entry.authId, dataId: [id], type: "grant" as const }));
   });
 }
 

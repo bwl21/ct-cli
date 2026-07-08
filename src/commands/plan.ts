@@ -34,11 +34,13 @@ export function planCommand(): Command {
       const { plan, fetchErrors } = await buildPlan(client, state, desired);
       const { items: permItems, fetchErrors: permFetchErrors } = await buildPermissionPlan(client, state, permissions);
       if (opts.json) {
-        out(plan);
+        out({ plan, permissions: permItems });
       } else {
         info(`config: ${configPath} · state host: ${state.host}`);
         process.stdout.write(`${renderPlan(plan)}\n`);
-        process.stdout.write(`\n${renderPermissionPlan(permItems)}\n`);
+        if (permItems.length > 0) {
+          process.stdout.write(`\n${renderPermissionPlan(permItems)}\n`);
+        }
       }
 
       const allFetchErrors = [...fetchErrors, ...permFetchErrors];

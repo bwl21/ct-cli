@@ -135,6 +135,10 @@ export function createContext(): {
   const resources: DesiredResource[] = [];
   const permissions: DesiredPermission[] = [];
   const seen = new Set<string>();
+  // Tracks (domainType, domainId) -> declaring key, so two declarations aiming at the same
+  // permission target (even under different logical keys) are rejected at eval time instead
+  // of each diffing against the other's grants and proposing them as deletes forever.
+  const seenDomains = new Map<string, string>();
   const define =
     (type: string) =>
     (input: ResourceInput): void => {
@@ -150,7 +154,7 @@ export function createContext(): {
     (input: PermissionInput): void => {
       if (typeof input.key !== "string" || !input.key)
         throw new Error(`${domainType} declaration missing a string "key".`);
-      if (typeof input.id !== "number")
+      if (typeof input.id !== "number" || !Number.isFinite(input.id))
         throw new Error(`${domainType} "${input.key}": "id" must be a number (the domainId).`);
       if (!Array.isArray(input.grants)) throw new Error(`${domainType} "${input.key}": "grants" must be an array.`);
       for (const g of input.grants) {
@@ -162,6 +166,14 @@ export function createContext(): {
       }
       if (seen.has(input.key)) throw new Error(`Duplicate logical key "${input.key}" in config.`);
       seen.add(input.key);
+      const domainKey = `${domainType}:${input.id}`;
+      const existingKey = seenDomains.get(domainKey);
+      if (existingKey) {
+        throw new Error(
+          `Duplicate permission target: ${domainType} #${input.id} is declared by both "${existingKey}" and "${input.key}". Merge their grants into one declaration.`,
+        );
+      }
+      seenDomains.set(domainKey, input.key);
       permissions.push({ key: input.key, domainType, domainId: input.id, grants: input.grants });
     };
   // Every type emitted here MUST have an apply tier in engine/graph.ts TYPE_TIER
