@@ -936,10 +936,9 @@ export default (ct: any) => {
     dynamic: {
       status: "manual",
       ruleset: {
-        description: "Alle aktiven Personen in Mainz",
-        importance: 0, personIdFieldName: "id", process: {},
-        query: churchQuery(q.and(q.eq("ctgroup.campusId", 0 /* mainz id */), q.eq("person.isArchived", false)),
-          { description: "Alle Mainz" }),
+        description: "Alle aktiven Personen in Mainz", // description lives on the ruleset, NOT inside query
+        importance: 0, personIdFieldName: "person.id", process: {},
+        query: churchQuery(q.and(q.eq("ctgroup.campusId", 0 /* mainz id */), q.eq("person.isArchived", false))),
       },
     },
   });
