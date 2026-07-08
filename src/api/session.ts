@@ -12,10 +12,10 @@ export interface AuthedSession {
 }
 
 export async function authedSession(): Promise<AuthedSession> {
-  const config = resolveConfig();
+  const config = await resolveConfig();
   const token = await readToken();
   if (!token) {
-    throw new Error("Not logged in. Run `ct auth login --token <token>` first.");
+    throw new Error("Not logged in. Run `ct auth login --host <url> --token <token>` first.");
   }
   const client = new CtClient(config);
   const me = await client.authenticate(token);
