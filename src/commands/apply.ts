@@ -46,14 +46,22 @@ export async function refreshChangedDynamicGroups(
 ): Promise<void> {
   for (const item of plan.items) {
     if (item.action === "no-op" || item.action === "delete") continue;
-    if (!item.changes.some((c) => c.field === "dynamic")) continue;
+    const dynamicChange = item.changes.find((c) => c.field === "dynamic");
+    if (!dynamicChange) continue;
+    const to = dynamicChange.to as { status?: string } | undefined;
+    if (to?.status === "none") continue; // demoted to a non-dynamic group — nothing to refresh
     const id = state.resources[item.key]?.id;
     if (id === undefined) continue;
     const path = `/dynamicgroups/${id}/refresh`;
     assertNotPeople(path);
-    const res = await client.request<RefreshResult[]>("POST", path);
-    const r = res?.[0];
-    if (r) info(`refreshed ${item.key}: +${r.created} ~${r.updated} -${r.deleted}`);
+    try {
+      const res = await client.request<RefreshResult[]>("POST", path);
+      const r = res?.[0];
+      if (r) info(`refreshed ${item.key}: +${r.created} ~${r.updated} -${r.deleted}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      warn(`Failed to refresh ${item.key} (#${id}): ${message}`);
+    }
   }
 }
 

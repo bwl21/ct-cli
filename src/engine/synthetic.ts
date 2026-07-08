@@ -6,6 +6,7 @@
  * registry so `build.ts`/`execute.ts` never grow per-feature branches.
  */
 import type { CtClient } from "../api/ctClient.js";
+import { CtApiError } from "../api/ctClient.js";
 import type { State } from "../state/state.js";
 import type { DesiredResource, FieldChange } from "./types.js";
 import { applyHierarchy, parentIdsByGroupId, type HierarchyEntry } from "./hierarchy.js";
@@ -90,6 +91,12 @@ const dynamicField: SyntheticField = {
           ruleset: normalizeRuleset(ruleset),
         };
       } catch (err) {
+        if (err instanceof CtApiError && err.status === 404) {
+          // Group exists but is not (yet) a dynamic group — its ruleset 404s. Sentinel so a promote
+          // (desired active vs actual none) diffs as a real change and demote-to-none is a clean no-op.
+          a.dynamic = { status: "none", ruleset: {} };
+          continue;
+        }
         const message = err instanceof Error ? err.message : String(err);
         errors.push(`dynamic ${managed.key} (#${managed.id}): ${message}`);
       }

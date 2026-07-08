@@ -50,10 +50,12 @@ Statuses are validated against exactly `["active", "inactive", "manual",
 ### Ordering: the group must exist first
 
 A group must exist before it can carry a ruleset. You never have to sequence
-this yourself: the engine assigns `group` to apply tier 1 and the
-dynamic-group write to tier 5 (`TYPE_TIER` in `src/engine/graph.ts`), so `ct
-apply` always creates/updates the group first, then writes the ruleset +
-status against its real (possibly just-created) id.
+this yourself: `dynamic` is a synthetic field on `group` (like `parents`),
+not a separate resource with its own tier in `TYPE_TIER`
+(`src/engine/graph.ts`). Its ruleset/status writes happen inline, as part of
+the group's own tier-1 apply, after the group itself has been
+created/updated — so `ct apply` always writes against the group's real
+(possibly just-created) id.
 
 ## Supplying a ruleset — three ways
 

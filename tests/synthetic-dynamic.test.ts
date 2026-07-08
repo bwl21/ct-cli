@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { SYNTHETIC_FIELDS, syntheticField } from "../src/engine/synthetic.js";
+import { normalizeDynamic } from "../src/engine/dynamic.js";
+import { CtApiError } from "../src/api/ctClient.js";
 import type { State } from "../src/state/state.js";
 import type { DesiredResource } from "../src/engine/types.js";
 import type { CtClient } from "../src/api/ctClient.js";
@@ -23,6 +25,24 @@ describe("dynamic synthetic field — fold", () => {
     expect(out.errors).toEqual([]);
     expect(actual.get("g")?.dynamic).toEqual({ status: "manual", ruleset: { description: "x", query: {}, process: {} } });
     expect(out.desired[0]?.fields.dynamic).toEqual({ status: "manual", ruleset: { description: "x", query: {}, process: {} } });
+  });
+
+  it("tolerates a 404 on the ruleset fetch — group is not (yet) a dynamic group", async () => {
+    const state: State = { version: 1, host: "h",
+      resources: { g: { type: "group", id: 5, key: "g", fields: { name: "G" }, adoptedAt: "t", updatedAt: "t" } } };
+    const actual = new Map<string, Record<string, unknown>>([["g", { name: "G" }]]);
+    const desired: DesiredResource[] = [
+      { type: "group", key: "g", fields: { name: "G" }, dependsOn: [],
+        dynamic: { status: "active", ruleset: { description: "x", query: {}, process: {} } } },
+    ];
+    const client = { get: vi.fn(async () => { throw new CtApiError("Not Found", 404, null); }) };
+    const out = await dynamicField().fold({ client: client as unknown as Pick<CtClient, "get">, state, desired, actual });
+    expect(out.errors).toEqual([]);
+    expect(actual.get("g")?.dynamic).toEqual({ status: "none", ruleset: {} });
+  });
+
+  it("demote-to-none is a no-op against the 404 sentinel", () => {
+    expect(normalizeDynamic({ status: "none", ruleset: {} })).toEqual({ status: "none", ruleset: {} });
   });
 
   it("ignores groups that did not opt into dynamic", async () => {

@@ -118,6 +118,69 @@ describe("refreshChangedDynamicGroups", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("skips the refresh POST for a dynamic change that demotes the group to status:none", async () => {
+    const state = stateWith({ dyn_a: 42, dyn_b: 43 });
+    const plan: Plan = {
+      items: [
+        {
+          type: "group",
+          key: "dyn_a",
+          id: 42,
+          action: "update",
+          changes: [{ field: "dynamic", from: { status: "active", ruleset: {} }, to: { status: "none", ruleset: {} } }],
+        },
+        {
+          type: "group",
+          key: "dyn_b",
+          id: 43,
+          action: "update",
+          changes: [{ field: "dynamic", from: undefined, to: { status: "active", ruleset: {} } }],
+        },
+      ],
+    };
+    const { client, calls } = recorder({
+      "POST /dynamicgroups/43/refresh": [{ created: 1, updated: 0, deleted: 0 }],
+    });
+    await refreshChangedDynamicGroups(plan, state, client);
+    const refreshCalls = calls.filter((c) => c.path.startsWith("/dynamicgroups/"));
+    expect(refreshCalls).toEqual([{ method: "POST", path: "/dynamicgroups/43/refresh", body: undefined }]);
+  });
+
+  it("one group's refresh POST failing does not prevent the next group's refresh", async () => {
+    const state = stateWith({ dyn_a: 42, dyn_b: 43 });
+    const plan: Plan = {
+      items: [
+        {
+          type: "group",
+          key: "dyn_a",
+          id: 42,
+          action: "update",
+          changes: [{ field: "dynamic", from: undefined, to: { status: "active", ruleset: {} } }],
+        },
+        {
+          type: "group",
+          key: "dyn_b",
+          id: 43,
+          action: "update",
+          changes: [{ field: "dynamic", from: undefined, to: { status: "active", ruleset: {} } }],
+        },
+      ],
+    };
+    const calls: Call[] = [];
+    const client = {
+      request: async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+        calls.push({ method, path, body });
+        if (path === "/dynamicgroups/42/refresh") throw new Error("boom");
+        return [{ created: 1, updated: 0, deleted: 0 }] as T;
+      },
+    };
+    await expect(refreshChangedDynamicGroups(plan, state, client)).resolves.toBeUndefined();
+    const refreshCalls = calls.filter((c) => c.path.startsWith("/dynamicgroups/"));
+    expect(refreshCalls).toHaveLength(2);
+    expect(refreshCalls).toContainEqual({ method: "POST", path: "/dynamicgroups/42/refresh", body: undefined });
+    expect(refreshCalls).toContainEqual({ method: "POST", path: "/dynamicgroups/43/refresh", body: undefined });
+  });
+
   it("skips a changed-dynamic item whose id is not yet resolvable in state (explicit undefined check, not truthiness)", async () => {
     // id 0 is a legitimate CT id — make sure it is NOT treated as "missing".
     const state = stateWith({ dyn_zero: 0 });
