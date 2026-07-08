@@ -11,6 +11,8 @@ import type { DesiredResource, FieldChange } from "./types.js";
 import { applyHierarchy, parentIdsByGroupId, type HierarchyEntry } from "./hierarchy.js";
 import { assertNotPeople } from "./guard.js";
 import { warn } from "../ui.js";
+import { normalizeDynamic, normalizeRuleset, resolveRulesetRef } from "./dynamic.js";
+import type { DynamicStatus } from "./types.js";
 
 export interface SyntheticFoldCtx {
   client: Pick<CtClient, "get">;
@@ -69,7 +71,53 @@ const parentsField: SyntheticField = {
   },
 };
 
-export const SYNTHETIC_FIELDS: SyntheticField[] = [parentsField];
+/** `dynamic`: dynamic-group ruleset + status, reconciled as one synthetic field. */
+const dynamicField: SyntheticField = {
+  field: "dynamic",
+  async fold({ client, state, desired, actual }) {
+    const optedIn = new Set(desired.filter((d) => d.type === "group" && d.dynamic !== undefined).map((d) => d.key));
+    if (optedIn.size === 0) return { desired, errors: [] };
+    const errors: string[] = [];
+    for (const managed of Object.values(state.resources)) {
+      if (managed.type !== "group" || !optedIn.has(managed.key)) continue;
+      const a = actual.get(managed.key);
+      if (!a) continue; // vanished from CT → handled as a recreate by the plain plan
+      try {
+        const ruleset = await client.get<Record<string, unknown>>(`/dynamicgroups/${managed.id}/ruleset`);
+        const statusRes = await client.get<{ dynamicGroupStatus?: string }>(`/dynamicgroups/${managed.id}/status`);
+        a.dynamic = {
+          status: (statusRes?.dynamicGroupStatus ?? "none") as DynamicStatus,
+          ruleset: normalizeRuleset(ruleset),
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        errors.push(`dynamic ${managed.key} (#${managed.id}): ${message}`);
+      }
+    }
+    const augmented = desired.map((d) =>
+      d.type === "group" && d.dynamic !== undefined
+        ? { ...d, fields: { ...d.fields, dynamic: normalizeDynamic({ status: d.dynamic.status, ruleset: resolveRulesetRef(d.dynamic.ruleset) }) } }
+        : d,
+    );
+    return { desired: augmented, errors };
+  },
+  async apply({ client, id, change }) {
+    const to = change.to as { status: DynamicStatus; ruleset: Record<string, unknown> } | undefined;
+    if (!to || to.status === "none") {
+      assertNotPeople(`/dynamicgroups/${id}/ruleset`);
+      await client.request("DELETE", `/dynamicgroups/${id}/ruleset`);
+      assertNotPeople(`/dynamicgroups/${id}/status`);
+      await client.request("PUT", `/dynamicgroups/${id}/status`, { dynamicGroupStatus: "none" });
+      return;
+    }
+    assertNotPeople(`/dynamicgroups/${id}/ruleset`);
+    await client.request("PUT", `/dynamicgroups/${id}/ruleset`, { dynamicGroupRuleSet: to.ruleset });
+    assertNotPeople(`/dynamicgroups/${id}/status`);
+    await client.request("PUT", `/dynamicgroups/${id}/status`, { dynamicGroupStatus: to.status });
+  },
+};
+
+export const SYNTHETIC_FIELDS: SyntheticField[] = [parentsField, dynamicField];
 
 const BY_FIELD = new Map(SYNTHETIC_FIELDS.map((f) => [f.field, f]));
 export function isSyntheticField(field: string): boolean {

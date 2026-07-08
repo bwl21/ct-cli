@@ -4,6 +4,8 @@
  * write) a `dynamicGroupRuleSet` envelope. Normalizing both the desired and
  * actual sides to one canonical form is what keeps drift real, not spurious.
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { DynamicStatus } from "./types.js";
 
 const READ_ONLY_KEYS = new Set(["dynamicGroupUpdateStarted", "dynamicGroupUpdateFinished"]);
@@ -63,4 +65,13 @@ export interface NormalizedDynamic { status: DynamicStatus; ruleset: Record<stri
 
 export function normalizeDynamic(spec: { status: DynamicStatus; ruleset: unknown }): NormalizedDynamic {
   return { status: spec.status, ruleset: normalizeRuleset(spec.ruleset) };
+}
+
+/** Resolve a `{ ref: "./file.json" }` ruleset to its JSON contents; pass through inline rulesets. */
+export function resolveRulesetRef(ruleset: unknown, baseDir: string = process.cwd()): unknown {
+  if (ruleset && typeof ruleset === "object" && typeof (ruleset as { ref?: unknown }).ref === "string") {
+    const p = resolve(baseDir, (ruleset as { ref: string }).ref);
+    return JSON.parse(readFileSync(p, "utf8"));
+  }
+  return ruleset;
 }
