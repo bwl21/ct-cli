@@ -1,0 +1,170 @@
+[
+  {
+    "description": "Automatische Mitgliedschaft für Gruppe #2022",
+    "shorty": "Autom. Mitgliedschaft Gruppe #2022",
+    "personIdFieldName": "person.id",
+    "importance": 0,
+    "query": {
+      "method": "ChurchQuery",
+      "params": {
+        "groupBy": [
+          "person.id"
+        ],
+        "filter": {
+          "and": [
+            {
+              "and": [
+                {
+                  "==": [
+                    {
+                      "var": "person.isArchived"
+                    },
+                    0
+                  ]
+                },
+                {
+                  "isnull": [
+                    {
+                      "var": "person.dateOfDeath"
+                    }
+                  ]
+                },
+                {
+                  "==": [
+                    {
+                      "var": "person.campusId"
+                    },
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "dterm": [
+                {
+                  "stereotype": [
+                    "groupmembership"
+                  ],
+                  "title": "Mitgliedschaft in einer Gruppe"
+                },
+                {
+                  "and": [
+                    {
+                      "and": [
+                        {
+                          "oneof": [
+                            {
+                              "var": "ctgroup.groupStatusId"
+                            },
+                            [
+                              1
+                            ]
+                          ]
+                        },
+                        {
+                          "==": [
+                            {
+                              "var": "ctgroup.groupTypeId"
+                            },
+                            1
+                          ]
+                        },
+                        {
+                          "dterm": [
+                            {
+                              "title": "Ist Untergruppe von"
+                            },
+                            {
+                              "subgroups": [
+                                {
+                                  "levelfrom": 1,
+                                  "levelto": 999
+                                },
+                                {
+                                  "and": [
+                                    {
+                                      "oneof": [
+                                        {
+                                          "var": "ctgroup.id"
+                                        },
+                                        [
+                                          "1869"
+                                        ]
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "==": [
+                            {
+                              "var": "ctgroup.campusId"
+                            },
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "and": [
+                        {
+                          "oneof": [
+                            {
+                              "var": "role.id"
+                            },
+                            [
+                              "8",
+                              "9",
+                              "10",
+                              "92"
+                            ]
+                          ]
+                        },
+                        {
+                          "==": [
+                            {
+                              "var": "groupmember.groupMemberStatus"
+                            },
+                            "active"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "primaryEntityAlias": "person",
+        "responseFields": [
+          "person.id",
+          "person.firstName",
+          "person.lastName"
+        ]
+      }
+    },
+    "process": {
+      "groupOnly": {
+        "active": {
+          "handleMembership": {
+            "groupMemberStatus": "none",
+            "groupTypeRoleId": 29
+          }
+        }
+      },
+      "queryResultOnly": {
+        "none": {
+          "handleMembership": {
+            "groupMemberStatus": "active",
+            "groupTypeRoleId": 29
+          }
+        }
+      },
+      "groupAndQueryResult": {}
+    }
+  }
+]

@@ -47,38 +47,11 @@
 **Interfaces:**
 - Produces: canonical example `RuleSet` + status JSON consumed by Tasks 4, 5, 7 (normalizer, synthetic-field, typed-query). All later normalizer code is validated against these files.
 
-**Why a task:** the `query.params.filter` JSONLogic internals and `handleMembership` contents are opaque in OpenAPI. The only way to write a correct normalizer + typed-query compiler is against a real ruleset. No dynamic groups exist on the instance, so we create one via the UI-equivalent API calls, read it back, and snapshot it.
+**Why a task:** the `query.params.filter` JSONLogic internals and `handleMembership` contents are opaque in OpenAPI. The only way to write a correct normalizer + typed-query compiler is against real rulesets.
 
-- [ ] **Step 1: Pick a throwaway group to make dynamic**
+**STATUS: COMPLETE** — captured by the controller **read-only** from the production instance `eqrm.church.tools` (CT 3.134.0), which has 68 real dynamic groups. Committed fixtures: `tests/fixtures/dynamic/ruleset-683.get.json` (string + object `dterm` labels, nested `or`/`and`/`!`, `oneof` string arrays, `isnull`, `"true and"`), `ruleset-2022.get.json` (`isnull`, `subgroups`, `campusId`, `groupMemberStatus`, mixed int/string), `ruleset-1092.get.json`, `ruleset.get.json` (canonical = 683), `status.get.json`, and `README.md` documenting the shapes.
 
-Use the CLI to list groups and choose a clearly disposable test group (or create one). Record its id as `$GID`.
-
-Run: `npx tsx src/index.ts get groups | npx --yes json5 2>/dev/null | head` (or pipe to `jq '.[] | {id, name}'`). Note a safe group id.
-
-- [ ] **Step 2: Author a minimal ruleset in the ChurchTools UI on `$GID`**
-
-In the ChurchTools web UI (`https://eqrm-dev.church.tools`), open group `$GID` → make it a dynamic group with one simple rule (e.g. "campus == Mainz"), status **manual** (manual does not auto-refresh membership — safest). This produces a real, valid `params.filter` + `process` + `handleMembership` we can read back. (Authoring via UI avoids guessing the ChurchQuery shape blind.)
-
-- [ ] **Step 3: Read back and snapshot ruleset + status**
-
-Run:
-```bash
-GID=<the id>
-npx tsx src/index.ts get raw "/dynamicgroups/$GID/ruleset" > tests/fixtures/dynamic/ruleset.get.json
-npx tsx src/index.ts get raw "/dynamicgroups/$GID/status"  > tests/fixtures/dynamic/status.get.json
-```
-Expected: `ruleset.get.json` contains `description/importance/personIdFieldName/process/query`, with `query.method === "ChurchQuery"` and a populated `query.params.filter`. `status.get.json` contains `{ "dynamicGroupStatus": "manual" }`.
-
-- [ ] **Step 4: Document the fixture**
-
-Write `tests/fixtures/dynamic/README.md`: the group id used, that status is `manual`, the date, and a one-paragraph description of the observed `params.filter` JSONLogic shape (operators seen, whether `var` values are int or string, whether any `dterm: [label, expr]` cosmetic wrappers appear). This paragraph is the source of truth for Task 4's normalizer.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add tests/fixtures/dynamic/
-git commit -m "test(dynamic): capture live ruleset + status fixtures from eqrm-dev"
-```
+**The one shape correction downstream tasks depend on:** `GET /dynamicgroups/{id}/ruleset` returns a **single-element array `[RuleSet]`**, not the bare object the OpenAPI schema advertised. `normalizeRuleset` (Task 4) unwraps it. See `tests/fixtures/dynamic/README.md` for the full shape notes.
 
 ---
 
@@ -422,7 +395,10 @@ git commit -m "feat(dynamic): accept and validate the dynamic block in the confi
   ```
 - Consumes: `DynamicStatus` from `types.js`; the fixtures from Task 1.
 
-**Reference:** use `tests/fixtures/dynamic/ruleset.get.json` (Task 1) as the golden input. The `stripCosmeticLabels` walk targets the `dterm: [label, expr]` cosmetic wrappers described in `tests/fixtures/dynamic/README.md`; if Task 1 observed no `dterm` in the sample, keep the stripper (a hand-authored ruleset may use it) and add a synthetic `dterm` case to the test.
+**Reference:** the golden inputs are the **real production fixtures** captured in Task 1 (`tests/fixtures/dynamic/ruleset*.get.json`) — see `tests/fixtures/dynamic/README.md`. Key realities they encode:
+- **`GET …/ruleset` returns a single-element array `[RuleSet]`** — `normalizeRuleset` unwraps it (see code below).
+- `dterm: [label, expr]` labels appear as **both** plain strings (`"Nur aktive Personen"`) and objects (`{ title, stereotype? }`, `title` possibly an i18n key). The stripper drops element 0 regardless of its shape and keeps `expr`.
+- int/string inconsistency is pervasive (`1` vs `"1"`, `oneof [...["112","8"]]` vs `oneof [...[1]]`) — `coerceScalars` fixes it. Non-numeric strings (`"active"`, field names) are left alone.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -433,9 +409,13 @@ import { readFileSync } from "node:fs";
 import { normalizeRuleset, stripCosmeticLabels, coerceScalars, normalizeDynamic } from "../src/engine/dynamic.js";
 
 describe("stripCosmeticLabels", () => {
-  it("unwraps a dterm [label, expr] to its expr, recursively", () => {
+  it("unwraps a dterm with a string label to its expr, recursively", () => {
     const input = { and: [{ dterm: ["Campus", { "==": [{ var: "ctgroup.campusId" }, 1] }] }] };
     expect(stripCosmeticLabels(input)).toEqual({ and: [{ "==": [{ var: "ctgroup.campusId" }, 1] }] });
+  });
+  it("unwraps a dterm with an object label (title/stereotype/i18n key)", () => {
+    const input = { dterm: [{ title: "group.x.title", stereotype: ["groupmembership"] }, { isnull: [{ var: "person.dateOfDeath" }] }] };
+    expect(stripCosmeticLabels(input)).toEqual({ isnull: [{ var: "person.dateOfDeath" }] });
   });
 });
 
@@ -443,6 +423,12 @@ describe("coerceScalars", () => {
   it("coerces numeric strings to numbers so int/string drift is not spurious", () => {
     expect(coerceScalars({ "==": [{ var: "ctgroup.campusId" }, "1"] }))
       .toEqual({ "==": [{ var: "ctgroup.campusId" }, 1] });
+  });
+  it("coerces numeric strings inside oneof arrays but leaves non-numeric strings", () => {
+    expect(coerceScalars({ oneof: [{ var: "ctgroup.id" }, ["112", "8"]] }))
+      .toEqual({ oneof: [{ var: "ctgroup.id" }, [112, 8]] });
+    expect(coerceScalars({ "==": [{ var: "groupmember.groupMemberStatus" }, "active"] }))
+      .toEqual({ "==": [{ var: "groupmember.groupMemberStatus" }, "active"] });
   });
 });
 
@@ -455,10 +441,18 @@ describe("normalizeRuleset", () => {
     expect(normalizeRuleset(once)).toEqual(once); // idempotent: read→normalize→normalize == normalize
   });
 
-  it("read-then-normalize of the live fixture is stable", () => {
-    const raw = JSON.parse(readFileSync("tests/fixtures/dynamic/ruleset.get.json", "utf8"));
-    const rule = raw.data ?? raw; // fixture may or may not carry a data wrapper
-    expect(normalizeRuleset(normalizeRuleset(rule))).toEqual(normalizeRuleset(rule));
+  it("unwraps the single-element array that GET returns", () => {
+    const arr = [{ description: "x", process: {}, query: {} }];
+    expect(normalizeRuleset(arr)).toEqual(normalizeRuleset(arr[0]));
+  });
+
+  it("read-then-normalize of every live fixture is stable and label-free", () => {
+    for (const name of ["ruleset-683", "ruleset-2022", "ruleset-1092"]) {
+      const raw = JSON.parse(readFileSync(`tests/fixtures/dynamic/${name}.get.json`, "utf8")); // array shape
+      const once = normalizeRuleset(raw);
+      expect(normalizeRuleset(once)).toEqual(once);                 // idempotent
+      expect(JSON.stringify(once)).not.toContain("dterm");          // cosmetic labels stripped
+    }
   });
 });
 
@@ -522,13 +516,15 @@ function dropReadOnly(rule: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-/** Canonicalise a ruleset for diffing: unwrap PUT envelope, drop timestamps, strip labels, coerce scalars. */
+/** Canonicalise a ruleset for diffing: unwrap array/PUT envelope, drop timestamps, strip labels, coerce scalars. */
 export function normalizeRuleset(rule: unknown): Record<string, unknown> {
-  let r = (rule ?? {}) as Record<string, unknown>;
-  if (r.dynamicGroupRuleSet && typeof r.dynamicGroupRuleSet === "object") {
-    r = r.dynamicGroupRuleSet as Record<string, unknown>; // unwrap the PUT envelope
+  let r: unknown = rule ?? {};
+  if (Array.isArray(r)) r = r[0] ?? {};                       // GET returns a single-element [RuleSet]
+  let obj = (r ?? {}) as Record<string, unknown>;
+  if (obj.dynamicGroupRuleSet && typeof obj.dynamicGroupRuleSet === "object") {
+    obj = obj.dynamicGroupRuleSet as Record<string, unknown>; // unwrap the PUT envelope
   }
-  return coerceScalars(stripCosmeticLabels(dropReadOnly(r))) as Record<string, unknown>;
+  return coerceScalars(stripCosmeticLabels(dropReadOnly(obj))) as Record<string, unknown>;
 }
 
 export interface NormalizedDynamic { status: DynamicStatus; ruleset: Record<string, unknown> }
