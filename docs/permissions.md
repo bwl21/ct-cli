@@ -19,7 +19,8 @@ export default (ct) => {
 
   ct.groupRole({
     key: "kids_lead_grant",
-    id: 2882,                // the internal (group, role) domainId — see below (group_role has no ref yet)
+    group: "kids_area",      // domain BY (group, role) — resolved to the pairing domainId per host (#25)
+    role: "Leiter",          // (or keep the numeric escape hatch: `id: 2882`)
     // "edit group memberships of group" is a scoped right, so it takes a `scope: [...]`.
     grants: [{ right: "churchgroup:edit group memberships of group", scope: ["kids_area"] }],
   });
@@ -35,11 +36,14 @@ reference or a numeric `id`:
   portable form, #20) or **by numeric `id`** (the escape hatch):
   - `ct.groupTypeRole` — `groupType: "<name>"` resolves against the live
     group-type catalog per host, or `id: <domainId>` targets one directly.
-  - `ct.groupRole` — **`id: <domainId>` only for now.** The logical
-    `group: "<key>", role: "<name>"` form is accepted by the DSL but the
-    resolver rejects it at plan time (the (group, role) pairing id has no
-    confirmed API source — see "domainId semantics" and #25). Declaring both a
-    logical form and a numeric `id` is a conflict and throws.
+  - `ct.groupRole` — `group: "<key>", role: "<name>"` resolves the (group,
+    role) pair to its pairing domainId per host (#25), or `id: <domainId>`
+    targets one directly. The group must be **managed** (declared via `ct.group`
+    or adopted into state) and already created — a same-run group is rejected
+    (its pairing id is only known once it exists; pass a numeric `id` there).
+    Declaring both a logical form and a numeric `id` is a conflict and throws.
+    See "domainId semantics" for the resolution assumption still to be
+    confirmed live.
 - **`grants`** — an array of `Grant`s, each either:
   - a bare string, `"module:right"` — an **unscoped** grant, or
   - an object `{ right: "module:right", scope: (string | number)[] }` — a
@@ -69,6 +73,40 @@ fetch — with a "did you mean" hint drawn from same-module names. (Config
 evaluation only checks a grant's *shape*: `module:right` string or
 `{ right, scope }`; it does not resolve the name against the catalog.)
 
+## Catalog lifecycle & staleness (#25)
+
+The catalog (`src/permissions/catalog.json`) is a snapshot of one instance's
+permission master data, captured at a specific ChurchTools version. Two things
+keep it honest:
+
+**Regeneration — one command.** Point it at a live instance and it rewrites
+`catalog.json` (rights + a fresh `$meta` provenance stamp):
+
+```bash
+CT_HOST=https://your.church.tools CT_LOGINTOKEN=<token> npm run regenerate:permission-catalog
+```
+
+It logs in, calls the legacy `POST /index.php?q=churchauth/ajax` `func=getMasterData`
+endpoint (the only source of the name↔authId map — see
+`src/permissions/README.md`), records the instance's CT version, and writes the
+file. It performs a single **read**; it never writes to the instance. Review
+the `git diff` before committing.
+
+**Staleness & unknown rights — `ct plan` warns (never fails).** `$meta.ctVersion`
+records the version the catalog was captured from. On every `plan`/`apply`:
+
+- If the live instance's CT version differs from `$meta.ctVersion`, `ct plan`
+  prints a warning — right names/authIds/scopeFields may have drifted;
+  regenerate to be sure.
+- If a **live grant carries an `authId` the catalog cannot name** (a stale or
+  foreign right), `ct plan` names the `authId` + domain and **leaves the grant
+  untouched** — it is deliberately kept *out* of the diff so `ct apply` never
+  revokes a right it cannot even describe. This is idempotent: the unknown row
+  is excluded every run, so it neither churns nor silently disappears.
+
+Both are warnings, not errors: the plan still runs and the exit code stays
+success. Regenerating the catalog (above) is the fix for both.
+
 ## `domainId` semantics
 
 The two DSL functions manage two different ChurchTools "domain types," and
@@ -81,18 +119,28 @@ The two DSL functions manage two different ChurchTools "domain types," and
 - **`group_role`** (`ct.groupRole`) — the domain is the **internal
   (group, role) pairing's own id** — a ChurchTools-internal id for one
   specific group's specific role, *not* the group's id and *not* the role's
-  id. **This is `id: <domainId>` only.** The logical `group` + `role` form is
-  reserved (and accepted by the DSL) but **not yet resolvable**: the pairing id
-  has no confirmed API source, so the resolver throws a clear "pass a numeric id
-  (see #25)" error at plan time. Find the id via the ChurchTools permission
-  editor / an existing `GET /permissions/group_role` response for a group+role
-  you already have, and hardcode it like any other domainId.
+  id. Declare it portably as `group: "<key>", role: "<name>"` (resolved per
+  host, #25) or directly as `id: <domainId>`.
+
+  > **ASSUMPTION — verify once on a live instance (`eqrm-dev`).** The reference
+  > form resolves by reading the group's own role list
+  > (`GET /groups/{groupId}/roles`) and taking the matched role row's `id` as
+  > the pairing domainId. Neither the endpoint nor the field is confirmed
+  > against a live instance (the assumption is pinned in a unit test and in a
+  > prominent comment in `src/resolve/resolver.ts`). If a live check shows the
+  > pairing id lives in a different field or endpoint, change the two
+  > constants at the top of `resolver.ts` — call sites don't change. Until
+  > confirmed, the numeric `id:` escape hatch is the guaranteed-correct path:
+  > find the id via the ChurchTools permission editor / an existing
+  > `GET /permissions/group_role` response, and hardcode it like any other
+  > domainId.
 
 Resolution runs in `buildPermissionPlan` (`src/permissions/plan.ts`): a numeric
 `id` passes straight through; a `groupType` reference resolves against the live
-catalog. After resolution, two declarations that resolve to the **same**
-`(domainType, domainId)` are rejected (they would otherwise diff against each
-other's grants forever) — even if one used a name and the other a raw id.
+catalog, and a `group` + `role` pair against the group's role list. After
+resolution, two declarations that resolve to the **same** `(domainType,
+domainId)` are rejected (they would otherwise diff against each other's grants
+forever) — even if one used a name and the other a raw id.
 
 ## Scope resolution
 

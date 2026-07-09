@@ -34,11 +34,11 @@ this doc's structure.
 | Item                                  | What it is                                                                                                                                                                                                    | Tracking issue                                                          | Manual workaround today                                                                                                                                                                                                   |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Group/group-type field decision table | Fields deliberately left unmanaged (decided out of scope): visibility, note, `autoAccept`/open-for-members, chat status, sort key. The triage **shipped** as a committed decision table ([`docs/group-field-decisions.md`](group-field-decisions.md))          | [#21](https://github.com/eqrm/ct-cli/issues/21) (decided)               | Set by hand; these fields are intentionally not diffed — `ct` will neither preserve nor revert them. Promote one later only with its own registry entry + tests                                                           |
-| Portable/logical references           | **Shipped (#20).** Configs reference master data by name/key — `campus`/`groupType`/`status` on a group, `ref.campus(...)` in ruleset `var` values, `groupType: "<name>"` for a `group_type_role` domain — and the per-host resolver maps each to that instance's id at plan time (managed resources ∪ live catalogs). A same-run campus resolves at apply time. Numeric ids still work as an escape hatch. **Residual gap:** the `group_role` domain by (group, role) reference is still gated — see the row below | [#20](https://github.com/eqrm/ct-cli/issues/20) (done)                  | None needed for the shipped surface. Write logical names; run `ct plan`. For the gated `group_role` case, use a numeric `id` (next row)                                                                                    |
+| Portable/logical references           | **Shipped (#20, #25).** Configs reference master data by name/key — `campus`/`groupType`/`status` on a group, `ref.campus(...)` in ruleset `var` values, `groupType: "<name>"` for a `group_type_role` domain, and now `group: "<key>", role: "<name>"` for a `group_role` domain (#25) — and the per-host resolver maps each to that instance's id at plan time (managed resources ∪ live catalogs). A same-run campus resolves at apply time. Numeric ids still work as an escape hatch | [#20](https://github.com/eqrm/ct-cli/issues/20) (done), [#25](https://github.com/eqrm/ct-cli/issues/25) (done)                  | None needed for the shipped surface. Write logical names; run `ct plan`. See the `group_role` resolution assumption below (one-time live check)                                                                                    |
 | Environments (dev → prod promotion)   | Named `(host, token, state file)` profiles and a `--env` flag; today one config + one state file = one host                                                                                                   | [#22](https://github.com/eqrm/ct-cli/issues/22)                         | Point `CT_HOST`/state file manually at each target and re-run; keep dev and prod state files apart yourself, and be careful — nothing stops you from applying a dev-shaped config against prod today                      |
-| Permission `group_role` domain by reference | `group_type_role` domains now resolve by name (`groupType: "<name>"`, #20). But `group_role`'s domain is CT's internal (group, role) _pairing_ id, with **no confirmed API source** — the DSL accepts `group: "<key>", role: "<name>"` but the resolver rejects it at plan time with a "pass a numeric id" error                          | [#25](https://github.com/eqrm/ct-cli/issues/25)                         | Find the pairing id via the CT permission editor, or an existing `GET /permissions/group_role` response for a group+role you already have, and pass it as numeric `id` ([`docs/permissions.md`](permissions.md) "domainId semantics") |
+| Permission `group_role` domain by reference **(shipped, assumption unverified)** | `ct.groupRole({ group, role })` now resolves the (group, role) pair to its pairing domainId at plan time (#25). **ASSUMPTION not yet confirmed live:** it reads the group's role list (`GET /groups/{groupId}/roles`) and takes the matched role row's `id` as the pairing domainId — endpoint/field unverified (pinned in a unit test + a comment in `src/resolve/resolver.ts`) | [#25](https://github.com/eqrm/ct-cli/issues/25) (done, verify live)     | Works today by reference for managed, already-created groups. If a live check shows the pairing id is elsewhere, flip the two constants at the top of `resolver.ts`. Numeric `id:` remains the guaranteed escape hatch ([`docs/permissions.md`](permissions.md) "domainId semantics") |
 | ~~Grant adoption~~ **(shipped)**      | ~~existing rights structures must be hand-transcribed~~ — **`ct adopt grants <domainType> <domainId>` ships this** (#25): it reads the live rows, applies the planner's normalization, and prints a paste-ready `ct.groupRole` / `ct.groupTypeRole` block (baseline/inherited excluded, denies noted-and-preserved, scope dataIds mapped back to managed-group keys). See [`docs/permissions.md`](permissions.md) "Adopting existing grants" | [#25](https://github.com/eqrm/ct-cli/issues/25) (done)                  | No workaround needed — run `ct adopt grants group_role <id>` (or `group_type_role`), review the `WARNING`/`NOTE` comments, paste into config                                                                              |
-| Permission catalog lifecycle          | `catalog.json` is a one-off HAR-trace snapshot of a single CT version, with no staleness detection                                                                                                            | [#25](https://github.com/eqrm/ct-cli/issues/25)                         | Manual regeneration procedure below (**Permission catalog lifecycle**)                                                                                                                                                    |
+| ~~Permission catalog lifecycle~~ **(shipped)** | ~~`catalog.json` is a one-off HAR-trace snapshot with no staleness detection~~ — **shipped (#25):** `npm run regenerate:permission-catalog` rewrites it from a live instance (records the CT version in `$meta`), and `ct plan` now warns on a version mismatch or an unknown-authId live grant (which it leaves untouched, never revoking a right it cannot name). See [`docs/permissions.md`](permissions.md) "Catalog lifecycle & staleness" | [#25](https://github.com/eqrm/ct-cli/issues/25) (done)                  | No workaround needed — run the command; heed the `ct plan` warnings                                                                                                                                                       |
 | API re-audit for new CT releases      | CT's OpenAPI spec is self-trimming (only shows endpoints your version has), so a new write endpoint (e.g. a group-status write) appears silently between CT upgrades                                          | tracked by this issue ([#26](https://github.com/eqrm/ct-cli/issues/26)) | Procedure below (**Re-audit procedure for new CT releases**)                                                                                                                                                              |
 
 ## Out of tool scope — deliberate, not a gap
@@ -51,21 +51,36 @@ this doc's structure.
 
 ## Permission catalog lifecycle (regeneration procedure)
 
-Until #25's scripted lifecycle lands, regenerate `src/permissions/catalog.json`
-by hand when the instance's CT version changes materially:
+**Scripted (#25) — the normal path.** Regenerate `src/permissions/catalog.json`
+from a live instance with one command:
+
+```bash
+CT_HOST=https://your.church.tools CT_LOGINTOKEN=<token> npm run regenerate:permission-catalog
+```
+
+It reads `POST /index.php?q=churchauth/ajax` `func=getMasterData`, flattens
+`data.auth_table[module][right]` to
+`"module:right" → { authId: id, scopeField: datenfeld, revocable: !!isRevocable, desc: bezeichnung }`,
+stamps the instance's CT version into `$meta`, and rewrites the file (read-only
+against the instance). Review the `git diff` and commit.
+
+**Staleness signals.** `ct plan`/`ct apply` throw a clear "did you mean" error
+for an unknown right *name* in a config; they now also **warn** (not fail) when
+the live instance's CT version differs from `$meta.ctVersion`, and when a live
+grant carries an `authId` the catalog cannot name (left untouched, never
+revoked). Both are fixed by regenerating.
+
+**Manual fallback (HAR).** If you cannot run the script (no login token to
+hand), capture it by hand:
 
 1. Open the ChurchTools permission editor in a browser with devtools
    recording (Network tab).
 2. Trigger the request: `POST /index.php?q=churchauth/ajax` with body
    `func=getMasterData`.
 3. Export the HAR and extract `log.entries[].response` for that request.
-4. Flatten `data.auth_table[module][right]` to
-   `"module:right" → { authId: id, scopeField: datenfeld, revocable: !!isRevocable, desc: bezeichnung }`.
-5. Overwrite `src/permissions/catalog.json` and update the "Captured
-   <date> from ... (CT <version>)" note in `src/permissions/README.md`.
-
-`ct plan`/`ct apply` throw a clear "did you mean" error for an unknown right
-name today; there is no version-mismatch warning yet (tracked under #25).
+4. Flatten `data.auth_table[module][right]` as above.
+5. Overwrite `src/permissions/catalog.json` (keep the `$meta` block, updating
+   its `ctVersion`/`capturedAt`).
 
 ## Re-audit procedure for new CT releases
 

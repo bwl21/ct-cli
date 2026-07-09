@@ -33,7 +33,7 @@ vi.mock("../src/engine/build.js", () => ({
 }));
 vi.mock("../src/engine/execute.js", () => ({ executePlan }));
 vi.mock("../src/permissions/plan.js", () => ({
-  buildPermissionPlan: vi.fn(async () => ({ items: [], fetchErrors: [] })),
+  buildPermissionPlan: vi.fn(async () => ({ items: [], fetchErrors: [], warnings: [] })),
 }));
 vi.mock("../src/permissions/apply.js", () => ({
   applyPermissionPlan: vi.fn(async () => ({ granted: 0, deleted: 0, failed: [] })),

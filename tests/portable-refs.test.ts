@@ -184,13 +184,36 @@ describe("permission domainId resolution", () => {
     );
   });
 
-  it("rejects a gated group_role reference at plan time", async () => {
+  it("resolves a group_role (group, role) reference to the pairing domainId at plan time (#25)", async () => {
     const { permissions } = await evaluateConfig((ct) => {
       ct.groupRole({ key: "p", group: "kids", role: "Leiter", grants: ["churchgroup:administer groups"] });
     });
+    const state: State = { ...emptyState("h"), resources: {
+      kids: { type: "group", id: 42, key: "kids", fields: {}, adoptedAt: "t", updatedAt: "t" },
+    } };
+    const client = {
+      get: async <T>(path: string): Promise<T> => {
+        if (path === "/groups/42/roles") return [{ id: 7001, name: "Leiter" }] as T;
+        if (path === "/permissions/group_role") return [] as T;
+        throw new CtApiError(`not found: ${path}`, 404, null);
+      },
+    };
+    const { items } = await buildPermissionPlan(client, state, permissions);
+    expect(items[0]?.domainId).toBe(7001);
+    // No live grant yet → the one declared grant is proposed to add (churchgroup:administer groups, unscoped).
+    expect(items[0]?.diff.toPut).toEqual([{ authId: 1113, dataId: [], type: "grant" }]);
+  });
+
+  it("still rejects a group_role reference to a not-yet-created group (pass a numeric id) (#25)", async () => {
+    const { permissions } = await evaluateConfig((ct) => {
+      ct.group({ key: "kids", name: "Kids", groupTypeId: 2 });
+      ct.groupRole({ key: "p", group: "kids", role: "Leiter", grants: ["churchgroup:administer groups"] });
+    });
     const client = { get: async <T>(): Promise<T> => [] as T };
-    await expect(buildPermissionPlan(client, emptyState("h"), permissions)).rejects.toThrow(
-      /not yet supported.*pass a numeric id.*#25/,
+    // `desired` includes the same-run group, so the resolver knows it is declared-but-pending.
+    const desired = [{ type: "group", key: "kids", fields: {}, dependsOn: [] }];
+    await expect(buildPermissionPlan(client, emptyState("h"), permissions, desired)).rejects.toThrow(
+      /declared in this config but not yet created.*pass a numeric id/is,
     );
   });
 });

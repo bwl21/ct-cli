@@ -51,9 +51,9 @@ export interface PermissionInput {
   id?: number;
   /** `group_type_role`: the group type by name/key — sugars into a Ref-valued domainId (#20). */
   groupType?: string;
-  /** `group_role`: the group by key (paired with `role`) — GATED, see `ref.groupRole`/#25. */
+  /** `group_role`: the group by key (paired with `role`) — resolves to the pairing domainId (#25). */
   group?: string;
-  /** `group_role`: the role name (paired with `group`) — GATED, see `ref.groupRole`/#25. */
+  /** `group_role`: the role name (paired with `group`) — resolves to the pairing domainId (#25). */
   role?: string;
   grants: Grant[];
 }
@@ -76,8 +76,8 @@ function domainKeyPart(domainId: number | Ref): string {
 /**
  * Resolve a permission declaration's domain to a numeric id (escape hatch) or a {@link Ref} (#20):
  *  - `group_type_role`: numeric `id`, or logical `groupType: "<key>"` → `ref.groupType(...)`.
- *  - `group_role`: numeric `id`, or logical `group` + `role` → `ref.groupRole(...)` (GATED — the
- *    resolver rejects it at plan time with a "pass a numeric id" error; see #25).
+ *  - `group_role`: numeric `id`, or logical `group` + `role` → `ref.groupRole(...)` (the resolver
+ *    maps the pair to its pairing domainId at plan time; see #25).
  * Declaring both a numeric `id` and a logical form is a conflict.
  */
 function resolveDomainInput(domainType: DomainType, input: PermissionInput): number | Ref {

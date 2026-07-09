@@ -78,11 +78,45 @@ describe("Resolver.resolve", () => {
     );
   });
 
-  it("throws the gated error for a group_role reference", async () => {
+  it("resolves a group_role (group, role) pair to the pairing domainId via the group's role list (#25)", async () => {
+    const state = stateWith({
+      kids: { type: "group", id: 42, key: "kids", fields: {}, adoptedAt: "t", updatedAt: "t" },
+    });
+    const client = fakeClient({
+      "/groups/42/roles": [{ id: 2882, name: "Leiter" }, { id: 2883, name: "Mitglied" }],
+    });
+    const r = new Resolver({ client, state, desired: NO_DESIRED });
+    // slug("Leiter") === "leiter", so either the slug key or the exact name resolves.
+    expect(await r.resolve(ref.groupRole("kids", "leiter"), "perm \"p\"")).toBe(2882);
+    expect(await r.resolve(ref.groupRole("kids", "Mitglied"), "perm \"p\"")).toBe(2883);
+    expect(client.calls["/groups/42/roles"]).toBe(1); // fetched once, cached across both refs
+  });
+
+  it("errors clearly when the role name is not on the group's role list", async () => {
+    const state = stateWith({
+      kids: { type: "group", id: 42, key: "kids", fields: {}, adoptedAt: "t", updatedAt: "t" },
+    });
+    const client = fakeClient({ "/groups/42/roles": [{ id: 2882, name: "Leiter" }] });
+    const r = new Resolver({ client, state, desired: NO_DESIRED, host: "hostA" });
+    await expect(r.resolve(ref.groupRole("kids", "Ghost"), "perm \"p\"")).rejects.toThrow(
+      /group #42 has no role named "Ghost".*available: "Leiter".*pass a numeric id/is,
+    );
+  });
+
+  it("errors when a group_role names a group that isn't managed", async () => {
     const client = fakeClient({});
     const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED });
-    await expect(r.resolve(ref.groupRole("g", "Leiter"), "perm \"p\"")).rejects.toThrow(
-      /not yet supported.*pass a numeric id.*#25/,
+    await expect(r.resolve(ref.groupRole("ghost", "Leiter"), "perm \"p\"")).rejects.toThrow(
+      /no managed group named "ghost".*pass a numeric id/is,
+    );
+  });
+
+  it("errors when a group_role names a same-run-declared (not-yet-created) group", async () => {
+    const desired: DesiredResource[] = [{ type: "group", key: "kids", fields: {}, dependsOn: [] }];
+    const client = fakeClient({});
+    const r = new Resolver({ client, state: emptyState("h"), desired });
+    await expect(r.resolve(ref.groupRole("kids", "Leiter"), "perm \"p\"")).rejects.toThrow(
+      /declared in this config but not yet created.*Apply the group first/is,
     );
   });
 

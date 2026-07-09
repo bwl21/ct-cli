@@ -1,4 +1,12 @@
 {
+ "$meta": {
+  "capturedFrom": "eqrm.church.tools",
+  "ctVersion": "3.134.0",
+  "capturedAt": "2026-07-08",
+  "rightCount": 187,
+  "source": "POST /index.php?q=churchauth/ajax  func=getMasterData",
+  "regenerate": "npm run regenerate:permission-catalog (see src/permissions/README.md)"
+ },
  "churchcore:administer settings": {
   "authId": 1,
   "scopeField": null,
