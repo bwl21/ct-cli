@@ -1,0 +1,314 @@
+/**
+ * `ct adopt group` — bulk/filtered group adoption + `--with-dynamic` ruleset capture (#51).
+ *
+ * A dedicated subcommand (mirroring `adopt-grants.ts`'s pattern) rather than an extension of the
+ * generic `ct adopt <type> <id>` action: bulk selection (`--type`, `--children-of`) and dynamic
+ * ruleset capture (`--with-dynamic`) are group-specific concepts with no analog for the other
+ * adoptable types. Commander matches this named subcommand before falling through to the base
+ * action, so every `ct adopt group ...` invocation — a single id, a list of ids, or a filter —
+ * routes here (the base action never sees `type === "group"`).
+ */
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { Command } from "commander";
+import { authedSession } from "../api/session.js";
+import { CtApiError, type CtClient } from "../api/ctClient.js";
+import { resolveConfig } from "../config.js";
+import { prepareEnv } from "../env/context.js";
+import { normalizeRuleset } from "../engine/dynamic.js";
+import type { DynamicStatus } from "../engine/types.js";
+import { RESOURCES, configSnippet, fromInformation, slug } from "../resources/registry.js";
+import { loadState, saveState, upsert, type State } from "../state/state.js";
+import { success, info, warn, out } from "../ui.js";
+
+interface AdoptGroupOptions {
+  key?: string;
+  state?: string;
+  env?: string;
+  dryRun?: boolean;
+  type?: string;
+  childrenOf?: string;
+  withDynamic?: boolean;
+}
+
+const GROUP_SPEC = RESOURCES.group!;
+
+interface ResolvedAdoption {
+  id: number;
+  key: string;
+  fields: Record<string, unknown>;
+  snippet: string;
+}
+
+function isNonNegativeInt(raw: string): boolean {
+  return /^\d+$/.test(raw.trim());
+}
+
+/** Resolve `--type`'s numeric group-type id or logical key against the live `/group/grouptypes` catalog. */
+async function resolveGroupTypeId(raw: string, client: Pick<CtClient, "get">): Promise<number> {
+  const trimmed = raw.trim();
+  if (isNonNegativeInt(trimmed)) return Number.parseInt(trimmed, 10);
+  const rows = await client.get<Array<Record<string, unknown>>>("/group/grouptypes");
+  const list = Array.isArray(rows) ? rows : [];
+  const bySlug = list.filter((r) => typeof r.name === "string" && slug(r.name as string) === trimmed);
+  const candidates = bySlug.length > 0 ? bySlug : list.filter((r) => r.name === trimmed);
+  if (candidates.length === 0) {
+    throw new Error(
+      `--type "${raw}": no group type matches (checked /group/grouptypes by slug and exact name).`,
+    );
+  }
+  if (candidates.length > 1) {
+    const listed = candidates.map((c) => `${JSON.stringify(c.name)} (#${String(c.id)})`).join(", ");
+    throw new Error(`--type "${raw}" is ambiguous: ${candidates.length} group types match — ${listed}.`);
+  }
+  return Number(candidates[0]!.id);
+}
+
+/** Resolve `--children-of`'s numeric id, adopted-state logical key, or live group name to a group id. */
+async function resolveGroupId(
+  raw: string,
+  client: Pick<CtClient, "get" | "getAll">,
+  state: State,
+): Promise<number> {
+  const trimmed = raw.trim();
+  if (isNonNegativeInt(trimmed)) return Number.parseInt(trimmed, 10);
+  const managed = state.resources[trimmed];
+  if (managed && managed.type === "group") return managed.id;
+  const page = await client.getAll<Record<string, unknown>>("/groups");
+  const rows = page.data;
+  const bySlug = rows.filter((r) => typeof r.name === "string" && slug(r.name as string) === trimmed);
+  const candidates = bySlug.length > 0 ? bySlug : rows.filter((r) => r.name === trimmed);
+  if (candidates.length === 0) {
+    throw new Error(
+      `--children-of "${raw}": not adopted (no state entry) and no live group matches ` +
+        `(checked /groups by slug and exact name).`,
+    );
+  }
+  if (candidates.length > 1) {
+    const listed = candidates.map((c) => `${JSON.stringify(c.name)} (#${String(c.id)})`).join(", ");
+    throw new Error(
+      `--children-of "${raw}" is ambiguous: ${candidates.length} live groups match — ${listed}.`,
+    );
+  }
+  return Number(candidates[0]!.id);
+}
+
+/**
+ * Recursively collect a group's full hierarchy subtree via `/groups/{id}/children`, in
+ * parent-before-child (pre-order) sequence, excluding the root itself. Guards against a cyclic
+ * hierarchy (a live-API bug, not a valid DAG state) with a `visited` set — never re-descends into
+ * an id already seen, so a back-reference to an ancestor cannot loop forever.
+ */
+async function collectSubtreeIds(rootId: number, client: Pick<CtClient, "get">): Promise<number[]> {
+  const visited = new Set<number>([rootId]);
+  const order: number[] = [];
+
+  async function walk(id: number): Promise<void> {
+    let raw: unknown;
+    try {
+      raw = await client.get(`/groups/${id}/children`);
+    } catch (err) {
+      if (err instanceof CtApiError && err.status === 404) return; // no children (leaf, or unknown group)
+      throw err;
+    }
+    const children = Array.isArray(raw) ? raw : [];
+    for (const c of children) {
+      const cid = typeof c === "number" ? c : Number((c as Record<string, unknown> | null)?.id);
+      if (!Number.isFinite(cid) || visited.has(cid)) continue;
+      visited.add(cid);
+      order.push(cid);
+      await walk(cid);
+    }
+  }
+
+  await walk(rootId);
+  return order;
+}
+
+/** List every group id whose live `groupTypeId` (top-level or under `information`) matches. */
+async function collectByGroupType(groupTypeId: number, client: Pick<CtClient, "getAll">): Promise<number[]> {
+  const page = await client.getAll<Record<string, unknown>>("/groups");
+  return page.data
+    .filter((row) => Number(fromInformation(row, "groupTypeId")) === groupTypeId)
+    .map((row) => Number(row.id))
+    .filter((id) => Number.isFinite(id))
+    .sort((a, b) => a - b);
+}
+
+interface DynamicCapture {
+  status: DynamicStatus;
+  normalizedRuleset: Record<string, unknown>;
+}
+
+/** Fetch + normalize a group's ruleset and status. `undefined` (never throws) if the group isn't dynamic. */
+async function captureDynamic(
+  id: number,
+  client: Pick<CtClient, "get">,
+): Promise<DynamicCapture | undefined> {
+  let raw: unknown;
+  try {
+    raw = await client.get(`/dynamicgroups/${id}/ruleset`);
+  } catch (err) {
+    if (err instanceof CtApiError && err.status === 404) return undefined; // not a dynamic group — skip silently
+    throw err;
+  }
+  const normalizedRuleset = normalizeRuleset(raw);
+  const statusRes = await client.get<{ dynamicGroupStatus?: string }>(`/dynamicgroups/${id}/status`);
+  const status = (statusRes?.dynamicGroupStatus ?? "none") as DynamicStatus;
+  return { status, normalizedRuleset };
+}
+
+export function adoptGroupCommand(): Command {
+  return new Command("group")
+    .description(
+      "Adopt one or more groups: `ct adopt group <id...>`, or a filtered bulk form via " +
+        "--type / --children-of. See --with-dynamic to also capture a dynamic group's ruleset.",
+    )
+    .argument("[ids...]", "one or more ChurchTools group ids")
+    .option("-k, --key <key>", "logical key (only valid when exactly one group is resolved)")
+    .option("-s, --state <path>", "state file path (or set CT_STATE)")
+    .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
+    .option("--dry-run", "preview the config entries and state changes without writing")
+    .option("--type <groupTypeIdOrKey>", "adopt every group of this group type (numeric id or logical key)")
+    .option(
+      "--children-of <idOrKey>",
+      "adopt a group's full hierarchy subtree (recursive; numeric id, adopted-state key, or live name)",
+    )
+    .option(
+      "--with-dynamic",
+      "also capture each dynamic group's ruleset to rulesets/<key>.json and emit the dynamic: block",
+    )
+    .action(async (ids: string[], _localOpts: AdoptGroupOptions, command: Command) => {
+      // `adopt` (the parent) also declares `-k/--key`, `-s/--state`, `-e/--env`, and `--dry-run` —
+      // for its own `<type> <id>` action. Commander does not merge same-named options declared on
+      // both a parent and a subcommand into either level's plain `.opts()` (each stays empty for
+      // that flag); only `optsWithGlobals()` walks the whole command chain and merges correctly.
+      // Read from there rather than the local `opts` parameter, so `ct adopt group ... --state
+      // <path>` / `--env <name>` (etc.) actually take effect.
+      const opts = command.optsWithGlobals() as AdoptGroupOptions;
+      const selectors = [ids.length > 0, Boolean(opts.type), Boolean(opts.childrenOf)].filter(Boolean).length;
+      if (selectors === 0) {
+        throw new Error("Specify group id(s), --type <groupTypeIdOrKey>, or --children-of <idOrKey>.");
+      }
+      if (selectors > 1) {
+        throw new Error("Specify only one of: group id(s), --type, --children-of.");
+      }
+      for (const raw of ids) {
+        if (!isNonNegativeInt(raw)) {
+          throw new Error(`Invalid id "${raw}" — expected a non-negative integer.`);
+        }
+      }
+      if (opts.key && ids.length > 1) {
+        throw new Error("--key is only valid when adopting a single group.");
+      }
+
+      // Resolve the env FIRST — it wires the target host/token into the process env before
+      // resolveConfig — then load + validate the state file (host guard) BEFORE any network call,
+      // so a state file recorded against another instance never triggers a live request against
+      // the wrong host.
+      const cmdEnv = await prepareEnv(opts);
+      const config = await resolveConfig();
+      const statePath = cmdEnv.statePath;
+      const state = await loadState(statePath, config.host);
+
+      const { client } = await authedSession();
+
+      let resolvedIds: number[];
+      if (ids.length > 0) {
+        resolvedIds = ids.map((raw) => Number.parseInt(raw, 10));
+      } else if (opts.type) {
+        const groupTypeId = await resolveGroupTypeId(opts.type, client);
+        resolvedIds = await collectByGroupType(groupTypeId, client);
+      } else {
+        const rootId = await resolveGroupId(opts.childrenOf!, client, state);
+        resolvedIds = await collectSubtreeIds(rootId, client);
+      }
+      resolvedIds = [...new Set(resolvedIds)];
+
+      if (opts.key && resolvedIds.length !== 1) {
+        throw new Error(`--key is only valid when adopting a single group (resolved ${resolvedIds.length}).`);
+      }
+      if (resolvedIds.length === 0) {
+        info("No groups matched — nothing to adopt.");
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const results: ResolvedAdoption[] = [];
+      const reports: Array<{ action: "created" | "updated"; id: number; key: string }> = [];
+
+      for (const id of resolvedIds) {
+        const resource = await client.get<Record<string, unknown>>(GROUP_SPEC.itemPath(id));
+        const key =
+          (resolvedIds.length === 1 ? opts.key?.trim() : undefined) || GROUP_SPEC.deriveKey(resource);
+        if (!key) {
+          throw new Error(`Could not derive a logical key for group #${id} — pass --key explicitly.`);
+        }
+        const fields = GROUP_SPEC.managedFields(resource);
+
+        let snippetFields: Record<string, unknown> = fields;
+        if (opts.withDynamic) {
+          const captured = await captureDynamic(id, client);
+          if (captured) {
+            const relPath = `rulesets/${key}.json`;
+            if (!opts.dryRun) {
+              await mkdir(join(process.cwd(), "rulesets"), { recursive: true });
+              await writeFile(
+                join(process.cwd(), relPath),
+                `${JSON.stringify(captured.normalizedRuleset, null, 2)}\n`,
+                "utf8",
+              );
+            }
+            snippetFields = {
+              ...fields,
+              dynamic: { status: captured.status, ruleset: { ref: `./${relPath}` } },
+            };
+          }
+        }
+        const snippet = configSnippet("group", key, snippetFields);
+
+        if (opts.dryRun) {
+          results.push({ id, key, fields, snippet });
+          continue;
+        }
+        const action = upsert(state, { type: "group", id, key, fields }, now);
+        results.push({ id, key, fields, snippet });
+        reports.push({ action, id, key });
+      }
+
+      if (opts.dryRun) {
+        const payload = results.map((r) => ({
+          key: r.key,
+          type: "group",
+          id: r.id,
+          fields: r.fields,
+          config: r.snippet,
+        }));
+        info(
+          results.length === 1
+            ? `Would adopt group #${results[0]!.id} as "${results[0]!.key}". Generated config entry:`
+            : `Would adopt ${results.length} groups. Generated config entries:`,
+        );
+        out(results.length === 1 ? payload[0] : payload);
+        return;
+      }
+
+      await saveState(statePath, state);
+
+      for (const r of reports) {
+        success(
+          `${r.action === "created" ? "Adopted" : "Updated"} group #${r.id} as "${r.key}" → ${statePath}`,
+        );
+        if (r.action === "updated") {
+          warn("This resource was already managed — its snapshot was refreshed.");
+        }
+      }
+
+      // Grouped, paste-ready config block. configSnippet's per-line FORMAT is unchanged (#52 reworks
+      // that later) — this only wraps the group of lines under a type comment header, ordered
+      // parents-before-children where hierarchy is known (--children-of's subtree walk).
+      info(results.length === 1 ? "Config entry:" : "Config entries (paste into your config):");
+      const block = [`// group`, ...results.map((r) => r.snippet)].join("\n");
+      process.stdout.write(`${block}\n`);
+    });
+}
