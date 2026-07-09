@@ -98,4 +98,47 @@ describe("state.loadState", () => {
     await writeFile(statePath, JSON.stringify({ version: 2, host: HOST, resources: {} }), "utf8");
     await expect(loadState(statePath, HOST)).rejects.toThrow(/Unsupported state file version/);
   });
+
+  it("migrates a pre-rename campus snapshot: shortName → shorty (#17 item 4)", async () => {
+    // A campus adopted before the shortName→shorty rename (Phase 4, no version bump).
+    const file = {
+      version: 1,
+      host: HOST,
+      resources: {
+        mainz: {
+          type: "campus",
+          id: 0,
+          key: "mainz",
+          fields: { name: "Mainz", shortName: "MZ" },
+          adoptedAt: "t",
+          updatedAt: "t",
+        },
+      },
+    };
+    await writeFile(statePath, JSON.stringify(file), "utf8");
+    const state = await loadState(statePath, HOST);
+    // The vestigial `shortName` is renamed to the real create-key `shorty`, clearing the phantom drift.
+    expect(state.resources.mainz!.fields).toEqual({ name: "Mainz", shorty: "MZ" });
+  });
+
+  it("does not clobber a post-rename snapshot that already has shorty", async () => {
+    const file = {
+      version: 1,
+      host: HOST,
+      resources: {
+        mainz: {
+          type: "campus",
+          id: 0,
+          key: "mainz",
+          // Both keys present (e.g. a raw CT snapshot) — the real `shorty` must win, untouched.
+          fields: { name: "Mainz", shorty: "MZ", shortName: null },
+          adoptedAt: "t",
+          updatedAt: "t",
+        },
+      },
+    };
+    await writeFile(statePath, JSON.stringify(file), "utf8");
+    const state = await loadState(statePath, HOST);
+    expect(state.resources.mainz!.fields.shorty).toBe("MZ");
+  });
 });
