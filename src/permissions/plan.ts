@@ -28,7 +28,16 @@ export function desiredTuples(p: DesiredPermission, state: State): GrantTuple[] 
     if (p.domainType === "group_type_role" && entry.authId >= 10000) {
       throw new Error(`${p.domainType} "${p.key}": "${name}" (authId ${entry.authId}) is not writable — ${p.domainType} requires authId < 10000.`);
     }
-    if (typeof g === "string") return [{ authId: entry.authId, dataId: [], type: "grant" as const }];
+    if (typeof g === "string") {
+      // A scoped right declared as a bare string would emit `dataId: []` — a silent GLOBAL grant.
+      // Refuse it: a scoped right must be declared as `{ right, scope: [...] }` so the scope is explicit.
+      if (entry.scopeField != null) {
+        throw new Error(
+          `${p.domainType} "${p.key}": "${name}" is a scoped right (scopeField "${entry.scopeField}") and must be declared as { right: "${name}", scope: [...] } — a bare string would grant it globally.`,
+        );
+      }
+      return [{ authId: entry.authId, dataId: [], type: "grant" as const }];
+    }
     if (entry.scopeField == null) {
       throw new Error(`${p.domainType} "${p.key}": "${name}" is not a scoped right (no scopeField) — remove "scope" or use a scoped right.`);
     }

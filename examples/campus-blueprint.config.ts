@@ -45,5 +45,15 @@ export default (ct: ConfigContext): void => {
     kidsArea(ct, campus);
   }
   // A permission grant (#13) on a shared group-type-role template — id is an illustrative placeholder.
-  ct.groupTypeRole({ key: "kids_lead_tpl", id: 2, grants: ["churchgroup:view group", "churchgroup:edit group members"] });
+  // Both rights are scoped (they carry a `scopeField` in the catalog), so they must be declared
+  // as `{ right, scope: [...] }` — a bare string would grant them globally and is rejected.
+  const kidsLeads = CAMPUSES.map((c) => `${c}_kids_lead`);
+  ct.groupTypeRole({
+    key: "kids_lead_tpl",
+    id: 2,
+    grants: [
+      { right: "churchgroup:view group", scope: kidsLeads },
+      { right: "churchgroup:edit group memberships of group", scope: kidsLeads },
+    ],
+  });
 };

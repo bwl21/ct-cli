@@ -15,7 +15,11 @@ export function renderPermissionPlan(items: PermissionPlanItem[]): string {
   const changed = items.filter((i) => i.diff.toPut.length > 0 || i.diff.toDelete.length > 0);
 
   if (changed.length === 0) {
-    return pc.green("No permission changes. Desired grants match ChurchTools.");
+    const preserved = items.reduce((n, i) => n + i.diff.preserved.length, 0);
+    const suffix = preserved > 0
+      ? ` (${preserved} pre-existing deny row(s) left untouched.)`
+      : "";
+    return pc.green(`No permission changes. Desired grants match ChurchTools.${suffix}`);
   }
 
   const lines: string[] = [];
@@ -35,6 +39,9 @@ export function renderPermissionPlan(items: PermissionPlanItem[]): string {
     }
     for (const t of item.diff.toDelete) {
       lines.push(`      ${pc.red("-")} ${fmtTuple(t)}`);
+    }
+    for (const t of item.diff.preserved) {
+      lines.push(`      ${pc.dim(`~ ${fmtTuple(t)} (pre-existing deny — left untouched)`)}`);
     }
   }
 

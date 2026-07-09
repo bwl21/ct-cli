@@ -9,6 +9,7 @@ describe("applyPermissionPlan", () => {
       diff: {
         toPut: [{ authId: 1104, dataId: [42], type: "grant" }, { authId: 1101, dataId: [], type: "grant" }],
         toDelete: [{ authId: 2000, dataId: [], type: "grant" }],
+        preserved: [],
       },
     }], { request } as never);
     expect(res).toEqual({ granted: 2, deleted: 1 });

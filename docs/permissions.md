@@ -20,7 +20,8 @@ export default (ct) => {
   ct.groupRole({
     key: "kids_lead_grant",
     id: 2882,                // the internal (group, role) domainId — see below
-    grants: ["churchgroup:edit group members"],
+    // "edit group memberships of group" is a scoped right, so it takes a `scope: [...]`.
+    grants: [{ right: "churchgroup:edit group memberships of group", scope: ["kids_area"] }],
   });
 };
 ```
@@ -54,8 +55,12 @@ ct get permissions-catalog
 
 Each line shows the name, its numeric `authId`, and whether it's `scoped`
 (accepts a `scope: [...]` — i.e. the catalog entry has a non-null
-`scopeField`) or `unscoped`. An unknown name throws a clear error at config
-evaluation time, with a "did you mean" hint drawn from same-module names.
+`scopeField`) or `unscoped`. An unknown name throws a clear error at
+**plan/apply time** — inside `desiredTuples` (`src/permissions/plan.ts`),
+when grants are resolved to tuples against the catalog, after the authed
+fetch — with a "did you mean" hint drawn from same-module names. (Config
+evaluation only checks a grant's *shape*: `module:right` string or
+`{ right, scope }`; it does not resolve the name against the catalog.)
 
 ## `domainId` semantics
 

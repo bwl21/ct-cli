@@ -24,10 +24,16 @@ export interface BuildResult {
   fetchErrors: string[];
 }
 
+export interface BuildOptions {
+  /** Directory of the config file — `{ ref }` ruleset paths resolve relative to it (not the cwd). */
+  configDir?: string;
+}
+
 export async function buildPlan(
   client: Pick<CtClient, "get">,
   state: State,
   desired: DesiredResource[],
+  opts: BuildOptions = {},
 ): Promise<BuildResult> {
   // Keyed by logical key (globally unique), not CT id (unique only within a type — the Mainz campus is id 0).
   const actual = new Map<string, Record<string, unknown>>();
@@ -58,7 +64,7 @@ export async function buildPlan(
   });
 
   // Synthetic sub-resource fields (parents, dynamic, …) fold into the diff on both sides.
-  const folded = await foldSynthetic({ client, state, desired, actual });
+  const folded = await foldSynthetic({ client, state, desired, actual, configDir: opts.configDir });
   fetchErrors.push(...folded.errors);
   const plan = computePlan(folded.desired, state, actual, { unresolved });
   return { plan, actual, fetchErrors };

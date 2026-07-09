@@ -92,11 +92,11 @@ export function applyCommand(): Command {
       const config = await resolveConfig();
       const configPath = resolveConfigPath(opts.config);
       const statePath = resolveStatePath(opts.state);
-      const { resources: desired, permissions } = await loadConfig(configPath);
+      const { resources: desired, permissions, configDir } = await loadConfig(configPath);
       const state = await loadState(statePath, config.host);
 
       const { client } = await authedSession();
-      const { plan, actual, fetchErrors } = await buildPlan(client, state, desired);
+      const { plan, actual, fetchErrors } = await buildPlan(client, state, desired, { configDir });
       const { items: permItems, fetchErrors: permFetchErrors } = await buildPermissionPlan(client, state, permissions);
 
       const allFetchErrors = [...fetchErrors, ...permFetchErrors];

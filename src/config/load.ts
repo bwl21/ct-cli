@@ -7,7 +7,7 @@
  * declared resources.
  */
 import { access } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { createJiti } from "jiti";
 import { evaluateConfig, type ConfigModule } from "./context.js";
 import type { DesiredResource } from "../engine/types.js";
@@ -21,8 +21,11 @@ export function resolveConfigPath(explicit?: string, env: NodeJS.ProcessEnv = pr
 
 export async function loadConfig(
   path: string,
-): Promise<{ resources: DesiredResource[]; permissions: DesiredPermission[] }> {
+): Promise<{ resources: DesiredResource[]; permissions: DesiredPermission[]; configDir: string }> {
   const resolved = resolve(path);
+  // Directory of the config file, so relative `{ ref }` ruleset paths resolve against the config
+  // (not wherever `ct` happens to be invoked). Threaded through buildPlan → foldSynthetic.
+  const configDir = dirname(resolved);
   // Surface a friendly message rather than jiti's raw ERR_MODULE_NOT_FOUND stack.
   try {
     await access(resolved);
@@ -37,5 +40,5 @@ export async function loadConfig(
   if (typeof mod !== "function") {
     throw new Error(`Config ${path} must default-export a function (ct) => { ... }.`);
   }
-  return evaluateConfig(mod);
+  return { ...(await evaluateConfig(mod)), configDir };
 }

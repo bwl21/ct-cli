@@ -67,11 +67,28 @@ export function normalizeDynamic(spec: { status: DynamicStatus; ruleset: unknown
   return { status: spec.status, ruleset: normalizeRuleset(spec.ruleset) };
 }
 
-/** Resolve a `{ ref: "./file.json" }` ruleset to its JSON contents; pass through inline rulesets. */
-export function resolveRulesetRef(ruleset: unknown, baseDir: string = process.cwd()): unknown {
+/**
+ * Resolve a `{ ref: "./file.json" }` ruleset to its JSON contents; pass through inline rulesets.
+ * `ref` paths resolve relative to `baseDir` (the config file's directory), NOT the process cwd,
+ * so a config is portable regardless of where `ct` is invoked. Missing/unreadable/invalid-JSON
+ * ref files raise a clear error naming the group and the resolved path instead of a raw ENOENT.
+ */
+export function resolveRulesetRef(ruleset: unknown, baseDir: string = process.cwd(), groupKey?: string): unknown {
   if (ruleset && typeof ruleset === "object" && typeof (ruleset as { ref?: unknown }).ref === "string") {
-    const p = resolve(baseDir, (ruleset as { ref: string }).ref);
-    return JSON.parse(readFileSync(p, "utf8"));
+    const ref = (ruleset as { ref: string }).ref;
+    const p = resolve(baseDir, ref);
+    const where = groupKey ? `dynamic ruleset for group "${groupKey}"` : "dynamic ruleset";
+    let raw: string;
+    try {
+      raw = readFileSync(p, "utf8");
+    } catch (err) {
+      throw new Error(`${where}: cannot read ruleset ref "${ref}" (resolved to ${p}): ${(err as Error).message}`);
+    }
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`${where}: ruleset ref "${ref}" (resolved to ${p}) is not valid JSON: ${(err as Error).message}`);
+    }
   }
   return ruleset;
 }

@@ -26,12 +26,18 @@ export function normalizeActual(rows: RawPermission[]): GrantTuple[] {
   return out;
 }
 
-export interface GrantDiff { toPut: GrantTuple[]; toDelete: GrantTuple[] }
+export interface GrantDiff { toPut: GrantTuple[]; toDelete: GrantTuple[]; preserved: GrantTuple[] }
 
 export function diffGrants(desired: GrantTuple[], actual: GrantTuple[]): GrantDiff {
+  // Reconciliation owns only user-authored GRANT rows. `desiredTuples` only ever emits
+  // `type: "grant"`, so an explicit deny row (`type: "revoke"`) has no desired counterpart and
+  // would land in `toDelete` — silently removing an admin's deny. Treat non-grant rows as
+  // unmanaged: keep them out of the diff and surface them as an informational `preserved` note.
+  const managedActual = actual.filter((t) => t.type === "grant");
+  const preserved = actual.filter((t) => t.type !== "grant");
   const desiredKeys = new Map(desired.map((t) => [tupleKey(t), t]));
-  const actualKeys = new Map(actual.map((t) => [tupleKey(t), t]));
+  const actualKeys = new Map(managedActual.map((t) => [tupleKey(t), t]));
   const toPut = [...desiredKeys].filter(([k]) => !actualKeys.has(k)).map(([, t]) => t);
   const toDelete = [...actualKeys].filter(([k]) => !desiredKeys.has(k)).map(([, t]) => t);
-  return { toPut, toDelete };
+  return { toPut, toDelete, preserved };
 }

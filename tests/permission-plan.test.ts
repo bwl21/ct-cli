@@ -11,13 +11,21 @@ describe("desiredTuples", () => {
   it("resolves names and scope to tuples", () => {
     const tuples = desiredTuples(
       { key: "t", domainType: "group_type_role", domainId: 8, grants: [
-        "churchgroup:view group",                                   // authId 1104, unscoped
-        { right: "churchgroup:view group", scope: ["kids_area"] },  // authId 1104, dataId [42]
+        "churchgroup:administer groups",                            // authId 1113, unscoped (no scopeField) → global
+        { right: "churchgroup:view group", scope: ["kids_area"] },  // authId 1104, scoped, dataId [42]
       ]}, state);
     expect(tuples).toEqual([
-      { authId: 1104, dataId: [], type: "grant" },
+      { authId: 1113, dataId: [], type: "grant" },
       { authId: 1104, dataId: [42], type: "grant" },
     ]);
+  });
+
+  it("rejects a bare-string scoped right — it would silently grant globally", () => {
+    // churchgroup:view group carries scopeField "cdb_gruppe" (it IS scoped). Declared as a bare
+    // string it would emit dataId: [] — a global grant. It must be declared as { right, scope }.
+    expect(() => desiredTuples(
+      { key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchgroup:view group"] }, state),
+    ).toThrow(/is a scoped right.*must be declared as \{ right/is);
   });
   it("rejects authId >= 10000 on group_type_role", () => {
     expect(() => desiredTuples({ key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchdb:+see persons"] }, state))
@@ -50,13 +58,13 @@ describe("desiredTuples", () => {
 describe("buildPermissionPlan", () => {
   it("diffs desired vs actual (bulk fetch filtered to managed domainIds)", async () => {
     const client = { get: vi.fn(async () => [
-      { domainType: "group_type_role", domainId: 8, authId: 1104, dataId: null, type: "grant", meta: { modifiedPid: 1 } },
+      { domainType: "group_type_role", domainId: 8, authId: 1113, dataId: null, type: "grant", meta: { modifiedPid: 1 } },
       { domainType: "group_type_role", domainId: 99, authId: 1, dataId: null, type: "grant", meta: { modifiedPid: 1 } }, // unmanaged domainId → ignored
     ]) };
     const { items, fetchErrors } = await buildPermissionPlan(client as never, state,
-      [{ key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchgroup:view group"] }]);
+      [{ key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchgroup:administer groups"] }]);
     expect(fetchErrors).toEqual([]);
-    expect(items[0]?.diff.toPut).toEqual([]);     // 1104 unscoped already present
+    expect(items[0]?.diff.toPut).toEqual([]);     // 1113 unscoped already present
     expect(items[0]?.diff.toDelete).toEqual([]);  // domainId 99 is unmanaged → invisible
   });
 

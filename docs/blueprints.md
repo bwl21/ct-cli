@@ -125,7 +125,15 @@ export default (ct: ConfigContext): void => {
     ct.campus({ key: campus, name: `Campus ${campus}`, shorty: campus.slice(0, 3).toUpperCase() });
     kidsArea(ct, campus);
   }
-  ct.groupTypeRole({ key: "kids_lead_tpl", id: 2, grants: ["churchgroup:view group", "churchgroup:edit group members"] });
+  const kidsLeads = CAMPUSES.map((c) => `${c}_kids_lead`);
+  ct.groupTypeRole({
+    key: "kids_lead_tpl",
+    id: 2,
+    grants: [
+      { right: "churchgroup:view group", scope: kidsLeads },
+      { right: "churchgroup:edit group memberships of group", scope: kidsLeads },
+    ],
+  });
 };
 ```
 

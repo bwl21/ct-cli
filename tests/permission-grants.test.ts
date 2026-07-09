@@ -29,5 +29,20 @@ describe("diffGrants", () => {
     const d = diffGrants(desired, actual);
     expect(d.toPut.map(tupleKey)).toEqual([tupleKey({ authId: 1101, dataId: [], type: "grant" })]);
     expect(d.toDelete.map(tupleKey)).toEqual([tupleKey({ authId: 2000, dataId: [], type: "grant" })]);
+    expect(d.preserved).toEqual([]);
+  });
+
+  it("never deletes a pre-existing revoke (deny) row — surfaces it as preserved instead", () => {
+    // desiredTuples only ever emits type:"grant", so a revoke row has no desired counterpart.
+    // It must NOT land in toDelete (that would silently remove an admin's explicit deny).
+    const desired = [{ authId: 1104, dataId: [3], type: "grant" as const }];
+    const actual = [
+      { authId: 1104, dataId: [3], type: "grant" as const },   // matched → no-op
+      { authId: 1105, dataId: [7], type: "revoke" as const },  // pre-existing deny → preserved, never deleted
+    ];
+    const d = diffGrants(desired, actual);
+    expect(d.toPut).toEqual([]);
+    expect(d.toDelete).toEqual([]); // the revoke row is NOT deleted
+    expect(d.preserved).toEqual([{ authId: 1105, dataId: [7], type: "revoke" }]);
   });
 });

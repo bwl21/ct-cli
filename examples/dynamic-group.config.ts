@@ -16,8 +16,10 @@ export default (ct: ConfigContext): void => {
   ct.campus({ key: "mainz", name: "Mainz", shorty: "MZ" });
 
   // The group must exist before it can carry a ruleset — the engine handles
-  // this ordering automatically (group is apply tier 1, the dynamic-group
-  // ruleset/status write is tier 5; see TYPE_TIER in src/engine/graph.ts).
+  // this ordering automatically. `dynamic` is a synthetic sub-resource field
+  // (like `parents`), not a separate resource type: its ruleset/status write is
+  // folded into the group's OWN tier-1 apply and routed to the dynamic-group
+  // endpoints inline (see src/engine/synthetic.ts and docs/dynamic-groups.md).
   ct.group({
     key: "all_mainz",
     name: "Alle Mainz",

@@ -20,6 +20,8 @@ export interface SyntheticFoldCtx {
   state: State;
   desired: DesiredResource[];
   actual: Map<string, Record<string, unknown>>;
+  /** Directory of the config file, so `{ ref }` ruleset paths resolve relative to it (not the cwd). */
+  configDir?: string;
 }
 export interface SyntheticApplyCtx {
   client: Pick<CtClient, "request">;
@@ -75,7 +77,7 @@ const parentsField: SyntheticField = {
 /** `dynamic`: dynamic-group ruleset + status, reconciled as one synthetic field. */
 const dynamicField: SyntheticField = {
   field: "dynamic",
-  async fold({ client, state, desired, actual }) {
+  async fold({ client, state, desired, actual, configDir }) {
     const optedIn = new Set(desired.filter((d) => d.type === "group" && d.dynamic !== undefined).map((d) => d.key));
     if (optedIn.size === 0) return { desired, errors: [] };
     const errors: string[] = [];
@@ -83,13 +85,13 @@ const dynamicField: SyntheticField = {
       if (managed.type !== "group" || !optedIn.has(managed.key)) continue;
       const a = actual.get(managed.key);
       if (!a) continue; // vanished from CT → handled as a recreate by the plain plan
+      // The ruleset GET and the status GET have distinct failure meanings, so they get distinct
+      // try/catch blocks: only a ruleset 404 means "not a dynamic group". A status GET that fails
+      // AFTER a successful ruleset GET must NOT fabricate the "none" sentinel (that would discard a
+      // real ruleset and propose a spurious re-PUT) — it degrades the plan via `errors` instead.
+      let ruleset: Record<string, unknown>;
       try {
-        const ruleset = await client.get<Record<string, unknown>>(`/dynamicgroups/${managed.id}/ruleset`);
-        const statusRes = await client.get<{ dynamicGroupStatus?: string }>(`/dynamicgroups/${managed.id}/status`);
-        a.dynamic = {
-          status: (statusRes?.dynamicGroupStatus ?? "none") as DynamicStatus,
-          ruleset: normalizeRuleset(ruleset),
-        };
+        ruleset = await client.get<Record<string, unknown>>(`/dynamicgroups/${managed.id}/ruleset`);
       } catch (err) {
         if (err instanceof CtApiError && err.status === 404) {
           // Group exists but is not (yet) a dynamic group — its ruleset 404s. Sentinel so a promote
@@ -99,11 +101,22 @@ const dynamicField: SyntheticField = {
         }
         const message = err instanceof Error ? err.message : String(err);
         errors.push(`dynamic ${managed.key} (#${managed.id}): ${message}`);
+        continue;
+      }
+      try {
+        const statusRes = await client.get<{ dynamicGroupStatus?: string }>(`/dynamicgroups/${managed.id}/status`);
+        a.dynamic = {
+          status: (statusRes?.dynamicGroupStatus ?? "none") as DynamicStatus,
+          ruleset: normalizeRuleset(ruleset),
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        errors.push(`dynamic ${managed.key} status (#${managed.id}): ${message}`);
       }
     }
     const augmented = desired.map((d) =>
       d.type === "group" && d.dynamic !== undefined
-        ? { ...d, fields: { ...d.fields, dynamic: normalizeDynamic({ status: d.dynamic.status, ruleset: resolveRulesetRef(d.dynamic.ruleset) }) } }
+        ? { ...d, fields: { ...d.fields, dynamic: normalizeDynamic({ status: d.dynamic.status, ruleset: resolveRulesetRef(d.dynamic.ruleset, configDir, d.key) }) } }
         : d,
     );
     return { desired: augmented, errors };
