@@ -112,17 +112,28 @@ default-exports a function receiving the DSL:
 ```ts
 export default (ct) => {
   ct.campus({ key: "mainz", name: "Mainz", shorty: "MZ" });
-  ct.group({ key: "mainz_area", name: "Mainz · Bereiche", groupTypeId: 2 });
+  // Reference master data BY NAME, not by hardcoded id: `groupType: "…"` resolves to the
+  // per-host group-type id at plan time, so this config is portable across instances (#20).
+  ct.group({ key: "mainz_area", name: "Mainz · Bereiche", groupType: "ministry_team" });
   // Hierarchy is opt-in and multi-parent: `parents` are managed group keys, each declared
   // in this config. Omit it to leave a group's hierarchy unmanaged; edges to unmanaged
   // groups stay invisible. (`parent:` is unrelated — an ordering hint only, not hierarchy.)
-  ct.group({ key: "mainz_kids_lead", name: "Mainz · Kids Leitung", groupTypeId: 2, parents: ["mainz_area"] });
-  // Assign a group to a campus by its numeric id (CT stores it at `information.campusId`).
-  // `campusId: null` clears the assignment. A *logical* `campus: "mainz"` reference — resolving a
-  // same-run campus by key — is deferred to #20; use the existing campus's numeric id for now.
-  ct.group({ key: "mainz_kids", name: "Mainz · Kids", groupTypeId: 2, campusId: 3, parents: ["mainz_kids_lead"] });
+  ct.group({ key: "mainz_kids_lead", name: "Mainz · Kids Leitung", groupType: "ministry_team", parents: ["mainz_area"] });
+  // Assign a group to a campus BY KEY: `campus: "mainz"` links to the campus above even though
+  // it is created in the same apply (its id is filled in at apply time). The numeric escape
+  // hatch still works — `campusId: 3` (or `campusId: null` to clear) targets an existing id.
+  ct.group({ key: "mainz_kids", name: "Mainz · Kids", groupType: "ministry_team", campus: "mainz", parents: ["mainz_kids_lead"] });
 };
 ```
+
+**Portable references (#20):** logical fields (`campus`/`groupType`/`status` on a
+group, `groupType` on a permission) and the inline `ref.*` helper compile to id-free
+sentinels a per-host resolver maps to real ChurchTools ids at plan time — sourced from
+resources this tool manages, then live master-data catalogs matched by name. So one
+config file plans and applies unchanged against different instances (ids differ per
+host). An unresolvable name fails the plan with a clear error naming the reference and
+where it was used. Raw numeric ids remain a valid escape hatch everywhere; see
+[`examples/portable.config.ts`](examples/portable.config.ts) for a zero-numeric-id config.
 
 `campusId` is a managed group field: `ct plan` shows a campus assign/move/clear
 as a normal field update, and `ct adopt group <id>` captures it. Which group
@@ -176,7 +187,7 @@ runnable example.
 ```ts
 ct.groupTypeRole({
   key: "leiter_tpl",
-  id: 1, // the domainId — the group type's own id for group_type_role
+  groupType: "kids", // domain BY NAME — resolved to the group-type domainId per host (#20)
   grants: [
     "churchgroup:view",                                          // unscoped
     { right: "churchgroup:view group", scope: ["kids_area"] },   // scoped to a managed group

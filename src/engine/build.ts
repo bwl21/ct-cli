@@ -12,6 +12,8 @@ import type { DesiredResource, Plan } from "./types.js";
 import { RESOURCES } from "../resources/registry.js";
 import { computePlan } from "./plan.js";
 import { foldSynthetic } from "./synthetic.js";
+import { Resolver } from "../resolve/resolver.js";
+import { collectPendingRefKeys } from "../resolve/refs.js";
 import { mapConcurrent } from "../util/concurrency.js";
 import { warn } from "../ui.js";
 
@@ -85,6 +87,13 @@ export async function fetchActual(
 export interface BuildOptions {
   /** Directory of the config file — `{ ref }` ruleset paths resolve relative to it (not the cwd). */
   configDir?: string;
+  /**
+   * Shared per-host reference resolver (#20). The command layer constructs ONE instance and passes
+   * it to both `buildPlan` and `buildPermissionPlan` (they run concurrently) so each master-data
+   * catalog is fetched at most once per run. Omitted → a private resolver is built from this call's
+   * client/state/desired (fine for tests and single-surface use).
+   */
+  resolver?: Resolver;
 }
 
 export async function buildPlan(
@@ -102,6 +111,30 @@ export async function buildPlan(
   // Synthetic sub-resource fields (parents, dynamic, …) fold into the diff on both sides.
   const folded = await foldSynthetic({ client, state, desired, actual, configDir: opts.configDir });
   fetchErrors.push(...folded.errors);
-  const plan = computePlan(folded.desired, state, actual, { unresolved, fetchFailed });
+
+  // Resolution pass (#20): rewrite Ref-valued fields (and the dynamic ruleset, walked deeply) to
+  // numbers / pending markers AFTER folding, BEFORE computePlan — so the diff stays number↔number.
+  // Unknown/ambiguous refs THROW here (a config error, not a degrade-and-continue fetch error).
+  const resolver = opts.resolver ?? new Resolver({ client, state, desired });
+  const resolved = await Promise.all(
+    folded.desired.map(async (d) => {
+      const fields = await resolver.resolveValue(d.fields, `${d.type} "${d.key}"`);
+      return fields === d.fields ? d : { ...d, fields: fields as Record<string, unknown> };
+    }),
+  );
+
+  // A pending ref names a resource created in this same run, but tier ordering alone doesn't put
+  // the target first when both share a tier (e.g. a group's ruleset ref.group()-ing another group:
+  // declaration order would apply the referencer first and the pending id could never resolve).
+  // Inject the dependency edge so orderKeys sequences the target before the referencer.
+  const desiredKeys = new Set(resolved.map((d) => d.key));
+  const ordered = resolved.map((d) => {
+    const targets = [
+      ...new Set(collectPendingRefKeys(d.fields).filter((k) => k !== d.key && desiredKeys.has(k))),
+    ].filter((k) => !d.dependsOn.includes(k));
+    return targets.length === 0 ? d : { ...d, dependsOn: [...d.dependsOn, ...targets] };
+  });
+
+  const plan = computePlan(ordered, state, actual, { unresolved, fetchFailed });
   return { plan, actual, fetchErrors };
 }

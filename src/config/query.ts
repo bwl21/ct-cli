@@ -11,6 +11,11 @@
  * are the observed common case (grouping/returning by `person.id`); override
  * via `opts` for a query keyed on a different primary entity.
  */
+// Re-exported so a ruleset built with this DSL can drop a logical reference straight into a `var`
+// value: `q.eq("ctgroup.campusId", ref.campus("mainz"))`. The Ref is an inert sentinel the per-host
+// resolver turns into a numeric id at plan time (#20) — the numeric escape hatch still works too.
+export { ref } from "../resolve/refs.js";
+
 export interface QueryNode {
   [op: string]: unknown;
 }

@@ -78,9 +78,27 @@ describe("config context", () => {
     expect(r2[0]?.fields).toEqual({ name: "Team", campusId: null });
   });
 
-  it("rejects a logical `campus` reference (deferred to #20) and a non-numeric campusId", () => {
+  it("sugars a logical `campus`/`groupType`/`status` into a Ref-valued id field (#20)", () => {
+    const { ct, resources } = createContext();
+    ct.group({ key: "g", name: "G", campus: "mainz", groupType: "ministry_team", status: "active" });
+    expect(resources[0]?.fields).toEqual({
+      name: "G",
+      campusId: { __ctRef: true, kind: "campus", key: "mainz" },
+      groupTypeId: { __ctRef: true, kind: "group-type", key: "ministry_team" },
+      groupStatusId: { __ctRef: true, kind: "group-status", key: "active" },
+    });
+  });
+
+  it("rejects declaring both the logical and the numeric id form", () => {
     const { ct } = createContext();
-    expect(() => ct.group({ key: "g", name: "G", campus: "mainz" })).toThrow(/not supported yet/);
+    expect(() => ct.group({ key: "g", name: "G", campus: "mainz", campusId: 4 })).toThrow(
+      /either "campus".*or "campusId".*not both/,
+    );
+  });
+
+  it("rejects a non-string logical reference and a non-numeric/non-ref id field", () => {
+    const { ct } = createContext();
+    expect(() => ct.group({ key: "g", name: "G", campus: 4 as never })).toThrow(/non-empty string key/);
     expect(() => ct.group({ key: "h", name: "H", campusId: "4" as never })).toThrow(/must be a number/);
   });
 
@@ -235,7 +253,7 @@ describe("permission declarations", () => {
   it("rejects a non-numeric id and an empty right name", async () => {
     await expect(
       evaluateConfig((ct: ConfigContext) => ct.groupRole({ key: "x", id: "nope", grants: [] } as never)),
-    ).rejects.toThrow(/id.*number/i);
+    ).rejects.toThrow(/numeric "id"/i);
     await expect(
       evaluateConfig((ct: ConfigContext) => ct.groupRole({ key: "x", id: 1, grants: [""] })),
     ).rejects.toThrow(/grant/i);
@@ -244,7 +262,7 @@ describe("permission declarations", () => {
   it("rejects a non-finite id (NaN)", async () => {
     await expect(
       evaluateConfig((ct: ConfigContext) => ct.groupRole({ key: "x", id: NaN, grants: [] })),
-    ).rejects.toThrow(/id.*number/i);
+    ).rejects.toThrow(/numeric "id"/i);
   });
 
   it("rejects two declarations targeting the same (domainType, domainId)", async () => {
@@ -262,5 +280,36 @@ describe("permission declarations", () => {
       ct.groupRole({ key: "b", id: 8, grants: ["churchgroup:view group"] });
     });
     expect(permissions).toHaveLength(2);
+  });
+
+  it("sugars a logical `groupType` into a Ref-valued domainId (#20)", async () => {
+    const { permissions } = await evaluateConfig((ct: ConfigContext) =>
+      ct.groupTypeRole({ key: "tpl", groupType: "ministry_team", grants: ["churchgroup:view group"] }),
+    );
+    expect(permissions[0]?.domainId).toEqual({ __ctRef: true, kind: "group-type", key: "ministry_team" });
+  });
+
+  it("sugars group_role `group` + `role` into a compound Ref (gated at plan time, #25)", async () => {
+    const { permissions } = await evaluateConfig((ct: ConfigContext) =>
+      ct.groupRole({ key: "p", group: "kids", role: "Leiter", grants: ["churchgroup:view group"] }),
+    );
+    expect(permissions[0]?.domainId).toEqual({ __ctRef: true, kind: "group-role", group: "kids", role: "Leiter" });
+  });
+
+  it("rejects declaring both a numeric id and a logical domain form", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) =>
+        ct.groupTypeRole({ key: "tpl", id: 8, groupType: "mt", grants: ["churchgroup:view group"] }),
+      ),
+    ).rejects.toThrow(/either "id".*or "groupType".*not both/);
+  });
+
+  it("dedups two logical declarations targeting the same group-type ref", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) => {
+        ct.groupTypeRole({ key: "a", groupType: "mt", grants: ["churchgroup:view group"] });
+        ct.groupTypeRole({ key: "b", groupType: "mt", grants: ["churchdb:view group members"] });
+      }),
+    ).rejects.toThrow(/Duplicate permission target.*group-type:mt/s);
   });
 });

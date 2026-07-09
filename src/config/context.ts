@@ -14,10 +14,14 @@
 import type { DesiredResource, DynamicSpec, DynamicStatus } from "../engine/types.js";
 import type { DomainType } from "../permissions/grants.js";
 import type { DesiredPermission, Grant } from "../permissions/types.js";
+import { isRef, ref, refKey, type Ref } from "../resolve/refs.js";
 // Re-exported so a config file can pull the query DSL from the same module as
 // `ConfigContext`: `import { q, churchQuery } from "../../src/config/context.js"`.
 export { q, churchQuery } from "./query.js";
 export type { QueryNode } from "./query.js";
+// Re-exported so a config can pull the logical-reference helper from the same module: it turns a
+// name/key into an inert `Ref` sentinel the per-host resolver later maps to a numeric id (#20).
+export { ref } from "../resolve/refs.js";
 
 const DYNAMIC_STATUSES = ["active", "inactive", "manual", "none"] as const;
 
@@ -43,8 +47,64 @@ export interface ResourceInput {
 
 export interface PermissionInput {
   key: string;
-  id: number;
+  /** Numeric domainId (the escape hatch). Mutually exclusive with the logical forms below. */
+  id?: number;
+  /** `group_type_role`: the group type by name/key — sugars into a Ref-valued domainId (#20). */
+  groupType?: string;
+  /** `group_role`: the group by key (paired with `role`) — GATED, see `ref.groupRole`/#25. */
+  group?: string;
+  /** `group_role`: the role name (paired with `group`) — GATED, see `ref.groupRole`/#25. */
+  role?: string;
   grants: Grant[];
+}
+
+/** Logical id-field sugar for declarations: a named string field → a Ref-valued numeric id field. */
+const ID_SUGAR: Record<string, { idField: string; make: (key: string) => Ref }> = {
+  campus: { idField: "campusId", make: ref.campus },
+  groupType: { idField: "groupTypeId", make: ref.groupType },
+  status: { idField: "groupStatusId", make: ref.status },
+};
+
+/** The numeric id fields a declaration may carry — each accepts a number, `null`, or a {@link Ref}. */
+const ID_FIELDS = ["campusId", "groupTypeId", "groupStatusId"] as const;
+
+/** Canonical string for a domainId (number or Ref) — keys the eval-time duplicate-target guard. */
+function domainKeyPart(domainId: number | Ref): string {
+  return typeof domainId === "number" ? String(domainId) : refKey(domainId);
+}
+
+/**
+ * Resolve a permission declaration's domain to a numeric id (escape hatch) or a {@link Ref} (#20):
+ *  - `group_type_role`: numeric `id`, or logical `groupType: "<key>"` → `ref.groupType(...)`.
+ *  - `group_role`: numeric `id`, or logical `group` + `role` → `ref.groupRole(...)` (GATED — the
+ *    resolver rejects it at plan time with a "pass a numeric id" error; see #25).
+ * Declaring both a numeric `id` and a logical form is a conflict.
+ */
+function resolveDomainInput(domainType: DomainType, input: PermissionInput): number | Ref {
+  const hasId = input.id !== undefined;
+  const bothError = (logical: string): Error =>
+    new Error(`${domainType} "${input.key}": declare either "id" (numeric) or ${logical} (logical), not both.`);
+  if (domainType === "group_type_role") {
+    if (input.groupType !== undefined) {
+      if (hasId) throw bothError('"groupType"');
+      if (typeof input.groupType !== "string" || !input.groupType)
+        throw new Error(`${domainType} "${input.key}": "groupType" must be a non-empty group-type key.`);
+      return ref.groupType(input.groupType);
+    }
+  } else {
+    // group_role
+    if (input.group !== undefined || input.role !== undefined) {
+      if (hasId) throw bothError('"group" + "role"');
+      if (typeof input.group !== "string" || !input.group || typeof input.role !== "string" || !input.role)
+        throw new Error(`${domainType} "${input.key}": "group" and "role" must both be non-empty strings.`);
+      return ref.groupRole(input.group, input.role);
+    }
+  }
+  if (typeof input.id !== "number" || !Number.isFinite(input.id)) {
+    const logical = domainType === "group_type_role" ? '"groupType"' : '"group" + "role"';
+    throw new Error(`${domainType} "${input.key}": provide a numeric "id" (the domainId) or the logical ${logical} form.`);
+  }
+  return input.id;
 }
 
 export interface ConfigContext {
@@ -75,18 +135,34 @@ function toDesired(type: string, input: ResourceInput): DesiredResource {
   if (parents !== undefined && (!Array.isArray(parents) || parents.some((p) => typeof p !== "string"))) {
     throw new Error(`${type} "${key}": "parents" must be an array of string group keys.`);
   }
-  // Campus assignment is a numeric escape hatch only (mirrors `groupTypeId`): `campusId: <id>`.
-  // A logical `campus: "mainz"` reference is #20's resolver, not built yet — reject it up front
-  // rather than let an un-diffable `campus` field slip into the bag and drift against the
-  // managed-only actual forever. Also pin `campusId`'s type so a stray string fails at eval time.
-  if (fields.campus !== undefined) {
-    throw new Error(
-      `${type} "${key}": logical campus references ("campus") are not supported yet — ` +
-        `use a numeric "campusId" (the existing CT campus id). Logical references land with #20.`,
-    );
+  // Logical id-field sugar (#20): a named string field (`campus`/`groupType`/`status`) sugars into
+  // a Ref-valued numeric id field (`campusId`/`groupTypeId`/`groupStatusId`). The per-host resolver
+  // turns the Ref into a real id at plan time. Declaring BOTH forms (`campus` + `campusId`) is a
+  // conflict — reject it rather than silently pick one. Numeric ids still pass straight through.
+  for (const [logical, { idField, make }] of Object.entries(ID_SUGAR)) {
+    if (fields[logical] === undefined) continue;
+    if (fields[idField] !== undefined) {
+      throw new Error(
+        `${type} "${key}": declare either "${logical}" (logical reference) or "${idField}" (numeric id), not both.`,
+      );
+    }
+    const value = fields[logical];
+    if (typeof value !== "string" || value.length === 0) {
+      throw new Error(`${type} "${key}": "${logical}" must be a non-empty string key (e.g. "${logical}: \\"mainz\\"").`);
+    }
+    fields[idField] = make(value);
+    delete fields[logical];
   }
-  if (fields.campusId !== undefined && fields.campusId !== null && typeof fields.campusId !== "number") {
-    throw new Error(`${type} "${key}": "campusId" must be a number (the CT campus id) or null to clear.`);
+  // After sugar, each id field must be a number (escape hatch), null (clear), or a Ref (logical).
+  // A stray string (e.g. `campusId: "4"`) is rejected so a mistyped id fails at eval, not silently.
+  for (const idField of ID_FIELDS) {
+    const value = fields[idField];
+    if (value === undefined || value === null || typeof value === "number" || isRef(value)) continue;
+    throw new Error(
+      `${type} "${key}": "${idField}" must be a number (the CT id), null to clear, or a logical ` +
+        `reference (use the "${Object.entries(ID_SUGAR).find(([, s]) => s.idField === idField)?.[0] ?? "logical"}" ` +
+        `field, or ref.*).`,
+    );
   }
   // `dynamic` is a synthetic field for auto-groups, handled separately from the plain diffed
   // field bag. Opt-in: `undefined` means "not a dynamic group" (mirrors `parents`).
@@ -176,8 +252,7 @@ export function createContext(): {
     (input: PermissionInput): void => {
       if (typeof input.key !== "string" || !input.key)
         throw new Error(`${domainType} declaration missing a string "key".`);
-      if (typeof input.id !== "number" || !Number.isFinite(input.id))
-        throw new Error(`${domainType} "${input.key}": "id" must be a number (the domainId).`);
+      const domainId = resolveDomainInput(domainType, input);
       if (!Array.isArray(input.grants)) throw new Error(`${domainType} "${input.key}": "grants" must be an array.`);
       for (const g of input.grants) {
         const right = typeof g === "string" ? g : g?.right;
@@ -188,15 +263,19 @@ export function createContext(): {
       }
       if (seen.has(input.key)) throw new Error(`Duplicate logical key "${input.key}" in config.`);
       seen.add(input.key);
-      const domainKey = `${domainType}:${input.id}`;
+      // Duplicate-target guard, keyed by the canonical domain string (numeric id or Ref key). This
+      // catches obvious eval-time collisions early; the authoritative check runs post-resolution in
+      // buildPermissionPlan (two different refs, or a ref and a number, can resolve to the same id).
+      const domainKey = `${domainType}:${domainKeyPart(domainId)}`;
       const existingKey = seenDomains.get(domainKey);
       if (existingKey) {
+        const label = typeof domainId === "number" ? `#${domainId}` : refKey(domainId);
         throw new Error(
-          `Duplicate permission target: ${domainType} #${input.id} is declared by both "${existingKey}" and "${input.key}". Merge their grants into one declaration.`,
+          `Duplicate permission target: ${domainType} ${label} is declared by both "${existingKey}" and "${input.key}". Merge their grants into one declaration.`,
         );
       }
       seenDomains.set(domainKey, input.key);
-      permissions.push({ key: input.key, domainType, domainId: input.id, grants: input.grants });
+      permissions.push({ key: input.key, domainType, domainId, grants: input.grants });
     };
   // Every type emitted here MUST have an apply tier in engine/graph.ts TYPE_TIER
   // (locked by tests/context.test.ts), else computePlan rejects it at plan time.

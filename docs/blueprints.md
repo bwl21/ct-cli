@@ -36,18 +36,31 @@ language, no generated files, just a function called twice.
 
 ### Assigning the blueprint's groups to their campus
 
-A group is linked to a campus with a numeric `campusId: <existing campus id>`
-(CT stores it at `information.campusId`; `campusId: null` clears it). `ct plan`
-diffs a campus assign/move/clear as a normal field update — see
-[`docs/group-field-decisions.md`](group-field-decisions.md).
+Link a group to a campus **by key** — `campus: "mainz"` (or, when the campus key
+is a loop variable, `campus`) — and the per-host resolver fills in the id (#20).
+When the blueprint *creates* the campus in the same apply, its id is unknown at
+eval time, so the resolver marks the link **pending** and writes the
+freshly-created id at apply time (tier ordering creates the campus first). `ct
+plan` renders it as `campusId = <campus:mainz (created this apply)>`.
 
-The catch for a per-campus blueprint: the blueprint usually *creates* the campus
-in the same apply, and a numeric id doesn't exist until after that create. So
-linking a group to a **same-run** campus by key (`campus: "mainz"`) needs the
-logical-reference resolver and is deferred to
-[#20](https://github.com/eqrm/ct-cli/issues/20). Until then, assign to an
-**existing** campus by hardcoding its numeric id, or apply the campuses first and
-fill in the ids on a second pass.
+The same portability applies to the group type: `groupType: "ministry_team"`
+resolves against the live catalog per host, no hardcoded `groupTypeId`.
+
+```ts
+function kidsArea(ct: ConfigContext, campus: string): void {
+  const lead = `${campus}_kids_lead`;
+  // group type BY NAME, campus BY KEY — both resolved per host (#20).
+  ct.group({ key: lead, name: `${campus} · Kids Leitung`, groupType: "ministry_team", campus, parents: [] });
+}
+```
+
+The **numeric escape hatch** stays available: pass `campusId: <existing id>`
+(CT stores it at `information.campusId`; `campusId: null` clears it) or
+`groupTypeId: 2` to target one instance's id directly. `ct plan` diffs a campus
+assign/move/clear as a normal field update — see
+[`docs/group-field-decisions.md`](group-field-decisions.md). Declaring both the
+logical and the numeric form for one field (`campus` + `campusId`) is a conflict
+and throws at eval time.
 
 ## The loop-over-campuses pattern and `${campus}_`-prefixed keys
 

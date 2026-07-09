@@ -9,8 +9,8 @@ workflow used for structural resources (issue #13).
 ```ts
 export default (ct) => {
   ct.groupTypeRole({
-    key: "leiter_tpl",       // logical key (unique across the whole config)
-    id: 8,                   // the domainId — see "domainId semantics" below
+    key: "leiter_tpl",             // logical key (unique across the whole config)
+    groupType: "ministry_team",    // domain BY NAME — resolved to the domainId per host (#20)
     grants: [
       "churchgroup:view group",                                    // unscoped
       { right: "churchgroup:view group", scope: ["kids_area"] },   // scoped
@@ -19,20 +19,27 @@ export default (ct) => {
 
   ct.groupRole({
     key: "kids_lead_grant",
-    id: 2882,                // the internal (group, role) domainId — see below
+    id: 2882,                // the internal (group, role) domainId — see below (group_role has no ref yet)
     // "edit group memberships of group" is a scoped right, so it takes a `scope: [...]`.
     grants: [{ right: "churchgroup:edit group memberships of group", scope: ["kids_area"] }],
   });
 };
 ```
 
-Both take the same shape, `{ key, id, grants }`:
+Both take `{ key, <domain>, grants }`, where `<domain>` is either a logical
+reference or a numeric `id`:
 
 - **`key`** — the logical key, unique across the whole config (shared
   namespace with every other resource type).
-- **`id`** — the explicit **domainId** of the permission domain object. This
-  tool does not look it up for you; you supply it directly (see
-  "domainId semantics" below).
+- **domain** — the permission domain object. Declare it **by reference** (the
+  portable form, #20) or **by numeric `id`** (the escape hatch):
+  - `ct.groupTypeRole` — `groupType: "<name>"` resolves against the live
+    group-type catalog per host, or `id: <domainId>` targets one directly.
+  - `ct.groupRole` — **`id: <domainId>` only for now.** The logical
+    `group: "<key>", role: "<name>"` form is accepted by the DSL but the
+    resolver rejects it at plan time (the (group, role) pairing id has no
+    confirmed API source — see "domainId semantics" and #25). Declaring both a
+    logical form and a numeric `id` is a conflict and throws.
 - **`grants`** — an array of `Grant`s, each either:
   - a bare string, `"module:right"` — an **unscoped** grant, or
   - an object `{ right: "module:right", scope: string[] }` — a **scoped**
@@ -67,16 +74,25 @@ evaluation only checks a grant's *shape*: `module:right` string or
 The two DSL functions manage two different ChurchTools "domain types," and
 `id` means something different for each:
 
-- **`group_type_role`** (`ct.groupTypeRole`) — `id` is the **group type's own
-  id** (the same id you'd pass as `groupTypeId` on `ct.group`). It scopes the
-  grant to "every role holder of this group type."
-- **`group_role`** (`ct.groupRole`) — `id` is the **internal
+- **`group_type_role`** (`ct.groupTypeRole`) — the domain is the **group type's
+  own id** (the same id you'd pass as `groupTypeId` on `ct.group`). It scopes the
+  grant to "every role holder of this group type." Declare it portably as
+  `groupType: "<name>"` (resolved per host, #20) or directly as `id: <domainId>`.
+- **`group_role`** (`ct.groupRole`) — the domain is the **internal
   (group, role) pairing's own id** — a ChurchTools-internal id for one
   specific group's specific role, *not* the group's id and *not* the role's
-  id. There is no lookup helper for this in the CLI; find it via the
-  ChurchTools permission editor / an existing `GET /permissions/group_role`
-  response for a group+role you already have, and hardcode it in the config
-  like any other domainId.
+  id. **This is `id: <domainId>` only.** The logical `group` + `role` form is
+  reserved (and accepted by the DSL) but **not yet resolvable**: the pairing id
+  has no confirmed API source, so the resolver throws a clear "pass a numeric id
+  (see #25)" error at plan time. Find the id via the ChurchTools permission
+  editor / an existing `GET /permissions/group_role` response for a group+role
+  you already have, and hardcode it like any other domainId.
+
+Resolution runs in `buildPermissionPlan` (`src/permissions/plan.ts`): a numeric
+`id` passes straight through; a `groupType` reference resolves against the live
+catalog. After resolution, two declarations that resolve to the **same**
+`(domainType, domainId)` are rejected (they would otherwise diff against each
+other's grants forever) — even if one used a name and the other a raw id.
 
 ## Scope resolution
 

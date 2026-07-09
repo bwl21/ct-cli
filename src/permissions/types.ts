@@ -5,12 +5,18 @@
  * are collected as a separate list from `DesiredResource[]`.
  */
 import type { DomainType } from "./grants.js";
+import type { Ref } from "../resolve/refs.js";
 
 export type Grant = string | { right: string; scope: string[] };
 
 export interface DesiredPermission {
   key: string;
   domainType: DomainType;
-  domainId: number;
+  /**
+   * The permission domain. A raw number (escape hatch), or a logical {@link Ref} (#20) the per-host
+   * resolver turns into a numeric id at plan time (see `buildPermissionPlan`). Only ever a number
+   * downstream of resolution.
+   */
+  domainId: number | Ref;
   grants: Grant[];
 }

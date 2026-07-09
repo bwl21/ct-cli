@@ -106,9 +106,13 @@ sibling of `query`, not an argument to `churchQuery(...)`.
 | `q.oneof(varName, values)`     | `{ oneof: [{ var: varName }, values] }`   |
 | `q.isnull(varName)`            | `{ isnull: [{ var: varName }] }`          |
 
-`var` values are **raw ChurchTools ids** (e.g. `ctgroup.campusId`) — resolve
-any key → id lookup at config-build time, before calling `q.eq`/`q.oneof`,
-and pass the number.
+`var` values may be **logical references** or **raw ids**. Prefer a reference so
+the ruleset is portable across hosts (#20): `q.eq("ctgroup.campusId",
+ref.campus("mainz"))` — the per-host resolver fills in that instance's campus id
+at plan time (and, for a campus created in the same run, at apply time). `ref` is
+re-exported from `src/config/context.js` alongside `q`/`churchQuery`. The numeric
+escape hatch still works — pass a plain number to target one instance's id
+directly. References resolve deep inside the ruleset, so any `var` value works.
 
 `churchQuery(filter, opts?)` wraps a JSONLogic filter tree in the same
 envelope shape ChurchTools itself returns:
@@ -131,7 +135,7 @@ covers `primaryEntityAlias` / `responseFields` / `groupBy`, for a query keyed
 on something other than `person.id`.
 
 ```ts
-import { q, churchQuery } from "../src/config/context.js";
+import { q, churchQuery, ref } from "../src/config/context.js";
 
 const ruleset = {
   description: "Alle aktiven Personen in Mainz",
@@ -139,7 +143,8 @@ const ruleset = {
   importance: 0,
   personIdFieldName: "person.id",
   process: {},
-  query: churchQuery(q.and(q.eq("ctgroup.campusId", mainzCampusId), q.eq("person.isArchived", false))),
+  // campus BY NAME — resolved to the per-host id at plan time (numeric ids still work too).
+  query: churchQuery(q.and(q.eq("ctgroup.campusId", ref.campus("mainz")), q.eq("person.isArchived", false))),
 };
 ```
 

@@ -4,6 +4,7 @@ import { resolveConfig } from "../config.js";
 import { loadState, resolveStatePath } from "../state/state.js";
 import { loadConfig, resolveConfigPath } from "../config/load.js";
 import { buildPlan } from "../engine/build.js";
+import { Resolver } from "../resolve/resolver.js";
 import { renderPlan } from "../engine/render.js";
 import { buildPermissionPlan } from "../permissions/plan.js";
 import { renderPermissionPlan } from "../permissions/render.js";
@@ -29,11 +30,14 @@ export function planCommand(): Command {
       const state = await loadState(resolveStatePath(opts.state), config.host);
 
       const { client } = await authedSession();
+      // One shared resolver (#20): buildPlan and buildPermissionPlan run concurrently, so a single
+      // instance means each master-data catalog is fetched at most once (cache is Promise-keyed).
+      const resolver = new Resolver({ client, state, desired, host: config.host });
       // Independent fetches run concurrently (see commands/apply.ts).
       const [{ plan, fetchErrors }, { items: permItems, fetchErrors: permFetchErrors }] =
         await Promise.all([
-          buildPlan(client, state, desired, { configDir }),
-          buildPermissionPlan(client, state, permissions, desired),
+          buildPlan(client, state, desired, { configDir, resolver }),
+          buildPermissionPlan(client, state, permissions, desired, resolver),
         ]);
       if (opts.json) {
         out({ plan, permissions: permItems });

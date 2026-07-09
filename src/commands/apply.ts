@@ -5,6 +5,7 @@ import { resolveConfig } from "../config.js";
 import { loadState, resolveStatePath, saveState } from "../state/state.js";
 import { loadConfig, resolveConfigPath } from "../config/load.js";
 import { buildPlan } from "../engine/build.js";
+import { Resolver } from "../resolve/resolver.js";
 import { executePlan } from "../engine/execute.js";
 import { runPostApplyHooks } from "../engine/synthetic.js";
 import { writeBackup } from "../engine/backup.js";
@@ -53,12 +54,14 @@ export function applyCommand(): Command {
       const state = await loadState(statePath, config.host);
 
       const { client } = await authedSession();
+      // One shared resolver (#20) across both concurrent plans — see commands/plan.ts.
+      const resolver = new Resolver({ client, state, desired, host: config.host });
       // Independent fetches: the resource plan and the permission plan (whose instance-wide
       // /permissions/<domainType> reads are slow) run concurrently rather than back-to-back.
       const [{ plan, actual, fetchErrors }, { items: permItems, fetchErrors: permFetchErrors }] =
         await Promise.all([
-          buildPlan(client, state, desired, { configDir }),
-          buildPermissionPlan(client, state, permissions, desired),
+          buildPlan(client, state, desired, { configDir, resolver }),
+          buildPermissionPlan(client, state, permissions, desired, resolver),
         ]);
 
       const allFetchErrors = [...fetchErrors, ...permFetchErrors];
