@@ -1,0 +1,22 @@
+{
+  "branches": ["main"],
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    [
+      "@semantic-release/github",
+      {
+        "successCommentCondition": false,
+        "failCommentCondition": false,
+        "releasedLabels": false,
+        "assets": [
+          { "path": "release/ct-cli.tgz", "label": "ct-cli.tgz — npm-installable tarball" },
+          { "path": "release/ct-darwin-arm64", "label": "ct-darwin-arm64 — macOS (Apple Silicon)" },
+          { "path": "release/ct-darwin-x64", "label": "ct-darwin-x64 — macOS (Intel)" },
+          { "path": "release/ct-linux-x64", "label": "ct-linux-x64 — Linux x64" },
+          { "path": "release/INSTALL.md", "label": "INSTALL.md" }
+        ]
+      }
+    ]
+  ]
+}

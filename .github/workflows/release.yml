@@ -1,19 +1,32 @@
 name: Release
 
-# Triggered by pushing a version tag (e.g. `v0.1.0`). Runs the same
-# lint/typecheck/test/build gate as CI, then packages the built CLI as an
-# npm-pack tarball and publishes it as a GitHub Release with
-# auto-generated release notes.
+# Trunk-based, per-merge releases: every push to `main` runs the CI gate, compiles
+# standalone binaries, smoke-tests each one on its native OS/arch, and — only if
+# everything above is green — hands off to semantic-release. semantic-release reads
+# the conventional-commit history since the last release and, if there is a
+# releasable `feat:`/`fix:`/breaking change, creates the version tag, the GitHub
+# Release (with auto-generated notes as the changelog), and attaches the tarball +
+# binaries built by the `build` job. No manual tag push (see #9; builds on the
+# tag-triggered flow from #44, which this replaces).
+#
+# semantic-release publishes via the GitHub API using the default GITHUB_TOKEN, so
+# the tag/release it creates does NOT re-trigger this workflow (GitHub does not fire
+# `push` events for repo activity performed with the default token) — no loop risk.
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+  workflow_dispatch: {}
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  # CI gate + build the release assets every job below needs. Binaries are cross-
+  # compiled for all three targets from this single Linux runner — `bun build
+  # --compile` embeds a prebuilt runtime per target, so it doesn't need to run on
+  # the target OS to produce the binary (only to *execute* it, which is what the
+  # smoke-test jobs are for).
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,38 +42,125 @@ jobs:
       - run: npm test
       - run: npm run build
 
-      - name: Package release tarball
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Compile standalone binaries
         run: |
           mkdir -p release
+          bun build --compile --target=bun-darwin-arm64 ./src/index.ts --outfile release/ct-darwin-arm64
+          bun build --compile --target=bun-darwin-x64   ./src/index.ts --outfile release/ct-darwin-x64
+          bun build --compile --target=bun-linux-x64    ./src/index.ts --outfile release/ct-linux-x64
+          chmod +x release/ct-darwin-arm64 release/ct-darwin-x64 release/ct-linux-x64
+
+      - name: Package npm-pack tarball
+        run: |
           npm pack --pack-destination release
-          mv release/*.tgz "release/ct-cli-${GITHUB_REF_NAME}.tgz"
+          mv release/*.tgz release/ct-cli.tgz
 
       - name: Write install note
         run: |
-          cat > release/INSTALL.md <<EOF
-          # Installing ct ${GITHUB_REF_NAME}
+          cat > release/INSTALL.md <<'EOF'
+          # Installing ct
 
-          \`\`\`bash
-          npm install -g ./ct-cli-${GITHUB_REF_NAME}.tgz
-          \`\`\`
+          ## Standalone binary (no Node required)
 
-          Or directly from the release asset URL:
+          ```bash
+          # macOS, Apple Silicon
+          curl -L -o ct https://github.com/eqrm/ct-cli/releases/latest/download/ct-darwin-arm64
+          # macOS, Intel
+          curl -L -o ct https://github.com/eqrm/ct-cli/releases/latest/download/ct-darwin-x64
+          # Linux, x64
+          curl -L -o ct https://github.com/eqrm/ct-cli/releases/latest/download/ct-linux-x64
 
-          \`\`\`bash
-          npm install -g https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/ct-cli-${GITHUB_REF_NAME}.tgz
-          \`\`\`
-
-          Verify with:
-
-          \`\`\`bash
+          chmod +x ct
+          sudo mv ct /usr/local/bin/ct   # or anywhere on your PATH
           ct --help
-          \`\`\`
+          ```
+
+          ## npm tarball (requires Node >= 20)
+
+          ```bash
+          npm install -g https://github.com/eqrm/ct-cli/releases/latest/download/ct-cli.tgz
+          ct --help
+          ```
           EOF
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@v4
         with:
-          generate_release_notes: true
-          files: |
-            release/ct-cli-${{ github.ref_name }}.tgz
-            release/INSTALL.md
+          name: release-assets
+          path: release/
+          retention-days: 1
+          if-no-files-found: error
+
+  # Each compiled binary is smoke-tested on its own native OS/arch — cross-compiled
+  # output can look fine and still fail to *run* jiti's dynamic TS transpilation at
+  # runtime, which is the whole risk of `bun build --compile` here (see
+  # .github/scripts/smoke-test-binary.sh for exactly what this does and doesn't prove).
+  smoke-darwin-arm64:
+    needs: build
+    runs-on: macos-14 # Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release
+      - run: bash .github/scripts/smoke-test-binary.sh release/ct-darwin-arm64
+
+  smoke-darwin-x64:
+    needs: build
+    runs-on: macos-13 # Intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release
+      - run: bash .github/scripts/smoke-test-binary.sh release/ct-darwin-x64
+
+  smoke-linux-x64:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release
+      - run: bash .github/scripts/smoke-test-binary.sh release/ct-linux-x64
+
+  release:
+    needs: [smoke-darwin-arm64, smoke-darwin-x64, smoke-linux-x64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # semantic-release's commit-analyzer needs the full commit history since
+          # the last tag to compute the next version — a shallow checkout breaks it.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release
+
+      - run: chmod +x release/ct-darwin-arm64 release/ct-darwin-x64 release/ct-linux-x64
+
+      # Pinned via npx rather than added as devDependencies (see #9) — this repo
+      # doesn't otherwise need semantic-release, so keep it out of package.json.
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx --yes \
+            -p semantic-release@24 \
+            -p @semantic-release/commit-analyzer@13 \
+            -p @semantic-release/release-notes-generator@14 \
+            -p @semantic-release/github@11 \
+            semantic-release
