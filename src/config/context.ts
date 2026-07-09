@@ -258,8 +258,18 @@ export function createContext(): {
         const right = typeof g === "string" ? g : g?.right;
         if (typeof right !== "string" || !right.includes(":"))
           throw new Error(`${domainType} "${input.key}": each grant must be a "module:right" string or { right, scope }.`);
-        if (typeof g === "object" && !Array.isArray(g.scope))
-          throw new Error(`${domainType} "${input.key}": scoped grant needs "scope": string[].`);
+        if (typeof g === "object") {
+          if (!Array.isArray(g.scope))
+            throw new Error(`${domainType} "${input.key}": scoped grant needs "scope": (string | number)[].`);
+          // Each entry is a logical group key, or a raw numeric dataId (#49 escape hatch — for scope
+          // dimensions that aren't groups, e.g. security levels, which have no logical/managed form).
+          for (const s of g.scope) {
+            if (typeof s === "string" ? s.length === 0 : typeof s !== "number")
+              throw new Error(
+                `${domainType} "${input.key}": scope entries must be a non-empty string (logical group key) or a number (raw dataId), got ${JSON.stringify(s)}.`,
+              );
+          }
+        }
       }
       if (seen.has(input.key)) throw new Error(`Duplicate logical key "${input.key}" in config.`);
       seen.add(input.key);

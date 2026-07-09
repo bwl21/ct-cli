@@ -27,4 +27,24 @@ describe("resolveScope", () => {
   it("throws for a key that is neither in state nor declared", () => {
     expect(() => resolveScope(["nope"], state)).toThrow(/scope key "nope"/i);
   });
+
+  it("passes a raw numeric scope entry through directly, without a state lookup (escape hatch, #49)", () => {
+    expect(resolveScope([5, "kids_area"], state)).toEqual([
+      { key: "5", id: 5, numeric: true },
+      { key: "kids_area", id: 42 },
+    ]);
+  });
+
+  it("sorts numeric and resolved group entries together, ascending by id", () => {
+    expect(resolveScope(["kids_area", 3], state)).toEqual([
+      { key: "3", id: 3, numeric: true },
+      { key: "kids_area", id: 42 },
+    ]);
+  });
+
+  it("rejects a non-positive-integer numeric scope entry", () => {
+    expect(() => resolveScope([0], state)).toThrow(/numeric scope/i);
+    expect(() => resolveScope([-3], state)).toThrow(/numeric scope/i);
+    expect(() => resolveScope([1.5], state)).toThrow(/numeric scope/i);
+  });
 });

@@ -30,6 +30,11 @@ changes materially.
 - **authId** — numeric id sent in the `PermissionRequest` write body.
 - **scopeField** — the ChurchTools data-field a scoped right applies to (`datenfeld`), or `null`
   for an unscoped/global right. A non-null `scopeField` is a right that accepts a `dataId[]` scope.
+  Most scoped rights carry `scopeField: "cdb_gruppe"` (a group) — those are the only ones
+  declarable via a **logical group key** in the DSL's `scope: [...]`. Any other non-null
+  `scopeField` (`cc_securitylevel`, `cdb_comment_viewer`, `cdb_station`, …) names a dimension this
+  tool has no managed representation for, so it can only be declared via the **numeric scope
+  escape hatch** (`scope: [1, 2, 3]`, #49) — see `docs/permissions.md`.
 - **revocable** — whether the right supports `type: "revoke"` (`isRevocable` in the source).
 - **desc** — human description (`bezeichnung`).
 

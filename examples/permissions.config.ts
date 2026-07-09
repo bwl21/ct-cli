@@ -26,6 +26,10 @@ export default (ct: ConfigContext): void => {
       "churchgroup:view",
       // Scoped: applies only to the listed managed group(s). authId 1104
       // (`scopeField: "cdb_gruppe"` in the catalog — a scoped right).
+      // `scope` entries are logical group keys here; a right whose scopeField
+      // is NOT a group (e.g. "cc_securitylevel") instead takes a raw numeric
+      // dataId, e.g. `scope: [1, 2]` — see docs/permissions.md "Numeric scope
+      // escape hatch (#49)".
       { right: "churchgroup:view group", scope: ["kids_area"] },
     ],
   });
