@@ -31,6 +31,53 @@ describe("state.upsert", () => {
     expect(state.resources.mainz?.updatedAt).toBe(LATER);
   });
 
+  it("does not bump updatedAt when re-adopting identical fields (#52: quiet state)", () => {
+    const state = emptyState(HOST);
+    upsert(state, { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz", shorty: "MZ" } }, NOW);
+    // Re-upsert with the SAME fields (a fresh object, but structurally equal) at a LATER time.
+    const action = upsert(
+      state,
+      { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz", shorty: "MZ" } },
+      LATER,
+    );
+    expect(action).toBe("updated");
+    // updatedAt must NOT churn: nothing about the resource actually changed.
+    expect(state.resources.mainz?.updatedAt).toBe(NOW);
+    expect(state.resources.mainz?.adoptedAt).toBe(NOW);
+  });
+
+  it("bumps updatedAt only when the fields actually change", () => {
+    const state = emptyState(HOST);
+    upsert(state, { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz" } }, NOW);
+    upsert(state, { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz HQ" } }, LATER);
+    expect(state.resources.mainz?.updatedAt).toBe(LATER);
+    expect(state.resources.mainz?.adoptedAt).toBe(NOW);
+  });
+
+  it("ignores field key ORDER when deciding whether fields changed (order-independent)", () => {
+    const state = emptyState(HOST);
+    upsert(state, { type: "group", id: 5, key: "g", fields: { name: "G", groupTypeId: 2 } }, NOW);
+    upsert(state, { type: "group", id: 5, key: "g", fields: { groupTypeId: 2, name: "G" } }, LATER);
+    expect(state.resources.g?.updatedAt).toBe(NOW); // reordered, but structurally identical
+  });
+
+  it("re-adopting identical fields leaves the saved state file byte-identical", async () => {
+    const state = emptyState(HOST);
+    upsert(state, { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz", shorty: "MZ" } }, NOW);
+    const path = join(tmpdir(), `ct-cli-quiet-${process.pid}.json`);
+    await saveState(path, state);
+    const before = await import("node:fs/promises").then((fs) => fs.readFile(path, "utf8"));
+    upsert(
+      state,
+      { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz", shorty: "MZ" } },
+      LATER,
+    );
+    await saveState(path, state);
+    const after = await import("node:fs/promises").then((fs) => fs.readFile(path, "utf8"));
+    await rm(path, { force: true });
+    expect(after).toBe(before);
+  });
+
   it("handles id 0 without treating it as missing", () => {
     const state = emptyState(HOST);
     upsert(state, { type: "campus", id: 0, key: "mainz", fields: {} }, NOW);

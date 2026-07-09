@@ -182,11 +182,17 @@ export function upsert(state: State, input: UpsertInput, now: string): UpsertAct
     if (existing.key !== input.key) {
       delete state.resources[existing.key];
     }
+    // State is machine-only (#52): `updatedAt` bumps ONLY when the managed fields actually change, so
+    // an apply that writes an identical snapshot leaves the committed state file byte-for-byte
+    // unchanged (no churn). When unchanged, keep the EXISTING `fields` object (not the freshly-built
+    // input one) so serialization order is preserved too — a mere key-order difference must not churn
+    // the diff. `adoptedAt` is set once at first adoption and never touched again.
+    const unchanged = fieldsEqual(existing.fields, input.fields);
     state.resources[input.key] = {
       ...existing,
       key: input.key,
-      fields: input.fields,
-      updatedAt: now,
+      fields: unchanged ? existing.fields : input.fields,
+      updatedAt: unchanged ? existing.updatedAt : now,
     };
     return "updated";
   }
@@ -204,4 +210,24 @@ export function upsert(state: State, input: UpsertInput, now: string): UpsertAct
 
 function isNotFound(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { code?: string }).code === "ENOENT";
+}
+
+/**
+ * Structural, order-independent equality for two managed-field bags (#52). Kept local so state — a
+ * foundational module that imports no engine code — stays self-contained (mirrors the engine's
+ * `deepEqual`, but a key-order difference between two structurally-identical snapshots must not be
+ * seen as a change here either).
+ */
+function fieldsEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((v, i) => fieldsEqual(v, b[i]));
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const aKeys = Object.keys(ao);
+  if (aKeys.length !== Object.keys(bo).length) return false;
+  return aKeys.every((k) => Object.prototype.hasOwnProperty.call(bo, k) && fieldsEqual(ao[k], bo[k]));
 }
