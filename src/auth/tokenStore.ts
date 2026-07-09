@@ -64,7 +64,25 @@ async function keychainSet(value: string): Promise<void> {
   ]);
 }
 
+/**
+ * Memoized keychain blob for this process. A single run resolves the host
+ * (via `resolveConfig`) AND the token (via `authedSession`) — each of which
+ * reaches for the stored credentials — so without this cache the same entry is
+ * fetched up to 3× per command, spawning `security find-generic-password`
+ * (and prompting to unlock a locked Keychain) every time. `undefined` = not yet
+ * read; `null` = read and absent. Invalidated on any write (`resetKeychainCache`).
+ */
+let cachedKeychainBlob: string | null | undefined;
+
+/** Drop the memoized keychain read. Called after every store/clear; exported for tests. */
+export function resetKeychainCache(): void {
+  cachedKeychainBlob = undefined;
+}
+
 async function keychainGet(): Promise<string | null> {
+  if (cachedKeychainBlob !== undefined) {
+    return cachedKeychainBlob;
+  }
   try {
     const { stdout } = await run("security", [
       "find-generic-password",
@@ -74,10 +92,11 @@ async function keychainGet(): Promise<string | null> {
       KEYCHAIN_ACCOUNT,
       "-w",
     ]);
-    return stdout.trim() || null;
+    cachedKeychainBlob = stdout.trim() || null;
   } catch {
-    return null;
+    cachedKeychainBlob = null;
   }
+  return cachedKeychainBlob;
 }
 
 async function keychainDelete(account: string): Promise<void> {
@@ -96,6 +115,7 @@ export async function storeCredentials(creds: Credentials): Promise<string> {
     );
   }
   await keychainSet(JSON.stringify(creds));
+  resetKeychainCache(); // a fresh login must invalidate any read the process already cached
   return `macOS Keychain (service "${KEYCHAIN_SERVICE}", account "${KEYCHAIN_ACCOUNT}")`;
 }
 
@@ -128,4 +148,5 @@ export async function clearCredentials(): Promise<void> {
     // Also drop the pre-host bare-token entry so an upgrade doesn't leave a secret behind.
     await keychainDelete(LEGACY_KEYCHAIN_ACCOUNT);
   }
+  resetKeychainCache(); // a later read in the same process must not return the cleared secret
 }

@@ -7,9 +7,13 @@
 import type { CtClient } from "../api/ctClient.js";
 import type { State } from "../state/state.js";
 import { assertNotPeople } from "../engine/guard.js";
+import { mapConcurrent } from "../util/concurrency.js";
 import type { PermissionPlanItem } from "./plan.js";
 import type { GrantTuple } from "./grants.js";
 import { reresolveTuple } from "./scope.js";
+
+/** How many permission tuples to write at once. Tuples are independent rows, so a modest fan-out is safe. */
+const WRITE_CONCURRENCY = 6;
 
 function body(t: GrantTuple): Record<string, unknown> {
   if (t.pending) {
@@ -22,30 +26,79 @@ function body(t: GrantTuple): Record<string, unknown> {
   return b;
 }
 
+/** One tuple write, flattened out of the per-domain diff so all writes share one concurrency pool. */
+interface WriteOp {
+  method: "PUT" | "DELETE";
+  path: string;
+  tuple: GrantTuple;
+}
+
+export interface FailedWrite {
+  method: "PUT" | "DELETE";
+  path: string;
+  authId: number;
+  dataId: number[];
+  message: string;
+}
+
+export interface PermissionApplyResult {
+  granted: number;
+  deleted: number;
+  /** Tuples whose write threw, so the caller can report a clean resumable summary (#35 item 14). */
+  failed: FailedWrite[];
+}
+
 /**
  * Apply a permission plan. When `state` is provided, each scoped grant's dataId is RE-RESOLVED
  * against it just before the PUT — `state` here is the POST-execute state (executePlan has upserted
  * every created/recreated group), so grants are always written with fresh ids and a group created in
  * the same apply gets its real id (#29, #33.3). Without `state`, tuples are written as-is.
+ *
+ * Writes fan out at {@link WRITE_CONCURRENCY} (independent rows). Result counts are collected in the
+ * flattened op order — deterministic regardless of completion order — and a write that throws is
+ * captured in `failed` instead of aborting the batch, so the command can print a resumable summary.
  */
 export async function applyPermissionPlan(
   items: PermissionPlanItem[],
   client: Pick<CtClient, "request">,
   state?: State,
-): Promise<{ granted: number; deleted: number }> {
-  let granted = 0;
-  let deleted = 0;
+): Promise<PermissionApplyResult> {
+  const ops: WriteOp[] = [];
   for (const item of items) {
     const path = `/permissions/${item.domainType}/${item.domainId}`;
     assertNotPeople(path);
-    for (const t of item.diff.toPut) {
-      await client.request("PUT", path, body(state ? reresolveTuple(t, state) : t));
-      granted++;
+    for (const t of item.diff.toPut) ops.push({ method: "PUT", path, tuple: t });
+    for (const t of item.diff.toDelete) ops.push({ method: "DELETE", path, tuple: t });
+  }
+
+  const outcomes = await mapConcurrent(ops, WRITE_CONCURRENCY, async (op) => {
+    try {
+      // toPut tuples may be scoped/pending → re-resolve against post-execute state; toDelete tuples
+      // come from actuals (never pending), so pass them through. `body()` guards a stray pending row.
+      const b = op.method === "PUT" && state ? body(reresolveTuple(op.tuple, state)) : body(op.tuple);
+      await client.request(op.method, op.path, b);
+      return { ok: true as const, op };
+    } catch (err) {
+      return { ok: false as const, op, message: err instanceof Error ? err.message : String(err) };
     }
-    for (const t of item.diff.toDelete) {
-      await client.request("DELETE", path, body(t));
-      deleted++;
+  });
+
+  let granted = 0;
+  let deleted = 0;
+  const failed: FailedWrite[] = [];
+  for (const o of outcomes) {
+    if (o.ok) {
+      if (o.op.method === "PUT") granted++;
+      else deleted++;
+    } else {
+      failed.push({
+        method: o.op.method,
+        path: o.op.path,
+        authId: o.op.tuple.authId,
+        dataId: o.op.tuple.dataId,
+        message: o.message,
+      });
     }
   }
-  return { granted, deleted };
+  return { granted, deleted, failed };
 }
