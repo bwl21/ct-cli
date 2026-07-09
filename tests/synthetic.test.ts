@@ -53,4 +53,43 @@ describe("synthetic-field registry", () => {
     expect(actual.get("child")?.parents).toEqual(["parent"]);
     expect(out.desired[0]?.fields.parents).toEqual(["parent"]);
   });
+
+  it("augments desired parents on a FRESH (empty) state — first apply keeps hierarchy edges (#28)", async () => {
+    // Fresh state: no groups exist yet. The old gate keyed on pre-apply state and returned early,
+    // so create items carried no parents change and the first apply produced a flat hierarchy.
+    const state: State = { version: 1, host: "h", resources: {} };
+    const actual = new Map<string, Record<string, unknown>>();
+    const desired: DesiredResource[] = [
+      { type: "group", key: "child", fields: { name: "child" }, parents: ["parent"], dependsOn: ["parent"] },
+      { type: "group", key: "parent", fields: { name: "parent" }, dependsOn: [] },
+    ];
+    let fetched = false;
+    const client = {
+      get: async <T>(): Promise<T> => {
+        fetched = true;
+        return [] as unknown as T; // no hierarchies exist yet on a fresh instance
+      },
+    };
+    const out = await foldSynthetic({ client, state, desired, actual });
+    expect(fetched).toBe(true);
+    expect(out.desired.find((d) => d.key === "child")?.fields.parents).toEqual(["parent"]);
+  });
+
+  it("does NOT fetch /groups/hierarchies when no desired group opts into parents (#28 / #17.5)", async () => {
+    const state: State = { version: 1, host: "h", resources: {} };
+    const actual = new Map<string, Record<string, unknown>>();
+    const desired: DesiredResource[] = [
+      { type: "group", key: "team", fields: { name: "team" }, dependsOn: [] },
+    ];
+    let fetched = false;
+    const client = {
+      get: async <T>(): Promise<T> => {
+        fetched = true;
+        return [] as unknown as T;
+      },
+    };
+    const out = await foldSynthetic({ client, state, desired, actual });
+    expect(fetched).toBe(false);
+    expect(out.errors).toEqual([]);
+  });
 });

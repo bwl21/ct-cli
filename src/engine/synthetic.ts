@@ -45,8 +45,13 @@ function resolveId(state: State, key: string): number {
 const parentsField: SyntheticField = {
   field: "parents",
   async fold({ client, state, desired, actual }) {
-    const hasManagedGroups = Object.values(state.resources).some((m) => m.type === "group");
-    if (!hasManagedGroups) return { desired, errors: [] };
+    // Gate on the DESIRED side, not the pre-apply state: on a fresh state the
+    // groups don't exist yet, so a state-side gate returns early and the first
+    // apply drops every declared hierarchy edge (flat groups, exit 0). Gating on
+    // "some desired group opted into parents" makes the first apply create edges,
+    // and still skips the /groups/hierarchies fetch when nobody opts in.
+    const optedIn = desired.some((d) => d.type === "group" && d.parents !== undefined);
+    if (!optedIn) return { desired, errors: [] };
     try {
       const raw = await client.get<HierarchyEntry[]>("/groups/hierarchies");
       const parentIds = parentIdsByGroupId(Array.isArray(raw) ? raw : []);
