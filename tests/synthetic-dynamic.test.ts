@@ -94,6 +94,35 @@ describe("dynamic synthetic field — fold", () => {
     expect(diffFields(out.desired[0]!.fields, actual.get("g")!).find((c) => c.field === "dynamic")).toBeUndefined();
   });
 
+  it("folds many opted-in groups concurrently, each with its own (ruleset, status) pair (#35 item 1)", async () => {
+    // Behavior must be identical to the old serial loop: every opted-in managed group gets its actual
+    // dynamic filled from its own ruleset+status GETs, keyed by group id.
+    const state: State = { version: 1, host: "h", resources: {
+      g1: { type: "group", id: 1, key: "g1", fields: { name: "G1" }, adoptedAt: "t", updatedAt: "t" },
+      g2: { type: "group", id: 2, key: "g2", fields: { name: "G2" }, adoptedAt: "t", updatedAt: "t" },
+      g3: { type: "group", id: 3, key: "g3", fields: { name: "G3" }, adoptedAt: "t", updatedAt: "t" },
+    } };
+    const actual = new Map<string, Record<string, unknown>>([
+      ["g1", { name: "G1" }], ["g2", { name: "G2" }], ["g3", { name: "G3" }],
+    ]);
+    const desired: DesiredResource[] = ["g1", "g2", "g3"].map((key) => ({
+      type: "group", key, fields: { name: key.toUpperCase() }, dependsOn: [],
+      dynamic: { status: "manual", ruleset: { description: key, query: {}, process: {} } },
+    }));
+    const client = { get: vi.fn(async (p: string) => {
+      const id = p.match(/dynamicgroups\/(\d+)\//)![1];
+      return p.endsWith("/ruleset")
+        ? { description: `rs${id}`, query: {}, process: {} }
+        : { dynamicGroupStatus: "manual" };
+    }) };
+    const out = await dynamicField().fold({ client: getClient(client), state, desired, actual });
+    expect(out.errors).toEqual([]);
+    expect(actual.get("g1")?.dynamic).toEqual({ status: "manual", ruleset: { description: "rs1", query: {}, process: {} } });
+    expect(actual.get("g2")?.dynamic).toEqual({ status: "manual", ruleset: { description: "rs2", query: {}, process: {} } });
+    expect(actual.get("g3")?.dynamic).toEqual({ status: "manual", ruleset: { description: "rs3", query: {}, process: {} } });
+    expect(client.get).toHaveBeenCalledTimes(6); // ruleset + status per group
+  });
+
   it("ignores groups that did not opt into dynamic", async () => {
     const state: State = { version: 1, host: "h",
       resources: { g: { type: "group", id: 5, key: "g", fields: { name: "G" }, adoptedAt: "t", updatedAt: "t" } } };
@@ -115,6 +144,31 @@ describe("dynamic synthetic field — apply", () => {
         to: { status: "active", ruleset: { description: "x", query: {}, process: {} } } } });
     expect(request).toHaveBeenNthCalledWith(1, "PUT", "/dynamicgroups/5/ruleset",
       { dynamicGroupRuleSet: { description: "x", query: {}, process: {} } });
+    expect(request).toHaveBeenNthCalledWith(2, "PUT", "/dynamicgroups/5/status", { dynamicGroupStatus: "active" });
+  });
+
+  it("status-only change (ruleset byte-identical) PUTs only the status, skipping the ruleset re-PUT (#35 item 15)", async () => {
+    const request = vi.fn(async () => ({}));
+    const state: State = { version: 1, host: "h", resources: {} };
+    const ruleset = { description: "x", query: {}, process: {} };
+    await dynamicField().apply({ client: { request } as unknown as Pick<CtClient, "request">, state, id: 5,
+      change: { field: "dynamic",
+        from: { status: "active", ruleset }, // same ruleset, only the status flips
+        to: { status: "inactive", ruleset } } });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith("PUT", "/dynamicgroups/5/status", { dynamicGroupStatus: "inactive" });
+    expect(request).not.toHaveBeenCalledWith("PUT", "/dynamicgroups/5/ruleset", expect.anything());
+  });
+
+  it("still PUTs both when the ruleset changed alongside the status", async () => {
+    const request = vi.fn(async () => ({}));
+    const state: State = { version: 1, host: "h", resources: {} };
+    await dynamicField().apply({ client: { request } as unknown as Pick<CtClient, "request">, state, id: 5,
+      change: { field: "dynamic",
+        from: { status: "active", ruleset: { description: "old", query: {}, process: {} } },
+        to: { status: "active", ruleset: { description: "new", query: {}, process: {} } } } });
+    expect(request).toHaveBeenNthCalledWith(1, "PUT", "/dynamicgroups/5/ruleset",
+      { dynamicGroupRuleSet: { description: "new", query: {}, process: {} } });
     expect(request).toHaveBeenNthCalledWith(2, "PUT", "/dynamicgroups/5/status", { dynamicGroupStatus: "active" });
   });
 

@@ -8,12 +8,24 @@
 import type { CtClient } from "../api/ctClient.js";
 import { CtApiError } from "../api/ctClient.js";
 import type { State } from "../state/state.js";
-import type { DesiredResource, FieldChange } from "./types.js";
+import type { DesiredResource, FieldChange, Plan, PlanItem } from "./types.js";
 import { applyHierarchy, parentIdsByGroupId, type HierarchyEntry } from "./hierarchy.js";
 import { assertNotPeople } from "./guard.js";
-import { warn } from "../ui.js";
+import { deepEqual } from "./plan.js";
+import { mapConcurrent } from "../util/concurrency.js";
+import { info, warn } from "../ui.js";
 import { normalizeDynamic, normalizeRuleset, resolveRulesetRef } from "./dynamic.js";
 import type { DynamicStatus } from "./types.js";
+
+/** How many dynamic groups to fetch (ruleset + status) from ChurchTools at once. Mirrors build.ts. */
+const DYNAMIC_FETCH_CONCURRENCY = 8;
+
+/** The per-group counts CT returns from POST /dynamicgroups/{id}/refresh. */
+interface RefreshResult {
+  created: number;
+  updated: number;
+  deleted: number;
+}
 
 export interface SyntheticFoldCtx {
   client: Pick<CtClient, "get">;
@@ -29,10 +41,25 @@ export interface SyntheticApplyCtx {
   id: number;
   change: FieldChange;
 }
+export interface SyntheticPostApplyCtx {
+  client: Pick<CtClient, "request">;
+  state: State;
+  /** Post-execute id from state (creates already carry their real id). */
+  id: number;
+  item: PlanItem;
+  change: FieldChange;
+}
 export interface SyntheticField {
   field: string;
   fold(ctx: SyntheticFoldCtx): Promise<{ desired: DesiredResource[]; errors: string[] }>;
   apply(ctx: SyntheticApplyCtx): Promise<void>;
+  /**
+   * Optional opt-in side effect run AFTER the whole plan has applied (e.g. `ct apply --refresh`
+   * materializing dynamic-group membership). Keeps field-specific post-apply knowledge in the
+   * field, not the command layer. Must swallow its own errors — one field's failure must not
+   * abort the others.
+   */
+  postApply?(ctx: SyntheticPostApplyCtx): Promise<void>;
 }
 
 function resolveId(state: State, key: string): number {
@@ -83,13 +110,24 @@ const parentsField: SyntheticField = {
 const dynamicField: SyntheticField = {
   field: "dynamic",
   async fold({ client, state, desired, actual, configDir }) {
-    const optedIn = new Set(desired.filter((d) => d.type === "group" && d.dynamic !== undefined).map((d) => d.key));
-    if (optedIn.size === 0) return { desired, errors: [] };
-    const errors: string[] = [];
-    for (const managed of Object.values(state.resources)) {
-      if (managed.type !== "group" || !optedIn.has(managed.key)) continue;
-      const a = actual.get(managed.key);
-      if (!a) continue; // vanished from CT → handled as a recreate by the plain plan
+    // Single pass over the DESIRED opt-ins (mirrors hierarchy's desired-side gate): a group is
+    // folded only if it declared `dynamic` AND is under management AND was fetched. Replaces the
+    // old build-a-Set-then-invert-over-state pattern (one predicate, not three).
+    const targets = desired.flatMap((d) => {
+      if (d.type !== "group" || d.dynamic === undefined) return [];
+      const managed = state.resources[d.key];
+      if (!managed || managed.type !== "group") return []; // not adopted yet → created by the plain plan
+      const a = actual.get(d.key);
+      if (!a) return []; // vanished from CT → handled as a recreate by the plain plan
+      return [{ managed, a }];
+    });
+    if (targets.length === 0) return { desired, errors: [] };
+    // Fetch each group's (ruleset, status) concurrently — 2N serial round-trips otherwise dominate
+    // plan/apply latency on a config with many dynamic groups. Within a group the two GETs stay
+    // sequential: the status GET must run only after the ruleset GET succeeds (a 404 there means
+    // "not a dynamic group" and short-circuits). Per-group error strings are collected in input
+    // order so the plan-degradation output is deterministic regardless of completion order.
+    const perGroupErrors = await mapConcurrent(targets, DYNAMIC_FETCH_CONCURRENCY, async ({ managed, a }) => {
       // The ruleset GET and the status GET have distinct failure meanings, so they get distinct
       // try/catch blocks: only a ruleset 404 means "not a dynamic group". A status GET that fails
       // AFTER a successful ruleset GET must NOT fabricate the "none" sentinel (that would discard a
@@ -102,11 +140,10 @@ const dynamicField: SyntheticField = {
           // Group exists but is not (yet) a dynamic group — its ruleset 404s. Sentinel so a promote
           // (desired active vs actual none) diffs as a real change and demote-to-none is a clean no-op.
           a.dynamic = { status: "none", ruleset: {} };
-          continue;
+          return [];
         }
         const message = err instanceof Error ? err.message : String(err);
-        errors.push(`dynamic ${managed.key} (#${managed.id}): ${message}`);
-        continue;
+        return [`dynamic ${managed.key} (#${managed.id}): ${message}`];
       }
       try {
         const statusRes = await client.get<{ dynamicGroupStatus?: string }>(`/dynamicgroups/${managed.id}/status`);
@@ -114,11 +151,13 @@ const dynamicField: SyntheticField = {
           status: (statusRes?.dynamicGroupStatus ?? "none") as DynamicStatus,
           ruleset: normalizeRuleset(ruleset),
         };
+        return [];
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        errors.push(`dynamic ${managed.key} status (#${managed.id}): ${message}`);
+        return [`dynamic ${managed.key} status (#${managed.id}): ${message}`];
       }
-    }
+    });
+    const errors = perGroupErrors.flat();
     const augmented = desired.map((d) => {
       if (d.type !== "group" || d.dynamic === undefined) return d;
       // Demote-to-none: fold to the SAME sentinel the actual side uses for a non-dynamic group
@@ -135,6 +174,7 @@ const dynamicField: SyntheticField = {
   },
   async apply({ client, id, change }) {
     const to = change.to as { status: DynamicStatus; ruleset: Record<string, unknown> } | undefined;
+    const from = change.from as { status?: DynamicStatus; ruleset?: Record<string, unknown> } | undefined;
     if (!to || to.status === "none") {
       assertNotPeople(`/dynamicgroups/${id}/ruleset`);
       // A group that was never dynamic (or is already demoted) has no ruleset to delete — CT 404s.
@@ -148,10 +188,33 @@ const dynamicField: SyntheticField = {
       await client.request("PUT", `/dynamicgroups/${id}/status`, { dynamicGroupStatus: "none" });
       return;
     }
-    assertNotPeople(`/dynamicgroups/${id}/ruleset`);
-    await client.request("PUT", `/dynamicgroups/${id}/ruleset`, { dynamicGroupRuleSet: to.ruleset });
+    // A pure status flip (active↔inactive) leaves the ruleset byte-identical — skip the re-PUT so we
+    // don't rewrite an unchanged ruleset (wasteful, and may trigger a server-side recalculation). A
+    // fresh promote (`from` undefined / previously non-dynamic) has no comparable ruleset, so PUT it.
+    const rulesetChanged = from?.ruleset === undefined || !deepEqual(from.ruleset, to.ruleset);
+    if (rulesetChanged) {
+      assertNotPeople(`/dynamicgroups/${id}/ruleset`);
+      await client.request("PUT", `/dynamicgroups/${id}/ruleset`, { dynamicGroupRuleSet: to.ruleset });
+    }
     assertNotPeople(`/dynamicgroups/${id}/status`);
     await client.request("PUT", `/dynamicgroups/${id}/status`, { dynamicGroupStatus: to.status });
+  },
+  async postApply({ client, id, item, change }) {
+    // `ct apply --refresh`: materialize computed membership for a changed dynamic group. Per-group
+    // only — the all-groups /dynamicgroups/refresh endpoint has a huge blast radius and is never
+    // called from here. Owns the demote-sentinel knowledge so the command layer stays field-agnostic.
+    const to = change.to as { status?: string } | undefined;
+    if (to?.status === "none") return; // demoted to a non-dynamic group — nothing to refresh
+    const path = `/dynamicgroups/${id}/refresh`;
+    assertNotPeople(path);
+    try {
+      const res = await client.request<RefreshResult[]>("POST", path);
+      const r = res?.[0];
+      if (r) info(`refreshed ${item.key}: +${r.created} ~${r.updated} -${r.deleted}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      warn(`Failed to refresh ${item.key} (#${id}): ${message}`);
+    }
   },
 };
 
@@ -163,6 +226,30 @@ export function isSyntheticField(field: string): boolean {
 }
 export function syntheticField(field: string): SyntheticField | undefined {
   return BY_FIELD.get(field);
+}
+
+/**
+ * Drive every synthetic field's optional `postApply` hook over an applied plan (e.g. the opt-in
+ * `ct apply --refresh` dynamic-group refresh). Runs after `executePlan`, so ids are read from the
+ * POST-execute state — a create already carries its real id. Skips no-op/delete items and any item
+ * whose key is not (yet) resolvable in state (explicit `undefined` check — CT ids can be `0`). Each
+ * hook swallows its own errors, so one field/group failing never blocks the rest.
+ */
+export async function runPostApplyHooks(
+  plan: Plan,
+  state: State,
+  client: Pick<CtClient, "request">,
+): Promise<void> {
+  for (const item of plan.items) {
+    if (item.action === "no-op" || item.action === "delete") continue;
+    for (const change of item.changes) {
+      const f = syntheticField(change.field);
+      if (!f?.postApply) continue;
+      const id = state.resources[item.key]?.id;
+      if (id === undefined) continue;
+      await f.postApply({ client, state, id, item, change });
+    }
+  }
 }
 
 /** Run every registered fold in order, threading the (immutably) augmented desired through each. */

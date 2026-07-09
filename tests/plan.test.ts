@@ -75,6 +75,18 @@ describe("computePlan", () => {
     ).toThrow(/Unknown resource type/);
   });
 
+  it("throws on duplicate desired keys instead of silently last-wins (#35 item 7)", () => {
+    // A raw array from a programmatic caller (import command, test harness) could carry duplicates —
+    // desiredByKey would collapse them while the plan loop emits both. Reject up front.
+    expect(() =>
+      computePlan(
+        [desired("dup", { name: "A" }), desired("dup", { name: "B" })],
+        stateOf(),
+        new Map(),
+      ),
+    ).toThrow(/Duplicate desired key "dup"/);
+  });
+
   it("plans an update with just the changed fields", () => {
     const plan = computePlan(
       [desired("mainz", { name: "Mainz HQ", shortName: "MZ" })],
