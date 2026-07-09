@@ -99,4 +99,78 @@ describe("CtClient", () => {
       message: expect.stringContaining("PUT /campuses/0"),
     });
   });
+
+  describe("getAll (#50)", () => {
+    it("auto-paginates until lastPage is reached, concatenating every page", async () => {
+      const { client, fetchMock } = await authedClient();
+      fetchMock
+        .mockResolvedValueOnce(
+          jsonResponse({
+            data: [{ id: 1 }, { id: 2 }],
+            meta: { pagination: { total: 3, current: 1, lastPage: 2, limit: 2 } },
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            data: [{ id: 3 }],
+            meta: { pagination: { total: 3, current: 2, lastPage: 2, limit: 2 } },
+          }),
+        );
+
+      const result = await client.getAll("/groups", { limit: 2 });
+
+      expect(result.data).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
+      expect(result.meta?.pagination).toMatchObject({ total: 3, current: 2, lastPage: 2 });
+      // calls 0-1 are the auth handshake (whoami + csrftoken); 2-3 are the two pages.
+      expect(String(fetchMock.mock.calls[2]?.[0])).toContain("page=1");
+      expect(String(fetchMock.mock.calls[2]?.[0])).toContain("limit=2");
+      expect(String(fetchMock.mock.calls[3]?.[0])).toContain("page=2");
+    });
+
+    it("stops after a single page when the response carries no pagination meta", async () => {
+      const { client, fetchMock } = await authedClient();
+      fetchMock.mockResolvedValueOnce(jsonResponse({ data: [{ id: 1 }] }));
+
+      const result = await client.getAll("/campuses");
+
+      expect(result.data).toEqual([{ id: 1 }]);
+      expect(fetchMock).toHaveBeenCalledTimes(3); // 2 auth + 1 page, no second page requested
+    });
+
+    it("defaults the per-page limit to 100", async () => {
+      const { client, fetchMock } = await authedClient();
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ data: [], meta: { pagination: { total: 0, current: 1, lastPage: 1, limit: 100 } } }),
+      );
+
+      await client.getAll("/groups");
+
+      expect(String(fetchMock.mock.calls[2]?.[0])).toContain("limit=100");
+    });
+
+    it("stops when a page comes back empty even if lastPage claims more", async () => {
+      const { client, fetchMock } = await authedClient();
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ data: [], meta: { pagination: { total: 3, current: 1, lastPage: 2, limit: 2 } } }),
+      );
+
+      const result = await client.getAll("/groups", { limit: 2 });
+
+      expect(result.data).toEqual([]);
+      expect(fetchMock).toHaveBeenCalledTimes(3); // does not spin forever on a degenerate response
+    });
+
+    it("propagates a CtApiError with status + body from a failing page", async () => {
+      const { client, fetchMock } = await authedClient();
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ errors: ["limit exceeds max of 100"] }), { status: 400 }),
+      );
+
+      await expect(client.getAll("/groups", { limit: 500 })).rejects.toMatchObject({
+        name: "CtApiError",
+        status: 400,
+        body: { errors: ["limit exceeds max of 100"] },
+      });
+    });
+  });
 });

@@ -9,7 +9,7 @@ import { applyCommand } from "./commands/apply.js";
 import { destroyCommand } from "./commands/destroy.js";
 import { plannedCommands } from "./commands/placeholders.js";
 import { isMainModule } from "./isMain.js";
-import { error } from "./ui.js";
+import { error, formatError } from "./ui.js";
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   try {
     await program.parseAsync(process.argv);
   } catch (err) {
-    error(err instanceof Error ? err.message : String(err));
+    error(formatError(err));
     process.exitCode = 1;
   }
 }
