@@ -4,7 +4,7 @@
  * acceptance test — one config yielding valid plans against two different hosts (states + catalogs).
  */
 import { describe, it, expect } from "vitest";
-import { evaluateConfig } from "../src/config/context.js";
+import { evaluateConfig, q, churchQuery, ref } from "../src/config/context.js";
 import { buildPlan } from "../src/engine/build.js";
 import { executePlan } from "../src/engine/execute.js";
 import { buildPermissionPlan } from "../src/permissions/plan.js";
@@ -85,6 +85,36 @@ describe("apply-time pending re-resolution (same-run campus + group)", () => {
     expect(groupPost.body).toEqual({ name: "Kids", groupTypeId: 2, campusId: 42 });
     // State records the resolved id too (no pending marker leaks into state).
     expect(state.resources.kids?.fields).toMatchObject({ campusId: 42 });
+  });
+
+  it("resolves a same-run ref embedded in a dynamic ruleset before the ruleset PUT", async () => {
+    // The dynamic group is already managed (a fresh dynamic group is a two-apply flow); the campus it
+    // filters on is added to the config now, so its ruleset ref is same-run pending until apply time.
+    const { resources } = await evaluateConfig((ct) => {
+      ct.campus({ key: "mainz", name: "Mainz", shorty: "MZ" });
+      ct.group({
+        key: "all_mainz",
+        name: "All",
+        groupTypeId: 1,
+        dynamic: {
+          status: "manual",
+          ruleset: { query: churchQuery(q.eq("ctgroup.campusId", ref.campus("mainz"))) },
+        },
+      });
+    });
+    const state = emptyState("h");
+    state.resources.all_mainz = {
+      type: "group", id: 100, key: "all_mainz", fields: { name: "All", groupTypeId: 1 }, adoptedAt: "t", updatedAt: "t",
+    };
+    // /groups/100 fetches clean; its ruleset 404s (not yet a dynamic group) → the manual ruleset is a change.
+    const host = fakeHost({ "/groups/100": { name: "All", groupTypeId: 1 } }, { "POST /campuses": 42 });
+    const { plan } = await buildPlan(host, state, resources);
+    await executePlan(plan, { client: host, state, statePath: "s.json", save: noSave, now: () => "t" });
+
+    const rulesetPut = host.calls.find((c) => c.path === "/dynamicgroups/100/ruleset" && c.method === "PUT")!;
+    const body = rulesetPut.body as { dynamicGroupRuleSet: { query: { params: { filter: { "==": unknown[] } } } } };
+    // The campus ref, pending at plan time, is the freshly-created id (42) in the PUT — not a sentinel.
+    expect(body.dynamicGroupRuleSet.query.params.filter["=="][1]).toBe(42);
   });
 });
 
