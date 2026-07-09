@@ -3,10 +3,12 @@ import { authedSession } from "../api/session.js";
 import { CtApiError, type CtClient } from "../api/ctClient.js";
 import { resolveConfig } from "../config.js";
 import { loadState, resolveStatePath, saveState, type State } from "../state/state.js";
-import { loadConfig, resolveConfigPath } from "../config/load.js";
 import { RESOURCES } from "../resources/registry.js";
 import { assertNotPeople } from "../engine/guard.js";
-import { tierOf } from "../engine/graph.js";
+import { orderKeys } from "../engine/graph.js";
+import { fetchActual } from "../engine/build.js";
+import { parentIdsByGroupId, managedParentKeys, type HierarchyEntry } from "../engine/hierarchy.js";
+import type { DesiredResource } from "../engine/types.js";
 import { writeBackup } from "../engine/backup.js";
 import { resolveBackupDir } from "./apply.js";
 import { confirmTyped } from "../ui/prompt.js";
@@ -14,7 +16,6 @@ import { info, warn, success, error } from "../ui.js";
 
 interface DestroyOptions {
   target?: string[];
-  config?: string;
   state?: string;
   backupDir?: string;
   force?: boolean;
@@ -34,16 +35,69 @@ export function parseTargets(raw: string[]): string[] {
   return out;
 }
 
-/** Reverse dependency order: highest tier first (leaves before their base metadata). */
-export function orderDestroy(state: State, keys: string[]): string[] {
-  return [...keys].sort((a, b) => tierOf(state.resources[b]!.type) - tierOf(state.resources[a]!.type));
+/**
+ * Reverse dependency order for destroy: highest tier first (leaves before their
+ * base metadata) and, within the group tier, a child before its parent.
+ *
+ * The state file carries no hierarchy edges (the synthetic `parents` field is
+ * stripped from snapshots — see execute.ts), so the caller passes `parentKeysByKey`
+ * discovered live from `/groups/hierarchies` (managed groups only). We reuse
+ * `orderKeys` — the very topological apply order plan uses — with those edges,
+ * then reverse it, so destroy is the exact inverse of apply and honours intra-tier
+ * parent edges. Pass an empty map (or omit) to fall back to tier-only ordering.
+ */
+export function orderDestroy(
+  state: State,
+  keys: string[],
+  parentKeysByKey: Map<string, string[]> = new Map(),
+): string[] {
+  const entries: DesiredResource[] = keys.map((key) => ({
+    type: state.resources[key]!.type,
+    key,
+    fields: {},
+    dependsOn: parentKeysByKey.get(key) ?? [],
+  }));
+  return orderKeys(entries).reverse();
+}
+
+/**
+ * Discover managed group→parent edges from the live `/groups/hierarchies`, so
+ * `orderDestroy` can put a child before its parent. Only the group targets need
+ * edges; every managed group is mapped id→key so a parent edge to a not-targeted
+ * managed group is still resolvable (harmless — `orderKeys` ignores deps outside
+ * the target set). Best-effort: a fetch failure warns and returns no edges, so
+ * ordering degrades to tier-only rather than aborting the destroy.
+ */
+async function fetchParentEdges(
+  client: Pick<CtClient, "get">,
+  state: State,
+  keys: string[],
+): Promise<Map<string, string[]>> {
+  const groupKeys = keys.filter((k) => state.resources[k]?.type === "group");
+  if (groupKeys.length === 0) return new Map();
+  const groupIdToKey = new Map<number, string>();
+  for (const m of Object.values(state.resources)) {
+    if (m.type === "group") groupIdToKey.set(m.id, m.key);
+  }
+  try {
+    const raw = await client.get<HierarchyEntry[]>("/groups/hierarchies");
+    const parentIds = parentIdsByGroupId(Array.isArray(raw) ? raw : []);
+    const edges = new Map<string, string[]>();
+    for (const key of groupKeys) {
+      edges.set(key, managedParentKeys(parentIds.get(state.resources[key]!.id) ?? [], groupIdToKey));
+    }
+    return edges;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    warn(`Failed to fetch group hierarchies for destroy ordering: ${message}. Falling back to tier-only order.`);
+    return new Map();
+  }
 }
 
 export function destroyCommand(): Command {
   return new Command("destroy")
     .description("Explicitly delete managed resources (protected; never implicit)")
     .requiredOption("--target <keys...>", "logical key(s) to destroy (repeatable or comma-separated)")
-    .option("-c, --config <path>", "config file (or set CT_CONFIG)")
     .option("-s, --state <path>", "state file (or set CT_STATE)")
     .option("--backup-dir <path>", "directory for the pre-destroy backup (or set CT_BACKUP_DIR)")
     .option("--force", "skip the typed confirmation (preventDestroy is still enforced)")
@@ -63,35 +117,35 @@ export function destroyCommand(): Command {
         }
       }
 
-      // preventDestroy guard: a target still declared with the flag is blocked.
-      const { resources: desired } = await loadConfig(resolveConfigPath(opts.config));
-      const protectedKeys = new Set(desired.filter((d) => d.preventDestroy).map((d) => d.key));
-      const blocked = targets.filter((k) => protectedKeys.has(k));
+      // preventDestroy guard: read from STATE, never the config. A resource dropped from config
+      // (the real destroy scenario) has lost its config flag, but its state entry still carries the
+      // protection apply mirrored there — so it survives the drop. destroy loads no config file at
+      // all, so a config eval error (e.g. a sibling still referencing the dropped target) can't
+      // block a teardown either (items 2 + 3).
+      const blocked = targets.filter((k) => state.resources[k]!.preventDestroy);
       if (blocked.length > 0) {
         throw new Error(
-          `preventDestroy is set for: ${blocked.join(", ")}. Remove the flag in config first.`,
+          `preventDestroy is set (in state) for: ${blocked.join(", ")}. ` +
+            `Set preventDestroy:false in config and re-apply (or clear it in the state file) first.`,
         );
       }
 
-      const ordered = orderDestroy(state, targets);
       const { client } = await authedSession();
 
-      // Backup: fetch each target's current actual values (best-effort; 404 → skip).
-      const actual = new Map<string, Record<string, unknown>>();
-      for (const key of ordered) {
-        const managed = state.resources[key]!;
-        const spec = RESOURCES[managed.type];
-        if (!spec) {
-          continue;
-        }
-        try {
-          const raw = await client.get<Record<string, unknown>>(spec.itemPath(managed.id));
-          actual.set(key, spec.managedFields(raw));
-        } catch (err) {
-          if (!(err instanceof CtApiError && err.status === 404)) {
-            throw err;
-          }
-        }
+      const parentEdges = await fetchParentEdges(client, state, targets);
+      const ordered = orderDestroy(state, targets, parentEdges);
+
+      // Backup: fetch each target's current actual values via the same fetchActual as plan/apply
+      // (404 → skip: already gone in CT, nothing to back up). A non-404 failure must ABORT before
+      // any DELETE — proceeding would irreversibly delete a target with no backup of its state.
+      const { actual, fetchErrors } = await fetchActual(client, ordered.map((k) => state.resources[k]!));
+      if (fetchErrors.length > 0) {
+        error(
+          `Backup fetch failed for: ${fetchErrors.join("; ")}. ` +
+            `Nothing was deleted — resolve the error (or wait out the outage) and re-run.`,
+        );
+        process.exitCode = 1;
+        return;
       }
       const backupPath = await writeBackup(resolveBackupDir(opts.backupDir, statePath), config.host, actual);
       info(`Backup written: ${backupPath}`);

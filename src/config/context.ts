@@ -32,7 +32,11 @@ export interface ResourceInput {
    */
   parents?: string[];
   dependsOn?: string[];
-  /** Block `ct destroy` for this resource until the flag is removed. */
+  /**
+   * Block `ct destroy` for this resource. Mirrored to the state entry on `apply`,
+   * so protection survives the resource being dropped from config; clear it by
+   * setting `false` (or removing it) and re-applying before you destroy.
+   */
   preventDestroy?: boolean;
   [field: string]: unknown;
 }
@@ -89,7 +93,9 @@ function toDesired(type: string, input: ResourceInput): DesiredResource {
   // `parent` is an ordering hint only — a dependency edge, never a diffed/managed field
   // (its pre-hierarchy meaning; a `parent` may point at a campus). Group hierarchy is
   // managed opt-in via `parents`: `undefined` → unmanaged, `[]` → managed with no parents.
-  const parentKey = typeof parent === "string" && parent !== "" ? parent : undefined;
+  // `parent` is already narrowed to `string | null | undefined` by the guard above; `|| undefined`
+  // collapses null and "" (an empty parent is "no parent", never opt-in) to undefined.
+  const parentKey = parent || undefined;
   const parentKeys = parents !== undefined ? [...new Set(parents)] : undefined;
   const edges = [...new Set([...dependsOn, ...(parentKey ? [parentKey] : []), ...(parentKeys ?? [])])];
   return {

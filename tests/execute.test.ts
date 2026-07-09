@@ -254,6 +254,59 @@ describe("executePlan", () => {
     expect(calls).toContainEqual({ method: "PUT", path: "/groups/2/parents/1", body: undefined });
   });
 
+  it("mirrors config preventDestroy onto the state entry on create (#17 item 2)", async () => {
+    const state = emptyState("h");
+    const { client } = recorder({ "POST /campuses": { id: 5 } });
+    const plan: Plan = {
+      items: [
+        {
+          type: "campus",
+          key: "zurich",
+          id: null,
+          action: "create",
+          changes: [{ field: "name", from: undefined, to: "Zürich" }],
+          preventDestroy: true,
+        },
+      ],
+    };
+    await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    expect(state.resources.zurich!.preventDestroy).toBe(true);
+  });
+
+  it("persists a preventDestroy toggle even when nothing else changed (no-op) (#17 item 2)", async () => {
+    const state = emptyState("h");
+    state.resources.mainz = {
+      type: "campus",
+      id: 0,
+      key: "mainz",
+      fields: { name: "Mainz" },
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
+    const { client } = recorder();
+    let saved = 0;
+    const save = async () => {
+      saved++;
+    };
+    // A note-less no-op whose config now sets preventDestroy — the flag alone is never a diffed field,
+    // so this is the only chance to persist it to state.
+    const plan: Plan = {
+      items: [
+        { type: "campus", key: "mainz", id: 0, action: "no-op", changes: [], preventDestroy: true },
+      ],
+    };
+    await executePlan(plan, { client, state, statePath: "s.json", save, now: fixedNow });
+    expect(state.resources.mainz!.preventDestroy).toBe(true);
+    expect(saved).toBe(1); // saved exactly once, because the flag actually changed
+
+    // Dropping the flag from config clears it (config → state is the source of truth for protection).
+    const clearPlan: Plan = {
+      items: [{ type: "campus", key: "mainz", id: 0, action: "no-op", changes: [] }],
+    };
+    await executePlan(clearPlan, { client, state, statePath: "s.json", save, now: fixedNow });
+    expect(state.resources.mainz!.preventDestroy).toBeUndefined();
+  });
+
   it("skips deletes (apply never deletes)", async () => {
     const state = emptyState("h");
     state.resources.old = {

@@ -111,6 +111,7 @@ export function computePlan(
         id: null,
         action: "create",
         changes: diffFields(d.fields, {}),
+        preventDestroy: d.preventDestroy,
       });
       continue;
     }
@@ -129,6 +130,7 @@ export function computePlan(
         action: "no-op",
         changes: [],
         note: "unresolved-type",
+        preventDestroy: d.preventDestroy,
       });
       continue;
     }
@@ -142,6 +144,7 @@ export function computePlan(
         changes: [],
         note: "fetch-failed",
         detail: fetchFailed.get(d.key),
+        preventDestroy: d.preventDestroy,
       });
       continue;
     }
@@ -154,6 +157,7 @@ export function computePlan(
         action: "create",
         changes: diffFields(d.fields, {}),
         note: "recreate",
+        preventDestroy: d.preventDestroy,
       });
       continue;
     }
@@ -168,6 +172,7 @@ export function computePlan(
       // The fetched actual — the write body is built from this, not the stale state snapshot (#27).
       actual: a,
       drift: drift.length > 0 ? drift : undefined,
+      preventDestroy: d.preventDestroy,
     });
   }
 

@@ -66,6 +66,12 @@ export interface PlanItem {
   note?: PlanNote;
   /** Extra human-readable context for a note (e.g. the HTTP status behind `fetch-failed`). */
   detail?: string;
+  /**
+   * The config's `preventDestroy` for this desired resource, carried so apply can
+   * mirror it onto the state entry (state, not config, guards `destroy`). Only set
+   * on desired-side items; undefined on delete-side items.
+   */
+  preventDestroy?: boolean;
 }
 
 export interface Plan {

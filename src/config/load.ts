@@ -12,11 +12,12 @@ import { createJiti } from "jiti";
 import { evaluateConfig, type ConfigModule } from "./context.js";
 import type { DesiredResource } from "../engine/types.js";
 import type { DesiredPermission } from "../permissions/types.js";
+import { resolveWithEnv } from "../util/resolve.js";
 
 export const DEFAULT_CONFIG_PATH = "ct.config.ts";
 
 export function resolveConfigPath(explicit?: string, env: NodeJS.ProcessEnv = process.env): string {
-  return explicit?.trim() || env.CT_CONFIG?.trim() || DEFAULT_CONFIG_PATH;
+  return resolveWithEnv(explicit, env.CT_CONFIG, DEFAULT_CONFIG_PATH);
 }
 
 export async function loadConfig(

@@ -9,7 +9,7 @@
  * their own dedicated endpoints, not the owning resource's body — see synthetic.ts.
  */
 import type { CtClient } from "../api/ctClient.js";
-import type { State } from "../state/state.js";
+import type { ManagedResource, State } from "../state/state.js";
 import { upsert, saveState } from "../state/state.js";
 import type { FieldChange, Plan } from "./types.js";
 import { RESOURCES } from "../resources/registry.js";
@@ -29,6 +29,12 @@ export interface ExecuteResult {
   updated: string[];
   skippedDeletes: string[];
   failed?: { key: string; message: string };
+}
+
+/** Mirror the config's `preventDestroy` onto a state entry (kept absent, not `false`, when unset). */
+function mirrorPreventDestroy(entry: ManagedResource, flag: boolean | undefined): void {
+  if (flag) entry.preventDestroy = true;
+  else delete entry.preventDestroy;
 }
 
 /** The managed field snapshot after a write: base ∪ changed fields, minus any synthetic sub-resource fields. */
@@ -62,6 +68,15 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
       continue;
     }
     if (item.action === "no-op") {
+      // A preventDestroy toggle alone yields a no-op plan (the flag is never a diffed field),
+      // so reconcile it here too — otherwise adding protection wouldn't reach state until some
+      // other field changed. Only clean (note-less) no-ops are desired-side and safe to touch;
+      // stale/unresolved/fetch-failed no-ops are delete-side or undiffable — leave them alone.
+      const entry = state.resources[item.key];
+      if (!item.note && entry && entry.preventDestroy !== (item.preventDestroy || undefined)) {
+        mirrorPreventDestroy(entry, item.preventDestroy);
+        await save(statePath, state);
+      }
       continue;
     }
     const spec = RESOURCES[item.type];
@@ -88,6 +103,7 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         // re-run POSTs another duplicate. Drop the stale entry: a create owns its key outright.
         delete state.resources[item.key];
         upsert(state, { type: item.type, id: res.id, key: item.key, fields: body }, now());
+        mirrorPreventDestroy(state.resources[item.key]!, item.preventDestroy);
         await save(statePath, state);
         await applySyntheticFields(client, state, res.id, item.changes);
         created.push(item.key);
@@ -112,6 +128,7 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
           await client.request(spec.updateMethod, path, body);
         }
         upsert(state, { type: item.type, id, key: item.key, fields: snapshot }, now());
+        mirrorPreventDestroy(state.resources[item.key]!, item.preventDestroy);
         await save(statePath, state);
         await applySyntheticFields(client, state, id, item.changes);
         updated.push(item.key);

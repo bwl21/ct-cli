@@ -15,6 +15,7 @@ import { buildPermissionPlan } from "../permissions/plan.js";
 import { renderPermissionPlan } from "../permissions/render.js";
 import { applyPermissionPlan } from "../permissions/apply.js";
 import { confirm } from "../ui/prompt.js";
+import { resolveWithEnv } from "../util/resolve.js";
 import { info, warn, success, error } from "../ui.js";
 
 interface ApplyOptions {
@@ -74,7 +75,7 @@ export function resolveBackupDir(
   statePath: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return explicit?.trim() || env.CT_BACKUP_DIR?.trim() || join(dirname(statePath), "backups");
+  return resolveWithEnv(explicit, env.CT_BACKUP_DIR, join(dirname(statePath), "backups"));
 }
 
 export function applyCommand(): Command {

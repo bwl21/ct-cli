@@ -13,6 +13,7 @@
  * uses explicit null/undefined checks — never truthiness.
  */
 import { readFile, writeFile } from "node:fs/promises";
+import { resolveWithEnv } from "../util/resolve.js";
 
 export interface ManagedResource {
   type: string;
@@ -22,6 +23,13 @@ export interface ManagedResource {
   fields: Record<string, unknown>;
   adoptedAt: string;
   updatedAt: string;
+  /**
+   * Lifecycle flag mirrored from the config's `preventDestroy` at apply time.
+   * State — not the ephemeral config — is the source of truth for destroy
+   * protection, so a resource stays protected after it is dropped from config
+   * (the exact moment it becomes a destroy candidate). Missing = not protected.
+   */
+  preventDestroy?: boolean;
 }
 
 export interface State {
@@ -34,7 +42,7 @@ export interface State {
 export const DEFAULT_STATE_PATH = "ct-state.json";
 
 export function resolveStatePath(explicit?: string, env: NodeJS.ProcessEnv = process.env): string {
-  return explicit?.trim() || env.CT_STATE?.trim() || DEFAULT_STATE_PATH;
+  return resolveWithEnv(explicit, env.CT_STATE, DEFAULT_STATE_PATH);
 }
 
 export function emptyState(host: string): State {
@@ -66,7 +74,7 @@ export async function loadState(path: string, host: string): Promise<State> {
     throw new Error(`Malformed state file ${path}: not valid JSON (${(err as Error).message}).`);
   }
 
-  const state = validateState(parsed, path);
+  const state = migrateState(validateState(parsed, path));
   if (state.host !== host) {
     throw new Error(
       `State file host (${state.host}) does not match CT_HOST (${host}). Refusing to mix instances.`,
@@ -91,6 +99,29 @@ function validateState(parsed: unknown, path: string): State {
     throw new Error(`Malformed state file ${path}: "resources" must be an object.`);
   }
   return obj as unknown as State;
+}
+
+/**
+ * In-place, version-preserving migrations for state loaded from disk.
+ *
+ * The campus registry field was renamed `shortName → shorty` (Phase 4) without a
+ * state-version bump, so a campus adopted before the rename carries a stale
+ * `shortName` key. Left alone it drifts forever (`shortName → undefined` on every
+ * plan) and a real update PUTs the vestigial `shortName` while omitting the
+ * create-required `shorty`. Rename the key on load — only when `shorty` is absent,
+ * so a post-rename snapshot is never clobbered. The next apply re-writes the real
+ * value; this just clears the phantom drift so the diff can converge.
+ */
+function migrateState(state: State): State {
+  for (const resource of Object.values(state.resources)) {
+    if (resource.type !== "campus") continue;
+    const fields = resource.fields;
+    if ("shortName" in fields && !("shorty" in fields)) {
+      fields.shorty = fields.shortName;
+      delete fields.shortName;
+    }
+  }
+  return state;
 }
 
 export async function saveState(path: string, state: State): Promise<void> {
