@@ -8,21 +8,18 @@
  * runs in the exact reverse.
  */
 import type { DesiredResource } from "./types.js";
+import { RESOURCES } from "../resources/registry.js";
 
-/** Lower tier is applied first. Delete runs highest tier first. */
-export const TYPE_TIER: Record<string, number> = {
-  campus: 0,
-  "group-type": 0,
-  "group-status": 0,
-  "age-group": 0,
-  "target-group": 0,
-  "relationship-type": 0,
-  group: 1,
-  "group-hierarchy": 2,
-  "group-role": 3,
-  permission: 4,
-  "dynamic-group": 5,
-};
+/**
+ * Lower tier is applied first; delete runs highest tier first. Derived from the resource registry
+ * (each entry owns its `tier`) rather than hand-maintained here — a new type gets ordered by adding
+ * one registry entry, and phantom types (`group-hierarchy`, `permission`, `dynamic-group`, …) that
+ * are synthetic sub-resources or separate plan domains, never `DesiredResource` types, cannot creep
+ * back in. The exported shape (`Record<string, number>`) is unchanged, so `computePlan` still reads it.
+ */
+export const TYPE_TIER: Record<string, number> = Object.fromEntries(
+  Object.entries(RESOURCES).map(([type, spec]) => [type, spec.tier]),
+);
 
 export function tierOf(type: string): number {
   return TYPE_TIER[type] ?? 0;

@@ -14,6 +14,12 @@ export interface AdoptableResource {
   itemPath: (id: number) => string;
   /** Update verb: `group` is PATCH; every other type is PUT. */
   updateMethod: "PUT" | "PATCH";
+  /**
+   * Apply tier: lower applies first, delete runs highest first (see engine/graph.ts). Owned here so
+   * a new resource type declares its ordering in the same place as its paths — `engine/graph.ts`
+   * derives `TYPE_TIER` from these entries instead of maintaining a parallel (drift-prone) table.
+   */
+  tier: number;
   /** Stable logical key derived from the fetched resource. */
   deriveKey: (resource: Record<string, unknown>) => string;
   /** The subset of fields we manage — the desired-state baseline. */
@@ -60,6 +66,7 @@ export const RESOURCES: Record<string, AdoptableResource> = {
   campus: define({
     collectionPath: "/campuses",
     updateMethod: "PUT",
+    tier: 0,
     // CT's campus short name is `shorty` (1–10 chars, required on create) — verified
     // live. `shortName` is a vestigial, usually-null sibling; do not use it for writes.
     deriveKey: (r) => slug(str(r, "shorty") || str(r, "name")),
@@ -68,6 +75,7 @@ export const RESOURCES: Record<string, AdoptableResource> = {
   group: define({
     collectionPath: "/groups",
     updateMethod: "PATCH",
+    tier: 1,
     deriveKey: (r) => slug(str(r, "name")),
     managedFields: (r) => ({
       name: r.name,
@@ -78,24 +86,28 @@ export const RESOURCES: Record<string, AdoptableResource> = {
   "group-type": define({
     collectionPath: "/group/grouptypes",
     updateMethod: "PUT",
+    tier: 0,
     deriveKey: (r) => slug(str(r, "name")),
     managedFields: (r) => ({ name: r.name, nameTranslated: r.nameTranslated }),
   }),
   "age-group": define({
     collectionPath: "/group/agegroups",
     updateMethod: "PUT",
+    tier: 0,
     deriveKey: (r) => slug(str(r, "name")),
     managedFields: (r) => ({ name: r.name, nameTranslated: r.nameTranslated, sortKey: r.sortKey }),
   }),
   "target-group": define({
     collectionPath: "/group/targetgroups",
     updateMethod: "PUT",
+    tier: 0,
     deriveKey: (r) => slug(str(r, "name")),
     managedFields: (r) => ({ name: r.name, nameTranslated: r.nameTranslated, sortKey: r.sortKey }),
   }),
   "relationship-type": define({
     collectionPath: "/person/relationshiptypes",
     updateMethod: "PUT",
+    tier: 0,
     deriveKey: (r) => slug(str(r, "name")),
     // CT names the two ends degreeNameA/degreeNameB (verified live) — not degreeForward/Reverse.
     managedFields: (r) => ({
@@ -108,6 +120,7 @@ export const RESOURCES: Record<string, AdoptableResource> = {
   "group-role": define({
     collectionPath: "/group/roles",
     updateMethod: "PUT",
+    tier: 3,
     deriveKey: (r) => slug(str(r, "name")),
     managedFields: (r) => ({ name: r.name, nameTranslated: r.nameTranslated, groupTypeId: r.groupTypeId }),
     // `groupRole` is taken by the permissions DSL (`ct.groupRole` = definePermission("group_role")),

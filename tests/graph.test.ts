@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { orderKeys, tierOf } from "../src/engine/graph.js";
+import { orderKeys, tierOf, isKnownType, TYPE_TIER } from "../src/engine/graph.js";
+import { RESOURCES } from "../src/resources/registry.js";
 import type { DesiredResource } from "../src/engine/types.js";
 
 function res(type: string, key: string, deps: string[] = [], parent?: string): DesiredResource {
@@ -8,10 +9,22 @@ function res(type: string, key: string, deps: string[] = [], parent?: string): D
 
 describe("tierOf", () => {
   it("ranks metadata below groups below the things that reference groups", () => {
+    // Tiers are derived from the resource registry now; only real DesiredResource types have one.
     expect(tierOf("campus")).toBeLessThan(tierOf("group"));
-    expect(tierOf("group")).toBeLessThan(tierOf("group-hierarchy"));
-    expect(tierOf("permission")).toBeLessThan(tierOf("dynamic-group"));
+    expect(tierOf("group-type")).toBeLessThan(tierOf("group"));
+    expect(tierOf("group")).toBeLessThan(tierOf("group-role"));
     expect(tierOf("unknown")).toBe(0);
+  });
+
+  it("derives TYPE_TIER from the resource registry — exactly the registry types, no phantoms (#35 item 6)", () => {
+    // The old hand-maintained table carried phantom types (group-status, group-hierarchy, permission,
+    // dynamic-group) that are not DesiredResource types. Derivation keeps the two in lockstep.
+    expect(Object.keys(TYPE_TIER).sort()).toEqual(Object.keys(RESOURCES).sort());
+    for (const [type, spec] of Object.entries(RESOURCES)) {
+      expect(TYPE_TIER[type]).toBe(spec.tier);
+      expect(isKnownType(type)).toBe(true);
+    }
+    expect(isKnownType("group-status")).toBe(false); // phantom removed
   });
 });
 
