@@ -7,7 +7,7 @@
  */
 import type { CtClient } from "../api/ctClient.js";
 import { CtApiError } from "../api/ctClient.js";
-import type { State } from "../state/state.js";
+import type { ManagedResource, State } from "../state/state.js";
 import type { DesiredResource, Plan } from "./types.js";
 import { RESOURCES } from "../resources/registry.js";
 import { computePlan } from "./plan.js";
@@ -24,25 +24,36 @@ export interface BuildResult {
   fetchErrors: string[];
 }
 
-export interface BuildOptions {
-  /** Directory of the config file — `{ ref }` ruleset paths resolve relative to it (not the cwd). */
-  configDir?: string;
+export interface FetchActualResult {
+  /** Managed fields per logical key, for every resource that fetched cleanly (a 404 is omitted, not an error). */
+  actual: Map<string, Record<string, unknown>>;
+  /** Keys whose managed type has no registry entry — cannot be fetched/diffed, so left untouched. */
+  unresolved: Set<string>;
+  /** Keys whose fetch errored (non-404), mapped to a short status descriptor for the plan render. */
+  fetchFailed: Map<string, string>;
+  /** Human-readable fetch-error lines (non-404), one per failed key. */
+  fetchErrors: string[];
 }
 
-export async function buildPlan(
+/**
+ * Fetch the actual ChurchTools values of a set of managed resources, concurrently.
+ *
+ * Shared by `buildPlan` (plan/apply) and `destroy` (its pre-delete backup) so the
+ * two read actuals identically and cannot drift. A 404 means the resource vanished
+ * in CT — omitted from `actual` (the plan recreates/prunes; the backup skips it).
+ * A non-404 error is recorded (never thrown) so one bad fetch neither aborts a
+ * read-only plan nor blocks tearing down the other targets.
+ */
+export async function fetchActual(
   client: Pick<CtClient, "get">,
-  state: State,
-  desired: DesiredResource[],
-  opts: BuildOptions = {},
-): Promise<BuildResult> {
-  // Keyed by logical key (globally unique), not CT id (unique only within a type — the Mainz campus is id 0).
+  resources: readonly ManagedResource[],
+): Promise<FetchActualResult> {
   const actual = new Map<string, Record<string, unknown>>();
   const unresolved = new Set<string>();
-  // Keys whose fetch errored (non-404), mapped to a short status descriptor for the plan render.
   const fetchFailed = new Map<string, string>();
   const fetchErrors: string[] = [];
 
-  await mapConcurrent(Object.values(state.resources), FETCH_CONCURRENCY, async (managed) => {
+  await mapConcurrent(resources, FETCH_CONCURRENCY, async (managed) => {
     const spec = RESOURCES[managed.type];
     if (!spec) {
       unresolved.add(managed.key);
@@ -67,6 +78,26 @@ export async function buildPlan(
       warn(`Failed to fetch ${managed.type}.${managed.key} (#${managed.id}): ${message}`);
     }
   });
+
+  return { actual, unresolved, fetchFailed, fetchErrors };
+}
+
+export interface BuildOptions {
+  /** Directory of the config file — `{ ref }` ruleset paths resolve relative to it (not the cwd). */
+  configDir?: string;
+}
+
+export async function buildPlan(
+  client: Pick<CtClient, "get">,
+  state: State,
+  desired: DesiredResource[],
+  opts: BuildOptions = {},
+): Promise<BuildResult> {
+  // Keyed by logical key (globally unique), not CT id (unique only within a type — the Mainz campus is id 0).
+  const { actual, unresolved, fetchFailed, fetchErrors } = await fetchActual(
+    client,
+    Object.values(state.resources),
+  );
 
   // Synthetic sub-resource fields (parents, dynamic, …) fold into the diff on both sides.
   const folded = await foldSynthetic({ client, state, desired, actual, configDir: opts.configDir });
