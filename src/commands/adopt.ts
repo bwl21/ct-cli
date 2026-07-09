@@ -3,6 +3,7 @@ import { authedSession } from "../api/session.js";
 import { resolveConfig } from "../config.js";
 import { prepareEnv } from "../env/context.js";
 import { resourceType, configSnippet } from "../resources/registry.js";
+import { ReverseResolver } from "../resolve/reverse.js";
 import { loadState, saveState, upsert } from "../state/state.js";
 import { success, info, warn, out } from "../ui.js";
 import { adoptGrantsCommand } from "./adopt-grants.js";
@@ -47,7 +48,10 @@ export function adoptCommand(): Command {
         throw new Error("Could not derive a logical key — pass --key explicitly.");
       }
       const fields = spec.managedFields(resource);
-      const snippet = configSnippet(type, key, fields);
+      // Reverse-resolve numeric ids (campusId/groupTypeId/groupStatusId) to logical sugar so the
+      // emitted snippet is portable and human-readable; unresolved ids stay numeric + a TODO (#52).
+      const { fields: sugared, todos } = await new ReverseResolver(client).sugarFields(fields);
+      const snippet = configSnippet(type, key, sugared, { todos });
 
       if (opts.dryRun) {
         info(`Would adopt ${type} #${id} as "${key}". Generated config entry:`);

@@ -69,29 +69,70 @@ describe("resourceType", () => {
   });
 });
 
-describe("configSnippet", () => {
-  it("renders a TS-as-code call with the logical key first", () => {
+describe("configSnippet — idiomatic multi-line output (#52 item A)", () => {
+  it("renders a prettier-compatible multi-line call with the logical key first", () => {
     expect(configSnippet("campus", "mainz", { name: "Mainz", shortName: "MZ" })).toBe(
-      'campus({ key: "mainz", name: "Mainz", shortName: "MZ" });',
+      ["campus({", '  key: "mainz",', '  name: "Mainz",', '  shortName: "MZ",', "});"].join("\n"),
     );
   });
 
   it("camelCases a hyphenated type into the function name", () => {
     expect(configSnippet("group-type", "commitment", { name: "Commitment" })).toBe(
-      'groupType({ key: "commitment", name: "Commitment" });',
+      ["groupType({", '  key: "commitment",', '  name: "Commitment",', "});"].join("\n"),
     );
   });
 
   it("omits undefined fields", () => {
     expect(configSnippet("group", "team", { name: "Team", groupTypeId: undefined })).toBe(
-      'group({ key: "team", name: "Team" });',
+      ["group({", '  key: "team",', '  name: "Team",', "});"].join("\n"),
     );
   });
 
   it("emits the master-data role under roleDefinition, not the colliding permission name groupRole", () => {
     expect(configSnippet("group-role", "leiter", { name: "Leiter", groupTypeId: 2 })).toBe(
-      'roleDefinition({ key: "leiter", name: "Leiter", groupTypeId: 2 });',
+      ["roleDefinition({", '  key: "leiter",', '  name: "Leiter",', "  groupTypeId: 2,", "});"].join("\n"),
     );
+  });
+
+  it("flags a field named in `todos` with a trailing `// TODO: no logical match` comment", () => {
+    expect(
+      configSnippet("group", "team", { name: "Team", groupTypeId: 5 }, { todos: new Set(["groupTypeId"]) }),
+    ).toBe(
+      [
+        "group({",
+        '  key: "team",',
+        '  name: "Team",',
+        "  groupTypeId: 5, // TODO: no logical match",
+        "});",
+      ].join("\n"),
+    );
+  });
+
+  it("collapses a `dynamic` block to `true` when it matches the ./rulesets/<key>.json convention", () => {
+    expect(
+      configSnippet("group", "all_mainz", {
+        name: "Alle",
+        dynamic: { status: "active", ruleset: { ref: "./rulesets/all_mainz.json" } },
+      }),
+    ).toContain("  dynamic: true,");
+  });
+
+  it("collapses a `dynamic` block to the bare path string when active but off-convention", () => {
+    expect(
+      configSnippet("group", "g", {
+        name: "G",
+        dynamic: { status: "active", ruleset: { ref: "./custom/rules.json" } },
+      }),
+    ).toContain('  dynamic: "./custom/rules.json",');
+  });
+
+  it("keeps a non-active `dynamic` block as an explicit object", () => {
+    const snip = configSnippet("group", "g", {
+      name: "G",
+      dynamic: { status: "manual", ruleset: { ref: "./rulesets/g.json" } },
+    });
+    expect(snip).toContain("  dynamic: {");
+    expect(snip).toContain('    status: "manual",');
   });
 });
 
@@ -186,7 +227,7 @@ describe("knownFields (#51)", () => {
 describe("configSnippet null omission", () => {
   it("omits null-valued fields — a campus-less group adopts without managing 'no campus'", () => {
     expect(configSnippet("group", "team", { name: "Team", groupTypeId: 2, campusId: null })).toBe(
-      'group({ key: "team", name: "Team", groupTypeId: 2 });',
+      ["group({", '  key: "team",', '  name: "Team",', "  groupTypeId: 2,", "});"].join("\n"),
     );
   });
 });

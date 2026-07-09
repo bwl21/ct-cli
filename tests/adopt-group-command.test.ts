@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +27,8 @@ function makeClient() {
     50: { id: 50, name: "Cycle A", information: { groupTypeId: 5, groupStatusId: 1 } },
     51: { id: 51, name: "Cycle B", information: { groupTypeId: 5, groupStatusId: 1 } },
     30: { id: 30, name: "All Mainz", information: { groupTypeId: 5, groupStatusId: 1 } },
-    31: { id: 31, name: "Static Group", information: { groupTypeId: 5, groupStatusId: 1 } },
+    // campusId 0 (Mainz) exercises campus reverse-resolution — including the id-0 edge — end to end.
+    31: { id: 31, name: "Static Group", information: { groupTypeId: 5, groupStatusId: 1, campusId: 0 } },
   };
   const children: Record<number, number[]> = {
     40: [41, 42],
@@ -39,6 +40,9 @@ function makeClient() {
     { id: 5, name: "Team" },
     { id: 9, name: "Other Type" },
   ];
+  // Master-data catalogs the reverse resolver reads to sugar numeric ids back to logical keys (#52).
+  const campuses = [{ id: 0, name: "Mainz" }];
+  const memberStatuses = [{ id: 1, name: "Aktiv" }];
   const rulesets: Record<number, Record<string, unknown>> = {
     30: { description: "x", query: { "==": [{ var: "a" }, "1"] }, process: {} },
   };
@@ -54,6 +58,8 @@ function makeClient() {
     m = /^\/groups\/(\d+)\/children$/.exec(path);
     if (m) return (children[Number(m[1])] ?? []).map((id) => ({ id }));
     if (path === "/group/grouptypes") return groupTypes;
+    if (path === "/campuses") return campuses;
+    if (path === "/group/memberstatus") return memberStatuses;
     m = /^\/dynamicgroups\/(\d+)\/ruleset$/.exec(path);
     if (m) {
       const rs = rulesets[Number(m[1])];
@@ -81,6 +87,7 @@ vi.mock("../src/api/session.js", () => ({
 
 const { adoptCommand } = await import("../src/commands/adopt.js");
 const { loadState } = await import("../src/state/state.js");
+const { loadConfig } = await import("../src/config/load.js");
 
 const HOST = "https://eqrm.church.tools";
 const originalHost = process.env.CT_HOST;
@@ -130,8 +137,10 @@ describe("ct adopt group — multi-id list form", () => {
     }
     const block = writes.join("");
     expect(block).toContain("// group");
-    expect(block).toContain('group({ key: "area_a"');
-    expect(block).toContain('group({ key: "area_b"');
+    // Idiomatic multi-line snippets (#52 item A): the call opens on its own line, key first.
+    expect(block).toContain("group({");
+    expect(block).toContain('key: "area_a"');
+    expect(block).toContain('key: "area_b"');
     // parents-before-children / declared order preserved: area_a's line precedes area_b's.
     expect(block.indexOf('key: "area_a"')).toBeLessThan(block.indexOf('key: "area_b"'));
   });
@@ -254,9 +263,12 @@ describe("ct adopt group --with-dynamic", () => {
     expect(written).toEqual({ description: "x", query: { "==": [{ var: "a" }, 1] }, process: {} }); // coerced "1" -> 1
 
     const block = writes.join("");
-    // configSnippet renders a nested-object field value via JSON.stringify (compact, quoted keys) —
-    // matches the existing tsObject behavior (see src/resources/registry.ts), unchanged by #51.
-    expect(block).toContain('dynamic: {"status":"active","ruleset":{"ref":"./rulesets/all_mainz.json"}}');
+    // #52 item A+B: an active dynamic group whose ruleset matches the ./rulesets/<key>.json convention
+    // is emitted with the shortest `dynamic: true` sugar (round-trips to the same spec on load).
+    expect(block).toContain("dynamic: true,");
+    // And the numeric ids are reverse-sugared to their logical keys against the mocked catalogs.
+    expect(block).toContain('groupType: "team",');
+    expect(block).toContain('status: "aktiv",');
 
     // The plain group fields (state snapshot) never carry "dynamic" — it's synthetic, not a managed field.
     const state = await loadState(statePath, HOST);
@@ -304,6 +316,44 @@ describe("ct adopt group --with-dynamic", () => {
       dynamic: { status: "active", ruleset: { ref: "./rulesets/all_mainz.json" } },
     });
 
+    const { plan } = await buildPlan(client as unknown as Pick<CtClient, "get">, state, resources, {
+      configDir: workDir,
+    });
+    expect(plan.items.every((i) => i.action === "no-op")).toBe(true);
+  });
+});
+
+describe("ct adopt group — idiomatic snippet round-trips to a no-op (#52 item A acceptance)", () => {
+  it("pasting the VERBATIM emitted snippet into a config plans as a no-op, zero hand edits", async () => {
+    // Adopt a real group, capturing exactly what the command prints to stdout.
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((s) => {
+      writes.push(String(s));
+      return true;
+    });
+    try {
+      await run(["group", "31", "--state", statePath]);
+    } finally {
+      spy.mockRestore();
+    }
+
+    // The printed block is a `// group` header + one idiomatic multi-line `group({ ... });` snippet
+    // with campusId/groupTypeId/groupStatusId reverse-sugared to campus/groupType/status keys.
+    const block = writes.join("");
+    const snippet = block.replace(/^\/\/ group\n/, "").trim();
+    expect(snippet.startsWith("group({")).toBe(true);
+    expect(snippet).toContain('campus: "mainz"'); // id 0 reverse-resolved
+    expect(snippet).toContain('groupType: "team"');
+    expect(snippet).toContain('status: "aktiv"');
+    expect(snippet).not.toContain("TODO"); // everything resolved — a clean, hand-edit-free paste
+
+    // Paste it VERBATIM into a config (only wrapping boilerplate + the `ct.` receiver added).
+    const configPath = join(workDir, "ct.config.ts");
+    writeFileSync(configPath, `export default (ct) => {\n  ct.${snippet}\n};\n`);
+
+    // Load it through the real loader and plan against the state the adopt just wrote.
+    const { resources } = await loadConfig(configPath);
+    const state = await loadState(statePath, HOST);
     const { plan } = await buildPlan(client as unknown as Pick<CtClient, "get">, state, resources, {
       configDir: workDir,
     });

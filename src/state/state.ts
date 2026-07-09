@@ -182,11 +182,17 @@ export function upsert(state: State, input: UpsertInput, now: string): UpsertAct
     if (existing.key !== input.key) {
       delete state.resources[existing.key];
     }
+    // State is machine-only (#52): `updatedAt` bumps ONLY when the managed fields actually change, so
+    // an apply that writes an identical snapshot leaves the committed state file byte-for-byte
+    // unchanged (no churn). When unchanged, keep the EXISTING `fields` object (not the freshly-built
+    // input one) so serialization order is preserved too — a mere key-order difference must not churn
+    // the diff. `adoptedAt` is set once at first adoption and never touched again.
+    const unchanged = fieldsEqual(existing.fields, input.fields);
     state.resources[input.key] = {
       ...existing,
       key: input.key,
-      fields: input.fields,
-      updatedAt: now,
+      fields: unchanged ? existing.fields : input.fields,
+      updatedAt: unchanged ? existing.updatedAt : now,
     };
     return "updated";
   }
@@ -204,4 +210,32 @@ export function upsert(state: State, input: UpsertInput, now: string): UpsertAct
 
 function isNotFound(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { code?: string }).code === "ENOENT";
+}
+
+/**
+ * Structural, order-independent equality for two managed-field bags (#52). Kept local so state — a
+ * foundational module that imports no engine code — stays self-contained (mirrors the engine's
+ * `deepEqual`, but a key-order difference between two structurally-identical snapshots must not be
+ * seen as a change here either).
+ *
+ * Undefined-valued keys are treated as absent (`undefined === missing`), on both sides and
+ * recursively at every level. This mirrors `JSON.stringify`/`JSON.parse` round-tripping, which is
+ * how state is actually persisted and reloaded: a fresh snapshot built from `managedFields` can carry
+ * explicit `foo: undefined` for an optional field the API omitted (e.g. group-type `nameTranslated`),
+ * while the persisted snapshot loaded from disk simply lacks the key. Without this, re-adopting an
+ * unchanged resource sees a key-count mismatch and spuriously bumps `updatedAt`.
+ */
+function fieldsEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((v, i) => fieldsEqual(v, b[i]));
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const aKeys = Object.keys(ao).filter((k) => ao[k] !== undefined);
+  const bKeys = Object.keys(bo).filter((k) => bo[k] !== undefined);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((k) => bo[k] !== undefined && fieldsEqual(ao[k], bo[k]));
 }

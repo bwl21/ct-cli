@@ -225,6 +225,60 @@ describe("dynamic block", () => {
   });
 });
 
+describe("dynamic sugar (#52 item B)", () => {
+  it("desugars `dynamic: true` to active + the conventional ./rulesets/<key>.json ref", () => {
+    const { ct, resources } = createContext();
+    ct.group({ key: "all_mainz", name: "Alle", groupTypeId: 1, dynamic: true });
+    expect(resources[0]?.dynamic).toEqual({
+      status: "active",
+      ruleset: { ref: "./rulesets/all_mainz.json" },
+    });
+    expect(resources[0]?.fields).not.toHaveProperty("dynamic");
+  });
+
+  it('desugars a `dynamic: "<path>.json"` string to active + that explicit ref', () => {
+    const { ct, resources } = createContext();
+    ct.group({ key: "g", name: "G", dynamic: "./custom/rules.json" });
+    expect(resources[0]?.dynamic).toEqual({
+      status: "active",
+      ruleset: { ref: "./custom/rules.json" },
+    });
+  });
+
+  it("keeps the explicit object form working unchanged", () => {
+    const { ct, resources } = createContext();
+    ct.group({
+      key: "g",
+      name: "G",
+      dynamic: { status: "manual", ruleset: { description: "x", method: "ChurchQuery", params: {} } },
+    });
+    expect(resources[0]?.dynamic).toEqual({
+      status: "manual",
+      ruleset: { description: "x", method: "ChurchQuery", params: {} },
+    });
+  });
+
+  it("rejects a string that is not a .json path", () => {
+    const { ct } = createContext();
+    expect(() => ct.group({ key: "g", name: "G", dynamic: "rules.yaml" })).toThrow(/\.json ruleset file/);
+  });
+
+  it("rejects `dynamic: false` and other non-true / non-string / non-object values", () => {
+    const { ct } = createContext();
+    expect(() => ct.group({ key: "a", name: "A", dynamic: false })).toThrow(
+      /must be true, a "<path>\.json" string, or an object/,
+    );
+    expect(() => ct.group({ key: "b", name: "B", dynamic: 42 as never })).toThrow(
+      /must be true, a "<path>\.json" string, or an object/,
+    );
+  });
+
+  it("rejects the sugar forms on a non-group type", () => {
+    const { ct } = createContext();
+    expect(() => ct.campus({ key: "c", name: "C", dynamic: true } as never)).toThrow(/dynamic.*only.*group/i);
+  });
+});
+
 describe("unknown-field warning (#51)", () => {
   it("warns naming the resource key and the unknown field, but still keeps it in fields", () => {
     const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);

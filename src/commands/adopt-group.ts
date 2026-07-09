@@ -18,6 +18,7 @@ import { prepareEnv } from "../env/context.js";
 import { normalizeRuleset } from "../engine/dynamic.js";
 import type { DynamicStatus } from "../engine/types.js";
 import { RESOURCES, configSnippet, fromInformation, slug } from "../resources/registry.js";
+import { ReverseResolver } from "../resolve/reverse.js";
 import { loadState, saveState, upsert, type State } from "../state/state.js";
 import { success, info, warn, out } from "../ui.js";
 
@@ -234,6 +235,9 @@ export function adoptGroupCommand(): Command {
       }
 
       const now = new Date().toISOString();
+      // One reverse resolver across the whole (possibly bulk) run — each master-data catalog is
+      // fetched at most once and reused for every group's numeric-id → logical-sugar rewrite (#52).
+      const reverse = new ReverseResolver(client);
       const results: ResolvedAdoption[] = [];
       const reports: Array<{ action: "created" | "updated"; id: number; key: string }> = [];
 
@@ -246,7 +250,10 @@ export function adoptGroupCommand(): Command {
         }
         const fields = GROUP_SPEC.managedFields(resource);
 
-        let snippetFields: Record<string, unknown> = fields;
+        // Reverse-resolve the group's numeric ids to logical sugar for the emitted snippet; the
+        // captured `dynamic` block (if any) is appended AFTER, so it is not treated as an id field.
+        const { fields: sugared, todos } = await reverse.sugarFields(fields);
+        const snippetFields: Record<string, unknown> = sugared;
         if (opts.withDynamic) {
           const captured = await captureDynamic(id, client);
           if (captured) {
@@ -259,13 +266,10 @@ export function adoptGroupCommand(): Command {
                 "utf8",
               );
             }
-            snippetFields = {
-              ...fields,
-              dynamic: { status: captured.status, ruleset: { ref: `./${relPath}` } },
-            };
+            snippetFields.dynamic = { status: captured.status, ruleset: { ref: `./${relPath}` } };
           }
         }
-        const snippet = configSnippet("group", key, snippetFields);
+        const snippet = configSnippet("group", key, snippetFields, { todos });
 
         if (opts.dryRun) {
           results.push({ id, key, fields, snippet });
@@ -304,9 +308,9 @@ export function adoptGroupCommand(): Command {
         }
       }
 
-      // Grouped, paste-ready config block. configSnippet's per-line FORMAT is unchanged (#52 reworks
-      // that later) — this only wraps the group of lines under a type comment header, ordered
-      // parents-before-children where hierarchy is known (--children-of's subtree walk).
+      // Grouped, paste-ready config block: each snippet is now idiomatic multi-line TS (#52 item A),
+      // wrapped under a type comment header and ordered parents-before-children where hierarchy is
+      // known (--children-of's subtree walk).
       info(results.length === 1 ? "Config entry:" : "Config entries (paste into your config):");
       const block = [`// group`, ...results.map((r) => r.snippet)].join("\n");
       process.stdout.write(`${block}\n`);

@@ -31,6 +31,66 @@ describe("state.upsert", () => {
     expect(state.resources.mainz?.updatedAt).toBe(LATER);
   });
 
+  it("does not bump updatedAt when re-adopting identical fields (#52: quiet state)", () => {
+    const state = emptyState(HOST);
+    upsert(state, { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz", shorty: "MZ" } }, NOW);
+    // Re-upsert with the SAME fields (a fresh object, but structurally equal) at a LATER time.
+    const action = upsert(
+      state,
+      { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz", shorty: "MZ" } },
+      LATER,
+    );
+    expect(action).toBe("updated");
+    // updatedAt must NOT churn: nothing about the resource actually changed.
+    expect(state.resources.mainz?.updatedAt).toBe(NOW);
+    expect(state.resources.mainz?.adoptedAt).toBe(NOW);
+  });
+
+  it("does not bump updatedAt when a fresh snapshot carries undefined-valued optional keys the persisted one lacks (#52: JSON round-trip parity)", () => {
+    // group-type's managedFields includes `nameTranslated` as an optional key: when the API omits
+    // it, the freshly-built fields object carries an explicit `nameTranslated: undefined`, while the
+    // snapshot loaded back from disk (via JSON.parse, after JSON.stringify dropped the undefined key
+    // on save) simply lacks the key. Re-adopting must see these as equal.
+    const state = emptyState(HOST);
+    const persisted = JSON.parse(JSON.stringify({ name: "Members", nameTranslated: undefined }));
+    upsert(state, { type: "group-type", id: 3, key: "gt-members", fields: persisted }, NOW);
+    expect(state.resources["gt-members"]?.fields).toEqual({ name: "Members" });
+
+    const fresh = { name: "Members", nameTranslated: undefined };
+    const action = upsert(state, { type: "group-type", id: 3, key: "gt-members", fields: fresh }, LATER);
+
+    expect(action).toBe("updated");
+    expect(state.resources["gt-members"]?.updatedAt).toBe(NOW);
+  });
+
+  it("bumps updatedAt only when the fields actually change", () => {
+    const state = emptyState(HOST);
+    upsert(state, { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz" } }, NOW);
+    upsert(state, { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz HQ" } }, LATER);
+    expect(state.resources.mainz?.updatedAt).toBe(LATER);
+    expect(state.resources.mainz?.adoptedAt).toBe(NOW);
+  });
+
+  it("ignores field key ORDER when deciding whether fields changed (order-independent)", () => {
+    const state = emptyState(HOST);
+    upsert(state, { type: "group", id: 5, key: "g", fields: { name: "G", groupTypeId: 2 } }, NOW);
+    upsert(state, { type: "group", id: 5, key: "g", fields: { groupTypeId: 2, name: "G" } }, LATER);
+    expect(state.resources.g?.updatedAt).toBe(NOW); // reordered, but structurally identical
+  });
+
+  it("re-adopting identical fields leaves the saved state file byte-identical", async () => {
+    const state = emptyState(HOST);
+    upsert(state, { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz", shorty: "MZ" } }, NOW);
+    const path = join(tmpdir(), `ct-cli-quiet-${process.pid}.json`);
+    await saveState(path, state);
+    const before = await import("node:fs/promises").then((fs) => fs.readFile(path, "utf8"));
+    upsert(state, { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz", shorty: "MZ" } }, LATER);
+    await saveState(path, state);
+    const after = await import("node:fs/promises").then((fs) => fs.readFile(path, "utf8"));
+    await rm(path, { force: true });
+    expect(after).toBe(before);
+  });
+
   it("handles id 0 without treating it as missing", () => {
     const state = emptyState(HOST);
     upsert(state, { type: "campus", id: 0, key: "mainz", fields: {} }, NOW);

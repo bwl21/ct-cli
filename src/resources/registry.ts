@@ -163,23 +163,100 @@ function camelCase(type: string): string {
 }
 
 /**
- * Render a config entry as a TS-as-code call, e.g. `campus({ key: "mainz", name: "Mainz" })`.
- * The function name comes from the registry entry's `dslName` (default: camelCase of the type),
- * so the emitted snippet always names an actual `ConfigContext` function — never a colliding one.
+ * The conventional ruleset-file path for a dynamic group's `dynamic: true` sugar (#52): the same
+ * `rulesets/<key>.json` layout `ct adopt group --with-dynamic` writes to. Owned here (a low-level
+ * module) so both the config-DSL desugarer (context.ts) and the adopt emitter can share it without
+ * a registry↔context import cycle.
  */
-export function configSnippet(type: string, key: string, fields: Record<string, unknown>): string {
-  const fn = RESOURCES[type]?.dslName ?? camelCase(type);
-  return `${fn}(${tsObject({ key, ...fields })});`;
+export function conventionalRulesetRef(key: string): string {
+  return `./rulesets/${key}.json`;
 }
 
-function tsObject(obj: Record<string, unknown>): string {
-  // null-valued fields are omitted, not emitted: pasting `campusId: null` would actively
-  // MANAGE "no campus" (planning a later UI-assigned campus back to null), whereas omission
-  // leaves the field unmanaged — the safer default for a freshly adopted resource.
-  const parts = Object.entries(obj)
-    .filter(([, v]) => v !== undefined && v !== null)
-    .map(([k, v]) => `${isIdentifier(k) ? k : JSON.stringify(k)}: ${JSON.stringify(v)}`);
-  return `{ ${parts.join(", ")} }`;
+/** Prettier's `printWidth` (see .prettierrc.json) — the emitter mirrors it for array wrapping. */
+const PRINT_WIDTH = 110;
+
+/** Options for {@link configSnippet}. `todos` names fields to flag with a trailing `// TODO` comment. */
+export interface SnippetOptions {
+  /** Field keys that could not be reverse-resolved to logical sugar — annotated inline (#52 item A). */
+  todos?: Set<string>;
+}
+
+/**
+ * Render a config entry as an idiomatic, prettier-compatible TS-as-code call (#52 item A):
+ * multi-line, 2-space indent, trailing commas, one field per line. The function name comes from the
+ * registry entry's `dslName` (default: camelCase of the type), so the emitted snippet always names an
+ * actual `ConfigContext` function — never a colliding one. `fields` should already be reverse-sugared
+ * (numeric ids → logical `campus`/`groupType`/`status` keys); anything left numeric that the caller
+ * couldn't resolve is passed in `opts.todos` to earn a `// TODO: no logical match` marker. A `dynamic`
+ * field is collapsed to its shortest sugar form (`true` / `"<path>"`) when it matches the convention.
+ */
+export function configSnippet(
+  type: string,
+  key: string,
+  fields: Record<string, unknown>,
+  opts: SnippetOptions = {},
+): string {
+  const fn = RESOURCES[type]?.dslName ?? camelCase(type);
+  const prepared: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    prepared[k] = k === "dynamic" ? sugarDynamicValue(key, v) : v;
+  }
+  return `${fn}(${renderObject({ key, ...prepared }, "", opts.todos)});`;
+}
+
+/**
+ * Collapse an emitted `dynamic` value to its shortest DSL sugar (#52 item B round-trip): an
+ * `active` status whose ruleset is exactly `{ ref }` becomes `true` (when the ref matches the
+ * `./rulesets/<key>.json` convention) or the bare `"<path>"` string. Any other shape (non-active
+ * status, an inline ruleset object) is emitted verbatim as the explicit object.
+ */
+function sugarDynamicValue(key: string, dynamic: unknown): unknown {
+  if (dynamic === null || typeof dynamic !== "object") return dynamic;
+  const d = dynamic as Record<string, unknown>;
+  const ruleset = d.ruleset;
+  if (d.status !== "active" || ruleset === null || typeof ruleset !== "object") return dynamic;
+  const rs = ruleset as Record<string, unknown>;
+  if (typeof rs.ref !== "string" || Object.keys(rs).length !== 1) return dynamic;
+  return rs.ref === conventionalRulesetRef(key) ? true : rs.ref;
+}
+
+/**
+ * Render a plain object as multi-line TS. null/undefined-valued fields are OMITTED, not emitted:
+ * pasting `campusId: null` would actively MANAGE "no campus" (planning a later UI-assigned campus
+ * back to null), whereas omission leaves the field unmanaged — the safer default for a freshly
+ * adopted resource. `todos` (top-level only) appends a `// TODO` marker after the trailing comma.
+ */
+function renderObject(obj: Record<string, unknown>, indent: string, todos?: Set<string>): string {
+  const inner = `${indent}  `;
+  const entries = Object.entries(obj).filter(([, v]) => v !== undefined && v !== null);
+  if (entries.length === 0) return "{}";
+  const lines = entries.map(([k, v]) => {
+    const keyStr = isIdentifier(k) ? k : JSON.stringify(k);
+    const todo = todos?.has(k) ? " // TODO: no logical match" : "";
+    return `${inner}${keyStr}: ${renderValue(v, inner)},${todo}`;
+  });
+  return `{\n${lines.join("\n")}\n${indent}}`;
+}
+
+/** Render any JSON value as prettier-style TS, indenting nested objects/arrays under `indent`. */
+function renderValue(value: unknown, indent: string): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]";
+    // Match prettier: a short all-primitive array stays on one line; anything longer or with a
+    // nested object/array breaks one element per line. (Adopt output never actually nests arrays —
+    // rulesets are emitted as a `{ ref }` — so this only keeps the emitter faithful in general.)
+    const allPrimitive = value.every((v) => v === null || typeof v !== "object");
+    const inline = `[${value.map((v) => renderValue(v, indent)).join(", ")}]`;
+    if (allPrimitive && indent.length + inline.length <= PRINT_WIDTH) return inline;
+    const inner = `${indent}  `;
+    const items = value.map((v) => `${inner}${renderValue(v, inner)},`).join("\n");
+    return `[\n${items}\n${indent}]`;
+  }
+  if (typeof value === "object") return renderObject(value as Record<string, unknown>, indent);
+  return JSON.stringify(value);
 }
 
 function isIdentifier(key: string): boolean {
