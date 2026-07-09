@@ -27,6 +27,22 @@ describe("writeBackup", () => {
     });
   });
 
+  it("strips synthetic pseudo-fields (parents, dynamic) so a backup holds only real values (#17 item 6)", async () => {
+    dir = await mkdtemp(join(tmpdir(), "ct-backup-test-"));
+    // buildPlan folds `parents`/`dynamic` into its actual map in place; apply reuses that same map.
+    const actual = new Map<string, Record<string, unknown>>([
+      [
+        "kids",
+        { name: "Kids", groupTypeId: 2, parents: ["area"], dynamic: { status: "active", ruleset: {} } },
+      ],
+    ]);
+    const path = await writeBackup(dir, "h", actual, new Date("2026-01-01T00:00:00.000Z"));
+    const parsed = JSON.parse(await readFile(path, "utf8"));
+    expect(parsed.resources.kids).toEqual({ name: "Kids", groupTypeId: 2 });
+    // The shared map itself is not mutated (executePlan may still read it after the backup).
+    expect(actual.get("kids")).toHaveProperty("parents");
+  });
+
   it("creates the backup directory if it does not exist", async () => {
     const base = await mkdtemp(join(tmpdir(), "ct-backup-test-"));
     dir = base;
