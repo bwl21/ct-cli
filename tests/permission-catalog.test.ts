@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveAuthId, loadCatalog } from "../src/permissions/catalog.js";
+import { resolveAuthId, CATALOG } from "../src/permissions/catalog.js";
 
 describe("permission catalog", () => {
   it("resolves a known global right to its authId", () => {
@@ -15,7 +15,7 @@ describe("permission catalog", () => {
   it("throws a helpful error for an unknown right", () => {
     expect(() => resolveAuthId("churchgroup:no such right")).toThrow(/unknown permission "churchgroup:no such right"/i);
   });
-  it("loads the whole catalog (187 rights)", () => {
-    expect(Object.keys(loadCatalog()).length).toBeGreaterThanOrEqual(180);
+  it("exposes the whole catalog (187 rights)", () => {
+    expect(Object.keys(CATALOG).length).toBeGreaterThanOrEqual(180);
   });
 });

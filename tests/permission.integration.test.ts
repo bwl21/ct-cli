@@ -17,7 +17,7 @@ import { authedSession } from "../src/api/session.js";
 import { buildPermissionPlan } from "../src/permissions/plan.js";
 import { applyPermissionPlan } from "../src/permissions/apply.js";
 import { normalizeActual, type RawPermission } from "../src/permissions/grants.js";
-import { loadCatalog } from "../src/permissions/catalog.js";
+import { CATALOG } from "../src/permissions/catalog.js";
 import type { State, ManagedResource } from "../src/state/state.js";
 import type { DesiredPermission, Grant } from "../src/permissions/types.js";
 
@@ -28,7 +28,7 @@ const DOMAIN_ID = Number(process.env.CT_PERM_FIXTURE_ID ?? "0"); // a disposable
 /** authId → catalog name, for reversing actual grants back into declarable rights. */
 function reverseCatalog(): Map<number, string> {
   const byAuthId = new Map<number, string>();
-  for (const [name, entry] of Object.entries(loadCatalog())) {
+  for (const [name, entry] of Object.entries(CATALOG)) {
     if (!byAuthId.has(entry.authId)) byAuthId.set(entry.authId, name);
   }
   return byAuthId;

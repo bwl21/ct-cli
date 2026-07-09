@@ -11,17 +11,18 @@ import catalogData from "./catalog.json" with { type: "json" };
 
 export interface CatalogEntry { authId: number; scopeField: string | null; revocable: boolean; desc: string }
 
-const catalog = catalogData as Record<string, CatalogEntry>;
-
-export function loadCatalog(): Record<string, CatalogEntry> {
-  return catalog;
-}
+/**
+ * The permission catalog: name → authId bridge, inlined at build time (see the module header).
+ * It is a constant, not something "loaded" — callers that need a snapshot already spread it, so it
+ * is exported directly rather than behind a `loadCatalog()` wrapper.
+ */
+export const CATALOG = catalogData as Record<string, CatalogEntry>;
 
 export function resolveAuthId(name: string): CatalogEntry {
-  const entry = loadCatalog()[name];
+  const entry = CATALOG[name];
   if (!entry) {
     const [mod] = name.split(":");
-    const near = Object.keys(loadCatalog()).filter((k) => k.startsWith(`${mod}:`)).slice(0, 6);
+    const near = Object.keys(CATALOG).filter((k) => k.startsWith(`${mod}:`)).slice(0, 6);
     const hint = near.length ? ` Did you mean one of: ${near.join(", ")}?` : "";
     throw new Error(`Unknown permission "${name}".${hint}`);
   }

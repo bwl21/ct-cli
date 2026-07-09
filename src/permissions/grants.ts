@@ -45,8 +45,9 @@ export function normalizeActual(rows: RawPermission[]): GrantTuple[] {
   for (const r of rows) {
     if (r.meta?.modifiedPid === -1) continue; // system baseline — invisible to reconciliation
     if (r.isInherited) continue;              // inherited — not directly owned here
-    const dataId = r.dataId == null ? [] : [r.dataId];
-    out.push({ authId: r.authId, dataId: dataId.sort((a, b) => a - b), type: r.type });
+    // dataId is [] or a single element (CT reads scoped grants back one row per dataId), so there is
+    // nothing to sort here — and tupleKey sorts defensively anyway when it builds the identity key.
+    out.push({ authId: r.authId, dataId: r.dataId == null ? [] : [r.dataId], type: r.type });
   }
   return out;
 }
