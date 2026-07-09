@@ -161,8 +161,11 @@ export function configSnippet(type: string, key: string, fields: Record<string, 
 }
 
 function tsObject(obj: Record<string, unknown>): string {
+  // null-valued fields are omitted, not emitted: pasting `campusId: null` would actively
+  // MANAGE "no campus" (planning a later UI-assigned campus back to null), whereas omission
+  // leaves the field unmanaged — the safer default for a freshly adopted resource.
   const parts = Object.entries(obj)
-    .filter(([, v]) => v !== undefined)
+    .filter(([, v]) => v !== undefined && v !== null)
     .map(([k, v]) => `${isIdentifier(k) ? k : JSON.stringify(k)}: ${JSON.stringify(v)}`);
   return `{ ${parts.join(", ")} }`;
 }

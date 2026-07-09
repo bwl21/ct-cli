@@ -156,3 +156,11 @@ describe("write specs", () => {
     ).toEqual({ name: "Mitglied", nameTranslated: "Mitglied", groupTypeId: 2 });
   });
 });
+
+describe("configSnippet null omission", () => {
+  it("omits null-valued fields — a campus-less group adopts without managing 'no campus'", () => {
+    expect(configSnippet("group", "team", { name: "Team", groupTypeId: 2, campusId: null })).toBe(
+      'group({ key: "team", name: "Team", groupTypeId: 2 });',
+    );
+  });
+});
