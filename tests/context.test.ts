@@ -281,4 +281,35 @@ describe("permission declarations", () => {
     });
     expect(permissions).toHaveLength(2);
   });
+
+  it("sugars a logical `groupType` into a Ref-valued domainId (#20)", async () => {
+    const { permissions } = await evaluateConfig((ct: ConfigContext) =>
+      ct.groupTypeRole({ key: "tpl", groupType: "ministry_team", grants: ["churchgroup:view group"] }),
+    );
+    expect(permissions[0]?.domainId).toEqual({ __ctRef: true, kind: "group-type", key: "ministry_team" });
+  });
+
+  it("sugars group_role `group` + `role` into a compound Ref (gated at plan time, #25)", async () => {
+    const { permissions } = await evaluateConfig((ct: ConfigContext) =>
+      ct.groupRole({ key: "p", group: "kids", role: "Leiter", grants: ["churchgroup:view group"] }),
+    );
+    expect(permissions[0]?.domainId).toEqual({ __ctRef: true, kind: "group-role", group: "kids", role: "Leiter" });
+  });
+
+  it("rejects declaring both a numeric id and a logical domain form", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) =>
+        ct.groupTypeRole({ key: "tpl", id: 8, groupType: "mt", grants: ["churchgroup:view group"] }),
+      ),
+    ).rejects.toThrow(/either "id".*or "groupType".*not both/);
+  });
+
+  it("dedups two logical declarations targeting the same group-type ref", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) => {
+        ct.groupTypeRole({ key: "a", groupType: "mt", grants: ["churchgroup:view group"] });
+        ct.groupTypeRole({ key: "b", groupType: "mt", grants: ["churchdb:view group members"] });
+      }),
+    ).rejects.toThrow(/Duplicate permission target.*group-type:mt/s);
+  });
 });
