@@ -41,6 +41,22 @@ Early scaffold. See the [epic (#1)](https://github.com/eqrm/ct-cli/issues/1) and
 - Node ≥ 20 (repo pins 22 via `.nvmrc`)
 - A ChurchTools **personal login token** (ChurchTools → your user settings)
 
+## Install
+
+Grab the latest tarball from the [Releases page](https://github.com/eqrm/ct-cli/releases/latest)
+and install it globally with npm — no clone, no build step:
+
+```bash
+npm install -g https://github.com/eqrm/ct-cli/releases/latest/download/ct-cli-<version>.tgz
+ct --help
+```
+
+(Replace `<version>` with the tag of the release you're installing, e.g. `v0.1.0`.)
+Each release also attaches an `INSTALL.md` with the exact command for that tag.
+
+Every push of a `v*` tag runs lint/typecheck/test/build and publishes the
+resulting package as a GitHub Release ([`.github/workflows/release.yml`](.github/workflows/release.yml)).
+
 ## Install (dev)
 
 ```bash
