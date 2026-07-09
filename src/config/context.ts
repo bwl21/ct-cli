@@ -17,7 +17,7 @@ import type { DesiredResource, DynamicSpec, DynamicStatus } from "../engine/type
 import type { DomainType } from "../permissions/grants.js";
 import type { DesiredPermission, Grant } from "../permissions/types.js";
 import { isRef, ref, refKey, type Ref } from "../resolve/refs.js";
-import { knownFields } from "../resources/registry.js";
+import { conventionalRulesetRef, knownFields } from "../resources/registry.js";
 import { warn } from "../ui.js";
 // Re-exported so a config file can pull the query DSL from the same module as
 // `ConfigContext`: `import { q, churchQuery } from "../../src/config/context.js"`.
@@ -188,15 +188,6 @@ export interface ConfigContext {
 }
 
 export type ConfigModule = (ct: ConfigContext) => void | Promise<void>;
-
-/**
- * Convention for the sugared ruleset path when `dynamic: true` — the same `rulesets/<key>.json`
- * layout `ct adopt group --with-dynamic` writes to, so an adopted dynamic group round-trips to the
- * shortest form. Kept in sync with the emitter in registry.ts.
- */
-export function conventionalRulesetRef(key: string): string {
-  return `./rulesets/${key}.json`;
-}
 
 /**
  * Eval-time desugaring of a group's `dynamic` field (#52 item B) — the engine is untouched; every
