@@ -111,6 +111,14 @@ function validateState(parsed: unknown, path: string): State {
  * create-required `shorty`. Rename the key on load — only when `shorty` is absent,
  * so a post-rename snapshot is never clobbered. The next apply re-writes the real
  * value; this just clears the phantom drift so the diff can converge.
+ *
+ * Contrast with an *additive* managed field (e.g. group `campusId`, #21): a snapshot from
+ * before the field was managed simply lacks the key. That produces NO phantom drift and needs
+ * no migration here, because the diff is desired-driven (`diffFields` only walks the config's
+ * fields) and drift is snapshot-driven (`driftFields` only walks the old snapshot's keys) — a
+ * key absent from both sides is never surfaced. The write body comes from the fetched actual
+ * (#27), so an unrelated update never omits or reverts the new field, and the post-write snapshot
+ * self-heals to include it. Only a *renamed/removed* key can drift forever; an added one cannot.
  */
 function migrateState(state: State): State {
   for (const resource of Object.values(state.resources)) {

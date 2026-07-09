@@ -77,10 +77,17 @@ export const RESOURCES: Record<string, AdoptableResource> = {
     updateMethod: "PATCH",
     tier: 1,
     deriveKey: (r) => slug(str(r, "name")),
+    // Campus lives on the live group at `information.campusId` (same nesting as groupTypeId /
+    // groupStatusId), and PATCH accepts it as a top-level `campusId` — so it is read via
+    // `fromInformation` and written the same field-agnostic way the executor writes every field.
+    // Numeric escape hatch only: a *logical* `campus: "key"` reference is #20's resolver, not this.
+    // Normalise an unset campus to `null` (never `undefined`) so the actual side is deterministic —
+    // an assign/change/clear all diff against a concrete `null`, and campus id `0` (Mainz) survives.
     managedFields: (r) => ({
       name: r.name,
       groupTypeId: fromInformation(r, "groupTypeId"),
       groupStatusId: fromInformation(r, "groupStatusId"),
+      campusId: fromInformation(r, "campusId") ?? null,
     }),
   }),
   "group-type": define({
