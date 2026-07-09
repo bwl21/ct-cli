@@ -46,6 +46,23 @@ describe("state.upsert", () => {
     expect(state.resources.mainz?.adoptedAt).toBe(NOW);
   });
 
+  it("does not bump updatedAt when a fresh snapshot carries undefined-valued optional keys the persisted one lacks (#52: JSON round-trip parity)", () => {
+    // group-type's managedFields includes `nameTranslated` as an optional key: when the API omits
+    // it, the freshly-built fields object carries an explicit `nameTranslated: undefined`, while the
+    // snapshot loaded back from disk (via JSON.parse, after JSON.stringify dropped the undefined key
+    // on save) simply lacks the key. Re-adopting must see these as equal.
+    const state = emptyState(HOST);
+    const persisted = JSON.parse(JSON.stringify({ name: "Members", nameTranslated: undefined }));
+    upsert(state, { type: "group-type", id: 3, key: "gt-members", fields: persisted }, NOW);
+    expect(state.resources["gt-members"]?.fields).toEqual({ name: "Members" });
+
+    const fresh = { name: "Members", nameTranslated: undefined };
+    const action = upsert(state, { type: "group-type", id: 3, key: "gt-members", fields: fresh }, LATER);
+
+    expect(action).toBe("updated");
+    expect(state.resources["gt-members"]?.updatedAt).toBe(NOW);
+  });
+
   it("bumps updatedAt only when the fields actually change", () => {
     const state = emptyState(HOST);
     upsert(state, { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz" } }, NOW);
