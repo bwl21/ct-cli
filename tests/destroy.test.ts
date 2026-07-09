@@ -38,6 +38,29 @@ describe("orderDestroy", () => {
     };
     expect(orderDestroy(state, ["mainz", "team"])).toEqual(["team", "mainz"]);
   });
+
+  it("orders a child before its parent within the group tier (live hierarchy edges)", () => {
+    const state = stateWith(
+      { key: "area", type: "group", id: 1 },
+      { key: "kids", type: "group", id: 2 },
+    );
+    // kids → parent area. State carries no edges, so the command supplies them from /groups/hierarchies.
+    const edges = new Map([["kids", ["area"]]]);
+    // Input order deliberately parent-first: a tier-only sort would delete area before kids.
+    expect(orderDestroy(state, ["area", "kids"], edges)).toEqual(["kids", "area"]);
+    // Order-independent: the child still precedes the parent regardless of input order.
+    expect(orderDestroy(state, ["kids", "area"], edges)).toEqual(["kids", "area"]);
+  });
+
+  it("still puts a campus (base tier) last, after its child groups", () => {
+    const state = stateWith(
+      { key: "mainz", type: "campus", id: 0 },
+      { key: "area", type: "group", id: 1 },
+      { key: "kids", type: "group", id: 2 },
+    );
+    const edges = new Map([["kids", ["area"]]]);
+    expect(orderDestroy(state, ["mainz", "area", "kids"], edges)).toEqual(["kids", "area", "mainz"]);
+  });
 });
 
 describe("runDeleteLoop", () => {
