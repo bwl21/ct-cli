@@ -35,6 +35,12 @@ Early scaffold. See the [epic (#1)](https://github.com/eqrm/ct-cli/issues/1) and
   ([#7](https://github.com/eqrm/ct-cli/issues/7)) — see
   [Auto-groups](#auto-groups), [Permissions](#permissions), and
   [Blueprints](#blueprints) below.
+- 🚧 **Phase 6 — Reproducibility** ([#26](https://github.com/eqrm/ct-cli/issues/26)):
+  what `ct` can't (yet) automate — API gaps, not-yet-implemented DSL surface,
+  and deliberately out-of-scope areas — is tracked in
+  [`docs/runbook-manual-surface.md`](docs/runbook-manual-surface.md), so instance
+  bootstrap ([#23](https://github.com/eqrm/ct-cli/issues/23)) can scope
+  "selective adoption" deliberately.
 
 ## Requirements
 
