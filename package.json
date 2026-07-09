@@ -24,7 +24,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "generate:client": "openapi-typescript \"$CT_HOST/system/runtime/swagger/openapi.json\" -o src/api/schema.d.ts"
+    "generate:client": "openapi-typescript \"$CT_HOST/system/runtime/swagger/openapi.json\" -o src/api/schema.d.ts",
+    "regenerate:permission-catalog": "tsx scripts/regenerate-permission-catalog.ts"
   },
   "dependencies": {
     "commander": "^12.1.0",

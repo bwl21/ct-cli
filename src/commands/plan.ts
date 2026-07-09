@@ -39,10 +39,10 @@ export function planCommand(): Command {
       // instance means each master-data catalog is fetched at most once (cache is Promise-keyed).
       const resolver = new Resolver({ client, state, desired, host: config.host });
       // Independent fetches run concurrently (see commands/apply.ts).
-      const [{ plan, fetchErrors }, { items: permItems, fetchErrors: permFetchErrors }] =
+      const [{ plan, fetchErrors }, { items: permItems, fetchErrors: permFetchErrors, warnings: permWarnings }] =
         await Promise.all([
           buildPlan(client, state, desired, { configDir, resolver }),
-          buildPermissionPlan(client, state, permissions, desired, resolver),
+          buildPermissionPlan(client, state, permissions, desired, resolver, client.version ?? undefined),
         ]);
       if (opts.json) {
         out({ plan, permissions: permItems });
@@ -62,6 +62,10 @@ export function planCommand(): Command {
           process.stdout.write(`\n${renderPermissionPlan(permItems)}\n`);
         }
       }
+
+      // Permission catalog warnings (#25): stale-version / unknown-authId. Informational — they do
+      // not make the plan incomplete (unlike fetchErrors), so they never set a failing exit code.
+      for (const w of permWarnings) warn(w);
 
       const allFetchErrors = [...fetchErrors, ...permFetchErrors];
       if (allFetchErrors.length > 0) {

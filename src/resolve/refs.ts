@@ -55,8 +55,10 @@ export const ref = {
   roleDef: (key: string): SimpleRef => ({ __ctRef: true, kind: "role-def", key: requireKey("role-def", key) }),
   group: (key: string): SimpleRef => ({ __ctRef: true, kind: "group", key: requireKey("group", key) }),
   /**
-   * GATED (#20/#25): the (group, role) pairing id has no confirmed API source, so the resolver
-   * throws a clear "pass a numeric id" error at plan time. The Ref itself is inert until then.
+   * A `group_role` permission domain, by its (group, role) pair (#25). The resolver maps it to the
+   * numeric pairing domainId at plan time by matching the role name against the group's role list
+   * (see the ASSUMPTION block in src/resolve/resolver.ts — the exact source is unverified; the
+   * numeric `id:` escape hatch remains the fallback). The Ref itself is an inert sentinel until then.
    */
   groupRole: (group: string, role: string): GroupRoleRef => ({
     __ctRef: true,
@@ -140,7 +142,8 @@ export function collectRefs(value: unknown): Ref[] {
 /**
  * Collect the managed logical keys named by every {@link PendingRef} in a value. Pending markers
  * always point at a same-run declared resource, so these keys are exactly the apply-order
- * dependencies the referencing resource needs (group-role refs are gated and never go pending).
+ * dependencies the referencing resource needs (group-role refs resolve to a concrete id at plan
+ * time and never go pending).
  */
 export function collectPendingRefKeys(value: unknown): string[] {
   const out: string[] = [];

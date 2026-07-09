@@ -8,7 +8,8 @@ import type { CtClient } from "../api/ctClient.js";
 import { CtApiError } from "../api/ctClient.js";
 import type { State } from "../state/state.js";
 import type { DesiredResource } from "../engine/types.js";
-import { resolveAuthId } from "./catalog.js";
+import { resolveAuthId, CATALOG_META, KNOWN_AUTH_IDS } from "./catalog.js";
+import { compareVersions } from "../api/version.js";
 import { resolveScope } from "./scope.js";
 import { normalizeActual, diffGrants, type GrantTuple, type GrantDiff, type DomainType, type RawPermission } from "./grants.js";
 import type { DesiredPermission } from "./types.js";
@@ -71,7 +72,7 @@ type ResolvedPermission = DesiredPermission & { domainId: number };
  * a Ref (e.g. `groupType: "…"`) resolves against the live catalog. A domainId that resolves to a
  * same-run-created resource (PendingRef) is rejected — the permission plan needs a concrete id to
  * fetch actuals and build the write path, and the permission subsystem does not defer that. A
- * group_role ref throws its own gated "pass a numeric id" error from the resolver.
+ * group_role ref resolves to its concrete (group, role) pairing id in the resolver (#25).
  *
  * After resolution, the authoritative duplicate-target guard runs on the CONCRETE ids: two different
  * refs (or a ref and a number) that collide on one (domainType, domainId) would otherwise each diff
@@ -112,10 +113,21 @@ async function resolveDomainIds(
 
 export async function buildPermissionPlan(
   client: Pick<CtClient, "get">, state: State, permissions: DesiredPermission[], desired: DesiredResource[] = [],
-  resolver?: Resolver,
-): Promise<{ items: PermissionPlanItem[]; fetchErrors: string[] }> {
+  resolver?: Resolver, instanceVersion?: string,
+): Promise<{ items: PermissionPlanItem[]; fetchErrors: string[]; warnings: string[] }> {
   const items: PermissionPlanItem[] = [];
   const fetchErrors: string[] = [];
+  const warnings: string[] = [];
+  // Catalog staleness (#25): the catalog is a snapshot captured against one CT version. If the live
+  // instance reports a different version, right names/authIds/scopeFields may have drifted — warn
+  // (never fail) so the diff is trusted-but-verified and the fix (regenerate) is one command away.
+  if (permissions.length > 0 && instanceVersion && CATALOG_META && compareVersions(instanceVersion, CATALOG_META.ctVersion) !== 0) {
+    warnings.push(
+      `Permission catalog was captured from ChurchTools ${CATALOG_META.ctVersion} but this instance ` +
+        `runs ${instanceVersion}. Right names/authIds may be stale — regenerate it with ` +
+        `\`npm run regenerate:permission-catalog\` (see docs/permissions.md).`,
+    );
+  }
   // Resolve logical domainIds (#20) up front. Shares the command layer's resolver so master-data
   // catalogs are fetched once across buildPlan + buildPermissionPlan; falls back to a private one.
   const resolved = await resolveDomainIds(permissions, resolver ?? new Resolver({ client, state, desired }));
@@ -135,8 +147,30 @@ export async function buildPermissionPlan(
   for (const p of resolved) {
     const all = byType.get(p.domainType);
     if (all == null) continue; // fetch failed for this domainType — recorded above
-    const actual = normalizeActual(all.filter((r) => r.domainId === p.domainId));
-    items.push({ key: p.key, domainType: p.domainType, domainId: p.domainId, diff: diffGrants(desiredTuples(p, state, declaredGroupKeys), actual) });
+    const normalized = normalizeActual(all.filter((r) => r.domainId === p.domainId));
+    // Unknown-authId guard (#25): a live GRANT whose authId is absent from the catalog cannot be
+    // named or described. Keep it OUT of the diff — otherwise, having no desired counterpart, it
+    // would land in `toDelete` and `ct apply` would silently revoke a right we cannot even name.
+    // Instead, warn (naming authId + domain) and leave it untouched. Idempotent: excluded every run.
+    // (Revoke/deny rows with an unknown authId are already `preserved` by diffGrants, so ignore them
+    // here — only unknown grant rows are the churn/silent-revoke hazard.)
+    const knownActual: GrantTuple[] = [];
+    const unknownAuthIds = new Set<number>();
+    for (const t of normalized) {
+      if (t.type === "grant" && !KNOWN_AUTH_IDS.has(t.authId)) {
+        unknownAuthIds.add(t.authId);
+        continue;
+      }
+      knownActual.push(t);
+    }
+    for (const authId of [...unknownAuthIds].sort((a, b) => a - b)) {
+      warnings.push(
+        `${p.domainType} #${p.domainId} ("${p.key}"): a live grant carries authId ${authId}, which is ` +
+          `not in the permission catalog — left untouched (never revoked). Regenerate the catalog ` +
+          `(\`npm run regenerate:permission-catalog\`) if this right should be manageable.`,
+      );
+    }
+    items.push({ key: p.key, domainType: p.domainType, domainId: p.domainId, diff: diffGrants(desiredTuples(p, state, declaredGroupKeys), knownActual) });
   }
-  return { items, fetchErrors };
+  return { items, fetchErrors, warnings };
 }

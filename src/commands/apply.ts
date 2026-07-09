@@ -67,11 +67,14 @@ export function applyCommand(): Command {
       const resolver = new Resolver({ client, state, desired, host: config.host });
       // Independent fetches: the resource plan and the permission plan (whose instance-wide
       // /permissions/<domainType> reads are slow) run concurrently rather than back-to-back.
-      const [{ plan, actual, fetchErrors }, { items: permItems, fetchErrors: permFetchErrors }] =
+      const [{ plan, actual, fetchErrors }, { items: permItems, fetchErrors: permFetchErrors, warnings: permWarnings }] =
         await Promise.all([
           buildPlan(client, state, desired, { configDir, resolver }),
-          buildPermissionPlan(client, state, permissions, desired, resolver),
+          buildPermissionPlan(client, state, permissions, desired, resolver, client.version ?? undefined),
         ]);
+
+      // Permission catalog warnings (#25): stale-version / unknown-authId (untouched, never revoked).
+      for (const w of permWarnings) warn(w);
 
       const allFetchErrors = [...fetchErrors, ...permFetchErrors];
       if (allFetchErrors.length > 0) {

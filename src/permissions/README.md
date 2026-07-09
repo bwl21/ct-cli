@@ -21,10 +21,17 @@ changes materially.
 
 ```json
 {
+  "$meta": { "capturedFrom": "eqrm.church.tools", "ctVersion": "3.134.0", "capturedAt": "2026-07-08", "rightCount": 187 },
   "churchgroup:view group": { "authId": 1104, "scopeField": "cdb_gruppe", "revocable": false, "desc": "View group incl. its group members" },
   "churchcore:administer settings": { "authId": 1, "scopeField": null, "revocable": false, "desc": "Edit system settings" }
 }
 ```
+
+- **`$meta`** (#25) — a reserved top-level provenance key (NOT a right):
+  `capturedFrom`, `ctVersion`, `capturedAt`, `rightCount`. `catalog.ts` splits
+  it off at load so no consumer (`resolveAuthId`, `ct get permissions-catalog`,
+  grant adoption) ever sees it as a right. `ctVersion` drives `ct plan`'s
+  staleness warning — see `docs/permissions.md` "Catalog lifecycle & staleness".
 
 - **key** — `"<modulename>:<auth>"`, the DSL vocabulary (e.g. `churchgroup:view group`).
 - **authId** — numeric id sent in the `PermissionRequest` write body.
@@ -43,6 +50,19 @@ churchresource, churchcheckin, churchwiki, churchreport, finance, churchsync, �
 
 ## Regeneration
 
-Open the permission editor in the CT admin with devtools recording, export the HAR, and extract
-`log.entries[].response` for the `churchauth/ajax` `func=getMasterData` POST; flatten
-`data.auth_table[module][right]` to `"module:right" → { authId: id, scopeField: datenfeld, revocable: !!isRevocable, desc: bezeichnung }`.
+**One command (#25):**
+
+```bash
+CT_HOST=https://your.church.tools CT_LOGINTOKEN=<token> npm run regenerate:permission-catalog
+```
+
+`scripts/regenerate-permission-catalog.ts` logs in with the login token, calls
+`POST /index.php?q=churchauth/ajax` `func=getMasterData`, flattens
+`data.auth_table[module][right]` to
+`"module:right" → { authId: id, scopeField: datenfeld, revocable: !!isRevocable, desc: bezeichnung }`,
+stamps the instance's CT version into `$meta`, and rewrites this file. It only
+**reads** from the instance. Review the `git diff` before committing.
+
+**Manual fallback (HAR):** open the permission editor in the CT admin with
+devtools recording, export the HAR, extract `log.entries[].response` for the
+`churchauth/ajax` `func=getMasterData` POST, and apply the same flattening.

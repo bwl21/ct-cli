@@ -40,7 +40,7 @@ vi.mock("../src/engine/build.js", () => ({
 }));
 
 vi.mock("../src/permissions/plan.js", () => ({
-  buildPermissionPlan: vi.fn(async () => ({ items: [], fetchErrors: [] })),
+  buildPermissionPlan: vi.fn(async () => ({ items: [], fetchErrors: [], warnings: [] })),
 }));
 
 const { planCommand } = await import("../src/commands/plan.js");

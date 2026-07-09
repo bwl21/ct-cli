@@ -77,8 +77,11 @@ export class CtClient {
 
   /**
    * The ChurchTools release this client is talking to, once known (populated by
-   * {@link assertMinVersion} / any `/info` read). `null` until then. Surfaced in
-   * the `--env` plan header so a per-env version gate is visible (#22).
+   * {@link assertMinVersion} / any `/info` read, which every command runs via
+   * `authedSession`). `null` until then. Surfaced in the `--env` plan header so a
+   * per-env version gate is visible (#22), and used for the permission-catalog
+   * staleness warning (#25) — no extra `/info` fetch, since the version is
+   * already cached.
    */
   get version(): string | null {
     return this.ctVersion;

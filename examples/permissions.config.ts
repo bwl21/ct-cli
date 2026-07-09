@@ -1,7 +1,8 @@
 /**
  * Runnable example: a group-type-role declaration with one unscoped (global)
- * grant and one scoped grant. See docs/permissions.md for the full feature
- * guide, and `ct get permissions-catalog` to discover right names.
+ * grant and one scoped grant, plus a group-role declared by (group, role)
+ * reference (#25). See docs/permissions.md for the full feature guide, and
+ * `ct get permissions-catalog` to discover right names.
  *
  * Portable references (#20): the permission domain is declared by name
  * (`groupType: "kids"`) instead of a hardcoded numeric domainId — the per-host
@@ -32,5 +33,18 @@ export default (ct: ConfigContext): void => {
       // escape hatch (#49)".
       { right: "churchgroup:view group", scope: ["kids_area"] },
     ],
+  });
+
+  // group_role by reference (#25): the domain is declared by the (group, role)
+  // pair instead of a numeric domainId. The group must be managed (declared
+  // above / adopted) and already created; the resolver maps the pair to the
+  // pairing domainId per host. Numeric escape hatch: `id: <domainId>` instead
+  // of `group`/`role`. (See docs/permissions.md "domainId semantics" for the
+  // resolution assumption still to be confirmed live.)
+  ct.groupRole({
+    key: "kids_leiter_grant",
+    group: "kids_area",
+    role: "Leiter",
+    grants: [{ right: "churchgroup:edit group memberships of group", scope: ["kids_area"] }],
   });
 };

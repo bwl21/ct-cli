@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { desiredTuples, buildPermissionPlan } from "../src/permissions/plan.js";
+import { CATALOG_META } from "../src/permissions/catalog.js";
+import { ref } from "../src/resolve/refs.js";
 import type { State } from "../src/state/state.js";
 
 const state: State = { version: 1, host: "h", resources: {
@@ -107,5 +109,53 @@ describe("buildPermissionPlan", () => {
     expect(fetchErrors).toEqual([]);
     expect(items[0]?.diff.toPut).toEqual([]);
     expect(items[0]?.diff.toDelete).toEqual([]);
+  });
+
+  it("resolves a group_role domain by (group, role) reference and reconciles idempotently (#25)", async () => {
+    const client = { get: vi.fn(async (path: string) => {
+      if (path === "/groups/42/roles") return [{ id: 2882, name: "Leiter" }];
+      if (path === "/permissions/group_role") return [
+        { domainType: "group_role", domainId: 2882, authId: 1104, dataId: 42, type: "grant", meta: { modifiedPid: 1 } },
+      ];
+      throw new Error(`unexpected path ${path}`);
+    }) };
+    // Declared with ZERO numeric ids: right name + group key + role name only.
+    const { items, warnings, fetchErrors } = await buildPermissionPlan(client as never, state, [
+      { key: "kids_lead", domainType: "group_role", domainId: ref.groupRole("kids_area", "Leiter"),
+        grants: [{ right: "churchgroup:view group", scope: ["kids_area"] }] },
+    ]);
+    expect(fetchErrors).toEqual([]);
+    expect(warnings).toEqual([]);
+    expect(items[0]?.domainId).toBe(2882);          // resolved from the (group, role) pair
+    expect(items[0]?.diff.toPut).toEqual([]);        // adopted live row already matches → no-op
+    expect(items[0]?.diff.toDelete).toEqual([]);
+  });
+
+  it("warns and never revokes a live grant whose authId is unknown to the catalog (#25)", async () => {
+    const client = { get: vi.fn(async () => [
+      { domainType: "group_type_role", domainId: 8, authId: 1113, dataId: null, type: "grant", meta: { modifiedPid: 1 } },   // known + desired
+      { domainType: "group_type_role", domainId: 8, authId: 987654, dataId: null, type: "grant", meta: { modifiedPid: 1 } }, // unknown authId
+    ]) };
+    const { items, warnings } = await buildPermissionPlan(client as never, state,
+      [{ key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchgroup:administer groups"] }]);
+    expect(items[0]?.diff.toDelete).toEqual([]); // the unnameable grant is NOT proposed for revocation
+    expect(items[0]?.diff.toPut).toEqual([]);
+    expect(warnings.some((w) => w.includes("987654") && w.includes("group_type_role #8"))).toBe(true);
+  });
+
+  it("warns when the instance CT version differs from the catalog's recorded version (#25)", async () => {
+    const client = { get: vi.fn(async () => []) };
+    const { warnings } = await buildPermissionPlan(client as never, state,
+      [{ key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchgroup:administer groups"] }],
+      [], undefined, "9.99.0");
+    expect(warnings.some((w) => /catalog was captured from ChurchTools .* but this instance\s+runs 9\.99\.0/is.test(w))).toBe(true);
+  });
+
+  it("does NOT warn about staleness when the instance version matches the catalog version (#25)", async () => {
+    const client = { get: vi.fn(async () => []) };
+    const { warnings } = await buildPermissionPlan(client as never, state,
+      [{ key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchgroup:administer groups"] }],
+      [], undefined, CATALOG_META!.ctVersion);
+    expect(warnings).toEqual([]);
   });
 });
