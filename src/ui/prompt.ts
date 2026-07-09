@@ -55,3 +55,27 @@ export async function confirmTyped(
   const answer = await ask(`Type "${expected}" to confirm: `);
   return answer.trim() === expected;
 }
+
+/**
+ * Protected-environment gate (#22): applying or destroying against a protected env
+ * ALWAYS requires typed confirmation of the environment name — there is NO
+ * `force`/`assumeYes` escape here by design. For non-interactive/CI use, the
+ * `--confirm-env <name>` flag (passed as `confirmFlag`) substitutes for the typed
+ * input and must match `envName` exactly. On a non-TTY with no flag, this refuses.
+ */
+export async function confirmEnv(
+  envName: string,
+  opts: PromptOptions & { confirmFlag?: string } = {},
+): Promise<boolean> {
+  if (opts.confirmFlag !== undefined) {
+    return opts.confirmFlag === envName;
+  }
+  if (!ttyState(opts)) {
+    return false;
+  }
+  const ask = opts.ask ?? realAsk;
+  const answer = await ask(
+    `Protected environment "${envName}". Type the environment name to confirm: `,
+  );
+  return answer.trim() === envName;
+}

@@ -76,6 +76,15 @@ export class CtClient {
   }
 
   /**
+   * The ChurchTools release this client is talking to, once known (populated by
+   * {@link assertMinVersion} / any `/info` read). `null` until then. Surfaced in
+   * the `--env` plan header so a per-env version gate is visible (#22).
+   */
+  get version(): string | null {
+    return this.ctVersion;
+  }
+
+  /**
    * Hard-fail if the ChurchTools instance is below the minimum version the CLI
    * requires (group hierarchy / metadata CRUD need v3.96+). One `/info` GET,
    * cached so repeated calls in a session cost nothing. plan/apply/destroy call
