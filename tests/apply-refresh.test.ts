@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { refreshChangedDynamicGroups } from "../src/commands/apply.js";
+// The dynamic-group refresh is a `postApply` hook on the `dynamic` synthetic field now, driven
+// generically by `runPostApplyHooks` — the command layer no longer hardcodes the field/sentinel.
+import { runPostApplyHooks } from "../src/engine/synthetic.js";
 import { emptyState, type State } from "../src/state/state.js";
 import type { Plan } from "../src/engine/types.js";
 
@@ -36,7 +38,7 @@ function stateWith(entries: Record<string, number>): State {
   return state;
 }
 
-describe("refreshChangedDynamicGroups", () => {
+describe("runPostApplyHooks (dynamic refresh)", () => {
   it("POSTs /dynamicgroups/{id}/refresh once for each item whose changes include a dynamic field", async () => {
     const state = stateWith({ dyn_a: 42, dyn_b: 43, plain: 44 });
     const plan: Plan = {
@@ -74,7 +76,7 @@ describe("refreshChangedDynamicGroups", () => {
       "POST /dynamicgroups/43/refresh": [{ created: 0, updated: 1, deleted: 1 }],
     });
 
-    await refreshChangedDynamicGroups(plan, state, client);
+    await runPostApplyHooks(plan, state, client);
 
     const refreshCalls = calls.filter((c) => c.path.startsWith("/dynamicgroups/"));
     expect(refreshCalls).toHaveLength(2);
@@ -96,7 +98,7 @@ describe("refreshChangedDynamicGroups", () => {
       ],
     };
     const { client, calls } = recorder();
-    await refreshChangedDynamicGroups(plan, state, client);
+    await runPostApplyHooks(plan, state, client);
     expect(calls.some((c) => c.path === "/dynamicgroups/refresh")).toBe(false);
   });
 
@@ -114,7 +116,7 @@ describe("refreshChangedDynamicGroups", () => {
       ],
     };
     const { client, calls } = recorder();
-    await refreshChangedDynamicGroups(plan, state, client);
+    await runPostApplyHooks(plan, state, client);
     expect(calls).toHaveLength(0);
   });
 
@@ -141,7 +143,7 @@ describe("refreshChangedDynamicGroups", () => {
     const { client, calls } = recorder({
       "POST /dynamicgroups/43/refresh": [{ created: 1, updated: 0, deleted: 0 }],
     });
-    await refreshChangedDynamicGroups(plan, state, client);
+    await runPostApplyHooks(plan, state, client);
     const refreshCalls = calls.filter((c) => c.path.startsWith("/dynamicgroups/"));
     expect(refreshCalls).toEqual([{ method: "POST", path: "/dynamicgroups/43/refresh", body: undefined }]);
   });
@@ -174,7 +176,7 @@ describe("refreshChangedDynamicGroups", () => {
         return [{ created: 1, updated: 0, deleted: 0 }] as T;
       },
     };
-    await expect(refreshChangedDynamicGroups(plan, state, client)).resolves.toBeUndefined();
+    await expect(runPostApplyHooks(plan, state, client)).resolves.toBeUndefined();
     const refreshCalls = calls.filter((c) => c.path.startsWith("/dynamicgroups/"));
     expect(refreshCalls).toHaveLength(2);
     expect(refreshCalls).toContainEqual({ method: "POST", path: "/dynamicgroups/42/refresh", body: undefined });
@@ -203,7 +205,7 @@ describe("refreshChangedDynamicGroups", () => {
       ],
     };
     const { client, calls } = recorder({ "POST /dynamicgroups/0/refresh": [{ created: 0, updated: 0, deleted: 0 }] });
-    await refreshChangedDynamicGroups(plan, state, client);
+    await runPostApplyHooks(plan, state, client);
     expect(calls).toEqual([{ method: "POST", path: "/dynamicgroups/0/refresh", body: undefined }]);
   });
 });

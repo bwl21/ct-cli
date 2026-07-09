@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createContext, evaluateConfig, type ConfigContext } from "../src/config/context.js";
 import { isKnownType } from "../src/engine/graph.js";
+import { RESOURCES } from "../src/resources/registry.js";
 
 describe("config context", () => {
   it("builds desired resources from DSL calls, separating key/parent from fields", () => {
@@ -110,6 +111,20 @@ describe("config context", () => {
     ct.roleDefinition({ key: "g", name: "g", groupTypeId: 2 });
     for (const r of resources) {
       expect(isKnownType(r.type), `type "${r.type}" is missing from TYPE_TIER`).toBe(true);
+    }
+  });
+
+  it("every registry type has a matching ConfigContext resource method (registry ↔ context sync, #35 item 6)", () => {
+    // ConfigContext isn't derived from the registry, so lock the two in sync: each registry entry's
+    // DSL name (its `dslName`, else the camelCase of the type) must be a callable ct method — a
+    // renamed/added type without its DSL surface fails here instead of at config-load time.
+    const { ct } = createContext();
+    const camel = (t: string): string => t.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+    for (const [type, spec] of Object.entries(RESOURCES)) {
+      const fn = spec.dslName ?? camel(type);
+      expect(typeof (ct as unknown as Record<string, unknown>)[fn], `registry type "${type}" expects ct.${fn}()`).toBe(
+        "function",
+      );
     }
   });
 

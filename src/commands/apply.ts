@@ -1,16 +1,15 @@
 import { dirname, join } from "node:path";
 import { Command } from "commander";
-import type { CtClient } from "../api/ctClient.js";
 import { authedSession } from "../api/session.js";
 import { resolveConfig } from "../config.js";
-import { loadState, resolveStatePath, saveState, type State } from "../state/state.js";
+import { loadState, resolveStatePath, saveState } from "../state/state.js";
 import { loadConfig, resolveConfigPath } from "../config/load.js";
 import { buildPlan } from "../engine/build.js";
 import { executePlan } from "../engine/execute.js";
+import { runPostApplyHooks } from "../engine/synthetic.js";
 import { writeBackup } from "../engine/backup.js";
 import { renderPlan } from "../engine/render.js";
-import { summarize, type Plan } from "../engine/types.js";
-import { assertNotPeople } from "../engine/guard.js";
+import { summarize } from "../engine/types.js";
 import { buildPermissionPlan } from "../permissions/plan.js";
 import { renderPermissionPlan } from "../permissions/render.js";
 import { applyPermissionPlan } from "../permissions/apply.js";
@@ -24,49 +23,6 @@ interface ApplyOptions {
   backupDir?: string;
   autoApprove?: boolean;
   refresh?: boolean;
-}
-
-interface RefreshResult {
-  created: number;
-  updated: number;
-  deleted: number;
-}
-
-/**
- * Post-apply dynamic-group refresh (opt-in via `--refresh`). For each applied
- * item whose changes touched the `dynamic` synthetic field, POST the
- * per-group `/dynamicgroups/{id}/refresh` endpoint to materialize computed
- * membership. Deliberately per-group only — the all-groups
- * `/dynamicgroups/refresh` endpoint has a huge blast radius and must never be
- * called from here.
- *
- * The id is read from state (post-apply, so creates have their real id) using
- * an explicit `undefined` check — CT ids can legitimately be `0`.
- */
-export async function refreshChangedDynamicGroups(
-  plan: Plan,
-  state: State,
-  client: Pick<CtClient, "request">,
-): Promise<void> {
-  for (const item of plan.items) {
-    if (item.action === "no-op" || item.action === "delete") continue;
-    const dynamicChange = item.changes.find((c) => c.field === "dynamic");
-    if (!dynamicChange) continue;
-    const to = dynamicChange.to as { status?: string } | undefined;
-    if (to?.status === "none") continue; // demoted to a non-dynamic group — nothing to refresh
-    const id = state.resources[item.key]?.id;
-    if (id === undefined) continue;
-    const path = `/dynamicgroups/${id}/refresh`;
-    assertNotPeople(path);
-    try {
-      const res = await client.request<RefreshResult[]>("POST", path);
-      const r = res?.[0];
-      if (r) info(`refreshed ${item.key}: +${r.created} ~${r.updated} -${r.deleted}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      warn(`Failed to refresh ${item.key} (#${id}): ${message}`);
-    }
-  }
 }
 
 /** backups/ dir: explicit flag → CT_BACKUP_DIR → `backups/` beside the state file. */
@@ -97,8 +53,13 @@ export function applyCommand(): Command {
       const state = await loadState(statePath, config.host);
 
       const { client } = await authedSession();
-      const { plan, actual, fetchErrors } = await buildPlan(client, state, desired, { configDir });
-      const { items: permItems, fetchErrors: permFetchErrors } = await buildPermissionPlan(client, state, permissions, desired);
+      // Independent fetches: the resource plan and the permission plan (whose instance-wide
+      // /permissions/<domainType> reads are slow) run concurrently rather than back-to-back.
+      const [{ plan, actual, fetchErrors }, { items: permItems, fetchErrors: permFetchErrors }] =
+        await Promise.all([
+          buildPlan(client, state, desired, { configDir }),
+          buildPermissionPlan(client, state, permissions, desired),
+        ]);
 
       const allFetchErrors = [...fetchErrors, ...permFetchErrors];
       if (allFetchErrors.length > 0) {
@@ -163,9 +124,21 @@ export function applyCommand(): Command {
       if (permResult.granted > 0 || permResult.deleted > 0) {
         success(`Permissions applied: ${permResult.granted} granted, ${permResult.deleted} deleted.`);
       }
+      if (permResult.failed.length > 0) {
+        // Mirror executePlan's resumable stance: report which tuples failed (not a raw stack) and
+        // exit non-zero. Grants are reconciled statelessly, so a plain re-run resumes idempotently.
+        error(
+          `${permResult.failed.length} permission write(s) failed — re-run to resume (grant reconciliation is idempotent):`,
+        );
+        for (const f of permResult.failed) {
+          info(`    ${f.method} ${f.path} (authId ${f.authId}${f.dataId.length ? ` dataId ${f.dataId.join(",")}` : ""}): ${f.message}`);
+        }
+        process.exitCode = 1;
+        return;
+      }
 
       if (opts.refresh) {
-        await refreshChangedDynamicGroups(plan, state, client);
+        await runPostApplyHooks(plan, state, client);
       }
     });
 }

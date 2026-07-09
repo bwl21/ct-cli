@@ -20,7 +20,7 @@ import { orderKeys, isKnownType } from "./graph.js";
  * change (a `JSON.stringify` comparison would flag it, proposing an update that
  * can never converge).
  */
-function deepEqual(a: unknown, b: unknown): boolean {
+export function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) {
     return true;
   }
@@ -92,9 +92,21 @@ export function computePlan(
   for (const d of desired) {
     if (!isKnownType(d.type)) {
       throw new Error(
-        `Unknown resource type "${d.type}" for "${d.key}" — no apply tier defined. Add it to TYPE_TIER.`,
+        `Unknown resource type "${d.type}" for "${d.key}" — no apply tier defined. Add a registry entry in src/resources/registry.ts.`,
       );
     }
+  }
+
+  // Reject duplicate desired keys up front. The DSL path (evaluateConfig) already dedups, but a
+  // programmatic caller (import command, test harness) that hands `computePlan` a raw array must not
+  // silently last-wins: `desiredByKey` would collapse the duplicates while the loop below emits both,
+  // corrupting the plan. Fail loudly instead.
+  const seen = new Set<string>();
+  for (const d of desired) {
+    if (seen.has(d.key)) {
+      throw new Error(`Duplicate desired key "${d.key}" — each resource must have a unique logical key.`);
+    }
+    seen.add(d.key);
   }
 
   const desiredByKey = new Map(desired.map((d) => [d.key, d]));

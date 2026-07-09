@@ -97,8 +97,10 @@ export class CtClient {
       throw new CtApiError("Login succeeded but no session cookie was returned", res.status, null);
     }
     await this.refreshCsrfToken();
-    const body = (await res.json()) as { data: WhoAmI };
-    return body.data;
+    // Same tolerant unwrap as request(): prefer `.data`, but fall back to the raw body if the
+    // envelope is absent, so authenticate and request() agree on the shape.
+    const body = (await res.json()) as { data?: WhoAmI };
+    return (body.data ?? body) as WhoAmI;
   }
 
   async get<T = unknown>(path: string): Promise<T> {
@@ -155,20 +157,12 @@ export class CtClient {
   }
 
   private async refreshCsrfToken(): Promise<void> {
-    if (!this.cookie) {
-      return;
-    }
-    const res = await fetchWithRetry(
-      `${this.config.host}/api/csrftoken`,
-      { headers: { Accept: "application/json", Cookie: this.cookie } },
-      { isIdempotent: true },
-    );
-    this.captureCookie(res);
-    if (!res.ok) {
-      throw new CtApiError("Failed to fetch CSRF token", res.status, await safeBody(res));
-    }
-    const body = (await res.json()) as { data: string };
-    this.csrfToken = body.data;
+    // A plain authenticated GET: it rides the session cookie and GET skips the CSRF branch in
+    // request(), so this cannot recurse — and it reuses request()'s envelope unwrap + guarded 2xx
+    // parsing instead of duplicating the bootstrap fetch here. Callers only reach this once a cookie
+    // exists (authenticate sets it; request()'s write path guards on it), so the old empty-cookie
+    // early-return is unreachable and dropped.
+    this.csrfToken = await this.get<string>("/csrftoken");
   }
 
   /** Merge any Set-Cookie values into the stored cookie header. */

@@ -25,14 +25,16 @@ export function planCommand(): Command {
       const config = await resolveConfig();
       const configPath = resolveConfigPath(opts.config);
       const { resources: desired, permissions, configDir } = await loadConfig(configPath);
+      // loadState already refuses a host mismatch (state.ts) — no second guard needed here.
       const state = await loadState(resolveStatePath(opts.state), config.host);
-      if (state.host !== config.host) {
-        throw new Error(`State host (${state.host}) does not match CT_HOST (${config.host}).`);
-      }
 
       const { client } = await authedSession();
-      const { plan, fetchErrors } = await buildPlan(client, state, desired, { configDir });
-      const { items: permItems, fetchErrors: permFetchErrors } = await buildPermissionPlan(client, state, permissions, desired);
+      // Independent fetches run concurrently (see commands/apply.ts).
+      const [{ plan, fetchErrors }, { items: permItems, fetchErrors: permFetchErrors }] =
+        await Promise.all([
+          buildPlan(client, state, desired, { configDir }),
+          buildPermissionPlan(client, state, permissions, desired),
+        ]);
       if (opts.json) {
         out({ plan, permissions: permItems });
       } else {

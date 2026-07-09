@@ -73,14 +73,17 @@ export function applyHierarchy(
     }
   }
 
-  // For each opted-in desired group that already exists in state, set its actual `parents` to the
-  // managed parent keys — mirroring the desired-side guard below (one pass, no separate opted-in set).
-  // A group not yet in state (fresh, first apply) has no actual to annotate; it is created instead.
+  // Single pass over the desired opt-ins (one copy of the predicate, mirroring the desired-side
+  // guard below). A group's actual gets a `parents` set only when it opted in AND is a managed
+  // GROUP in state — the managed-type guard from the old state-side iteration is preserved via the
+  // `state.resources[d.key]` lookup. A group not yet in state (fresh, first apply) has no actual to
+  // annotate; it is created instead.
   for (const d of desired) {
     if (d.type !== "group" || d.parents === undefined) continue;
     const managed = state.resources[d.key];
-    const a = managed && actual.get(d.key);
-    if (managed && a) {
+    if (!managed || managed.type !== "group") continue;
+    const a = actual.get(d.key);
+    if (a) {
       a.parents = managedParentKeys(parentIdsByGroup.get(managed.id) ?? [], groupIdToKey);
     }
   }
