@@ -1,38 +1,63 @@
 import { Command } from "commander";
 import { authedSession } from "../api/session.js";
 import { CATALOG } from "../permissions/catalog.js";
-import { out } from "../ui.js";
+import { info, out } from "../ui.js";
+
+interface ResourceSpec {
+  path: string;
+  /**
+   * Whether this endpoint returns a paged list (auto-paginate through every
+   * page) vs a single object (`whoami`, `info`, the global permissions blob)
+   * where paging params don't apply. Defaults to true.
+   */
+  paginated?: boolean;
+}
 
 /**
  * Read-only imperative queries — immediately useful before any declarative
  * engine exists. Resource → API path map. Paths confirmed against the live
  * spec by the Phase 0 spike (#2, CT 3.123.0); see docs/api-coverage.md.
+ *
+ * List endpoints are auto-paginated (#50): ChurchTools returns only its
+ * default page (10 items) per request, so `ct get groups` on an instance with
+ * 300+ groups silently returned just the first 10 before this fix.
  */
-const RESOURCE_PATHS: Record<string, string> = {
-  whoami: "/whoami",
-  info: "/info",
-  campuses: "/campuses",
-  groups: "/groups",
-  "group-hierarchies": "/groups/hierarchies",
-  "group-types": "/group/grouptypes",
-  "group-roles": "/group/roles",
-  "age-groups": "/group/agegroups",
-  "target-groups": "/group/targetgroups",
-  "dynamic-groups": "/dynamicgroups",
-  "relationship-types": "/person/relationshiptypes",
-  permissions: "/permissions/global",
+const RESOURCE_PATHS: Record<string, ResourceSpec> = {
+  whoami: { path: "/whoami", paginated: false },
+  info: { path: "/info", paginated: false },
+  campuses: { path: "/campuses" },
+  groups: { path: "/groups" },
+  "group-hierarchies": { path: "/groups/hierarchies" },
+  "group-types": { path: "/group/grouptypes" },
+  "group-roles": { path: "/group/roles" },
+  "age-groups": { path: "/group/agegroups" },
+  "target-groups": { path: "/group/targetgroups" },
+  "dynamic-groups": { path: "/dynamicgroups" },
+  "relationship-types": { path: "/person/relationshiptypes" },
+  permissions: { path: "/permissions/global", paginated: false },
 };
 
 export function getCommand(): Command {
   const cmd = new Command("get").description("Read structure resources from ChurchTools (JSON to stdout)");
 
-  for (const [name, path] of Object.entries(RESOURCE_PATHS)) {
+  for (const [name, spec] of Object.entries(RESOURCE_PATHS)) {
     cmd
       .command(name)
-      .description(`GET ${path}`)
+      .description(`GET ${spec.path}`)
       .action(async () => {
         const { client } = await authedSession();
-        out(await client.get(path));
+        if (spec.paginated === false) {
+          out(await client.get(spec.path));
+          return;
+        }
+        const { data, meta } = await client.getAll(spec.path);
+        out(data);
+        const total = meta?.pagination?.total;
+        if (total !== undefined && total !== data.length) {
+          info(`${data.length} of ${total} total`);
+        } else {
+          info(`${data.length} total`);
+        }
       });
   }
 

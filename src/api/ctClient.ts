@@ -37,6 +37,33 @@ export class CtApiError extends Error {
 
 type Json = Record<string, unknown>;
 
+/**
+ * ChurchTools' list-endpoint pagination envelope, carried as `meta.pagination`
+ * alongside `data`. Field names confirmed against the live API (#50): a page
+ * is exhausted once `current >= lastPage`.
+ */
+export interface CtPagination {
+  total?: number;
+  current?: number;
+  lastPage?: number;
+  limit?: number;
+  count?: number;
+}
+
+export interface CtMeta {
+  pagination?: CtPagination;
+  [key: string]: unknown;
+}
+
+export interface CtPage<T> {
+  data: T[];
+  meta?: CtMeta;
+}
+
+/** Hard stop so a malformed/adversarial pagination response can't loop forever. */
+const MAX_PAGES = 1000;
+const DEFAULT_PAGE_LIMIT = 100;
+
 export class CtClient {
   private cookie: string | null = null;
   private csrfToken: string | null = null;
@@ -108,6 +135,61 @@ export class CtClient {
   }
 
   async request<T = unknown>(method: string, path: string, body?: Json): Promise<T> {
+    const parsed = await this.requestEnvelope(method, path, body);
+    if (parsed === undefined) {
+      return undefined as T;
+    }
+    const envelope = parsed as { data?: T };
+    return (envelope.data ?? envelope) as T;
+  }
+
+  /**
+   * Fetch every page of a ChurchTools list endpoint and concatenate them, so
+   * callers see the whole collection instead of just CT's default first page
+   * (#50). CT caps `limit` at a per-endpoint maximum below 500 on real
+   * instances, so this defaults to a conservative page size and pages via
+   * `?page=N&limit=M` until `meta.pagination.current >= lastPage`. Endpoints
+   * that don't return pagination meta (or return everything on page 1) fall
+   * out after a single request.
+   */
+  async getAll<T = unknown>(path: string, options: { limit?: number } = {}): Promise<CtPage<T>> {
+    const limit = options.limit ?? DEFAULT_PAGE_LIMIT;
+    const items: T[] = [];
+    let meta: CtMeta | undefined;
+    let page = 1;
+    for (let i = 0; i < MAX_PAGES; i++) {
+      const parsed = await this.requestEnvelope("GET", withPageParams(path, page, limit));
+      if (parsed === undefined) {
+        break;
+      }
+      const isArrayEnvelope = Array.isArray(parsed);
+      const envelope = isArrayEnvelope ? undefined : (parsed as { data?: unknown; meta?: CtMeta });
+      const pageData = isArrayEnvelope ? parsed : (envelope?.data ?? parsed);
+      const pageItems = Array.isArray(pageData) ? (pageData as T[]) : [];
+      items.push(...pageItems);
+      const pageMeta = envelope?.meta;
+      meta = pageMeta ?? meta;
+      const pagination = pageMeta?.pagination;
+      if (pageItems.length === 0 || !pagination || pagination.current === undefined || pagination.lastPage === undefined) {
+        break;
+      }
+      if (pagination.current >= pagination.lastPage) {
+        break;
+      }
+      page += 1;
+    }
+    return { data: items, meta };
+  }
+
+  /**
+   * Shared fetch + parse for {@link request} and {@link getAll}: performs the
+   * HTTP call, throws a status/body-carrying {@link CtApiError} on failure,
+   * and returns the raw parsed JSON envelope (still carrying `data`/`meta`) —
+   * or `undefined` for an empty 2xx body. Kept private so `request()`'s
+   * `.data ?? envelope` unwrap stays the single source of truth for existing
+   * callers (plan/apply/adopt) while `getAll()` gets at `meta` too.
+   */
+  private async requestEnvelope(method: string, path: string, body?: Json): Promise<unknown> {
     if (!this.cookie) {
       throw new CtApiError("Not authenticated — run `ct auth login` first", 401, null);
     }
@@ -138,22 +220,20 @@ export class CtClient {
       throw new CtApiError(`${method} ${path} failed`, res.status, await safeBody(res));
     }
     if (res.status === 204) {
-      return undefined as T;
+      return undefined;
     }
     // Any 2xx may carry an empty or non-JSON body (DELETEs commonly do). A bare
     // res.json() there throws a raw SyntaxError naming no request. Read the text
     // first: empty → undefined; unparseable → a CtApiError that names method+path.
     const text = await res.text();
     if (text.trim() === "") {
-      return undefined as T;
+      return undefined;
     }
-    let parsed: { data?: T };
     try {
-      parsed = JSON.parse(text) as { data?: T };
+      return JSON.parse(text);
     } catch {
       throw new CtApiError(`${method} ${path} returned a non-JSON body`, res.status, text);
     }
-    return (parsed.data ?? parsed) as T;
   }
 
   private async refreshCsrfToken(): Promise<void> {
@@ -197,4 +277,10 @@ async function safeBody(res: Response): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+/** Append `page`/`limit` query params, respecting any query string the caller already has. */
+function withPageParams(path: string, page: number, limit: number): string {
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}page=${page}&limit=${limit}`;
 }
