@@ -2,7 +2,8 @@ import { Command } from "commander";
 import { authedSession } from "../api/session.js";
 import { CtApiError, type CtClient } from "../api/ctClient.js";
 import { resolveConfig } from "../config.js";
-import { loadState, resolveStatePath, saveState, type State } from "../state/state.js";
+import { prepareEnv } from "../env/context.js";
+import { loadState, saveState, type State } from "../state/state.js";
 import { RESOURCES } from "../resources/registry.js";
 import { assertNotPeople } from "../engine/guard.js";
 import { orderKeys } from "../engine/graph.js";
@@ -11,12 +12,14 @@ import { parentIdsByGroupId, managedParentKeys, type HierarchyEntry } from "../e
 import type { DesiredResource } from "../engine/types.js";
 import { writeBackup } from "../engine/backup.js";
 import { resolveBackupDir } from "./apply.js";
-import { confirmTyped } from "../ui/prompt.js";
+import { confirmTyped, confirmEnv } from "../ui/prompt.js";
 import { info, warn, success, error } from "../ui.js";
 
 interface DestroyOptions {
   target?: string[];
   state?: string;
+  env?: string;
+  confirmEnv?: string;
   backupDir?: string;
   force?: boolean;
 }
@@ -99,6 +102,11 @@ export function destroyCommand(): Command {
     .description("Explicitly delete managed resources (protected; never implicit)")
     .requiredOption("--target <keys...>", "logical key(s) to destroy (repeatable or comma-separated)")
     .option("-s, --state <path>", "state file (or set CT_STATE)")
+    .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
+    .option(
+      "--confirm-env <name>",
+      "confirm a protected env non-interactively (must match --env exactly)",
+    )
     .option("--backup-dir <path>", "directory for the pre-destroy backup (or set CT_BACKUP_DIR)")
     .option("--force", "skip the typed confirmation (preventDestroy is still enforced)")
     .action(async (opts: DestroyOptions) => {
@@ -107,8 +115,9 @@ export function destroyCommand(): Command {
         throw new Error("No --target given. Destroy never deletes implicitly.");
       }
 
+      const cmdEnv = await prepareEnv(opts);
       const config = await resolveConfig();
-      const statePath = resolveStatePath(opts.state);
+      const statePath = cmdEnv.statePath;
       const state = await loadState(statePath, config.host);
 
       for (const key of targets) {
@@ -151,10 +160,18 @@ export function destroyCommand(): Command {
       info(`Backup written: ${backupPath}`);
 
       warn(`About to DELETE: ${ordered.join(", ")}`);
+      // Protected env (#22): typed confirmation of the env NAME is mandatory and --force does NOT bypass
+      // it (--confirm-env <name> substitutes in CI). Otherwise the usual per-target typed confirmation.
       const expected = targets.length === 1 ? targets[0]! : "destroy";
-      const ok = await confirmTyped(expected, { force: opts.force });
+      const ok = cmdEnv.protected
+        ? await confirmEnv(cmdEnv.name!, { confirmFlag: opts.confirmEnv })
+        : await confirmTyped(expected, { force: opts.force });
       if (!ok) {
-        warn("Aborted — nothing deleted.");
+        warn(
+          cmdEnv.protected
+            ? `Aborted — protected environment "${cmdEnv.name}" was not confirmed. Nothing deleted.`
+            : "Aborted — nothing deleted.",
+        );
         process.exitCode = 1;
         return;
       }

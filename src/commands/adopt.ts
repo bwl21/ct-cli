@@ -1,14 +1,16 @@
 import { Command } from "commander";
 import { authedSession } from "../api/session.js";
 import { resolveConfig } from "../config.js";
+import { prepareEnv } from "../env/context.js";
 import { resourceType, configSnippet } from "../resources/registry.js";
-import { loadState, saveState, resolveStatePath, upsert } from "../state/state.js";
+import { loadState, saveState, upsert } from "../state/state.js";
 import { success, info, warn, out } from "../ui.js";
 import { adoptGrantsCommand } from "./adopt-grants.js";
 
 interface AdoptOptions {
   key?: string;
   state?: string;
+  env?: string;
   dryRun?: boolean;
 }
 
@@ -19,6 +21,7 @@ export function adoptCommand(): Command {
     .argument("<id>", "ChurchTools id of the resource")
     .option("-k, --key <key>", "logical key (defaults to a slug of the resource name)")
     .option("-s, --state <path>", "state file path (or set CT_STATE)")
+    .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
     .option("--dry-run", "preview the config entry and state change without writing")
     .action(async (type: string, rawId: string, opts: AdoptOptions) => {
       const spec = resourceType(type);
@@ -30,8 +33,9 @@ export function adoptCommand(): Command {
       // Load + validate the state file (host guard included) BEFORE any network
       // call, so a state file recorded against another instance never triggers a
       // live authenticated request against the wrong ChurchTools host.
+      const cmdEnv = await prepareEnv(opts);
       const config = await resolveConfig();
-      const statePath = resolveStatePath(opts.state);
+      const statePath = cmdEnv.statePath;
       const state = await loadState(statePath, config.host);
 
       const { client } = await authedSession();
