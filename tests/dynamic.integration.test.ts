@@ -7,6 +7,7 @@ import { syntheticField } from "../src/engine/synthetic.js";
 import { authedSession } from "../src/api/session.js";
 import type { State } from "../src/state/state.js";
 import type { DesiredResource } from "../src/engine/types.js";
+import type { DynamicStatus } from "../src/engine/types.js";
 
 const live = process.env.CT_LIVE === "1";
 const liveWrite = process.env.CT_LIVE_WRITE === "1";
@@ -113,6 +114,15 @@ describe.runIf(live && liveWrite)("dynamic ruleset round-trip pin (#36, live wri
 
       // The property #36 actually protects: a `ct plan` built from this same user-authored desired
       // ruleset is a no-op (empty `dynamic` diff) after the PUT — not just raw-object equality.
+      // The `dynamic` field bundles status + ruleset and `diffFields` compares it as one unit, so the
+      // desired status must track the group's REAL live status rather than a hardcoded literal —
+      // otherwise this assertion would false-fail whenever the fixture group's status isn't exactly
+      // "manual" (e.g. the committed fixture at tests/fixtures/dynamic/status.get.json is "active").
+      // This test only ever writes the ruleset (never a status PUT), so reading the live status here
+      // isolates exactly the #36 property under test — ruleset field rewriting — from status drift.
+      const liveStatus = (
+        await client.get<{ dynamicGroupStatus?: string }>(`/dynamicgroups/${GID}/status`)
+      )?.dynamicGroupStatus ?? "none";
       const state: State = {
         version: 1,
         host: expectedHost,
@@ -120,7 +130,13 @@ describe.runIf(live && liveWrite)("dynamic ruleset round-trip pin (#36, live wri
       };
       const actual = new Map<string, Record<string, unknown>>([["pin36", {}]]);
       const desired: DesiredResource[] = [
-        { type: "group", key: "pin36", fields: {}, dependsOn: [], dynamic: { status: "manual", ruleset: authored } },
+        {
+          type: "group",
+          key: "pin36",
+          fields: {},
+          dependsOn: [],
+          dynamic: { status: liveStatus as DynamicStatus, ruleset: authored },
+        },
       ];
       const folded = await syntheticField("dynamic")!.fold({ client, state, desired, actual });
       expect(folded.errors).toEqual([]);
