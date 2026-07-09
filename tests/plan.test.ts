@@ -176,3 +176,63 @@ describe("computePlan", () => {
     expect(plan.items.map((i) => i.key)).toEqual(["g", "c"]);
   });
 });
+
+// A group's campus (`information.campusId`, managed as top-level `campusId`) is a plain diffed
+// field — assign, change, and clear are all ordinary updates. The actual side is normalised to a
+// concrete `null` when unset (see registry), so each transition diffs against a real value.
+describe("group campus assignment (#21)", () => {
+  const g = (key: string, fields: Record<string, unknown>): DesiredResource =>
+    desired(key, fields, { type: "group" });
+  const gState = (fields: Record<string, unknown>): State =>
+    stateOf(managedT("group", "team", 9, { name: "Team", groupTypeId: 2, groupStatusId: 1, ...fields }));
+
+  it("assigns a campus to a previously unassigned group", () => {
+    const plan = computePlan(
+      [g("team", { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 })],
+      gState({ campusId: null }),
+      actualOf({ team: { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: null } }),
+    );
+    expect(plan.items[0]).toMatchObject({ action: "update", key: "team" });
+    expect(plan.items[0]?.changes).toEqual([{ field: "campusId", from: null, to: 4 }]);
+  });
+
+  it("plans a campus move as a normal field update", () => {
+    const plan = computePlan(
+      [g("team", { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 7 })],
+      gState({ campusId: 4 }),
+      actualOf({ team: { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 } }),
+    );
+    expect(plan.items[0]?.changes).toEqual([{ field: "campusId", from: 4, to: 7 }]);
+  });
+
+  it("clears a campus assignment (campusId: null)", () => {
+    const plan = computePlan(
+      [g("team", { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: null })],
+      gState({ campusId: 4 }),
+      actualOf({ team: { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 } }),
+    );
+    expect(plan.items[0]?.changes).toEqual([{ field: "campusId", from: 4, to: null }]);
+  });
+
+  it("is a no-op when desired campus matches actual", () => {
+    const plan = computePlan(
+      [g("team", { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 })],
+      gState({ campusId: 4 }),
+      actualOf({ team: { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 } }),
+    );
+    expect(plan.items[0]?.action).toBe("no-op");
+  });
+
+  it("does not drift on a pre-#21 state snapshot that lacks campusId (config omits it too)", () => {
+    // A group adopted before campusId was managed: its state snapshot has no campusId key, and the
+    // pre-#21 config declares none either. The fetched actual now carries campusId (managed). This
+    // must stay a no-op — no phantom drift, no spurious update — proving no state migration is needed.
+    const plan = computePlan(
+      [g("team", { name: "Team", groupTypeId: 2, groupStatusId: 1 })],
+      stateOf(managedT("group", "team", 9, { name: "Team", groupTypeId: 2, groupStatusId: 1 })),
+      actualOf({ team: { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 } }),
+    );
+    expect(plan.items[0]?.action).toBe("no-op");
+    expect(plan.items[0]?.changes).toEqual([]);
+  });
+});

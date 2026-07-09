@@ -3,8 +3,8 @@ import { readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const fakeCampus = { id: 0, name: "Mainz", shorty: "MZ" };
-const getMock = vi.fn(async () => fakeCampus);
+const fakeCampus: Record<string, unknown> = { id: 0, name: "Mainz", shorty: "MZ" };
+const getMock = vi.fn(async (): Promise<Record<string, unknown>> => fakeCampus);
 
 vi.mock("../src/api/session.js", () => ({
   authedSession: vi.fn(async () => ({ client: { get: getMock }, me: { id: 1 } })),
@@ -45,6 +45,21 @@ describe("ct adopt", () => {
       id: 0,
       key: "mz",
       fields: { name: "Mainz", shorty: "MZ" },
+    });
+  });
+
+  it("captures a campus-assigned group's campusId from information (#21)", async () => {
+    getMock.mockResolvedValueOnce({
+      id: 12,
+      name: "Kids Team",
+      information: { groupTypeId: 2, groupStatusId: 1, campusId: 4 },
+    });
+    await runAdopt(["group", "12", "--state", statePath]);
+    const state = await loadState(statePath, HOST);
+    expect(state.resources.kids_team).toMatchObject({
+      type: "group",
+      id: 12,
+      fields: { name: "Kids Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 },
     });
   });
 

@@ -38,13 +38,33 @@ describe("resourceType", () => {
 
   it("snapshots group ids whether they are nested under information or top-level", () => {
     expect(
-      RESOURCES.group?.managedFields({ name: "Team", information: { groupTypeId: 2, groupStatusId: 1 } }),
-    ).toEqual({ name: "Team", groupTypeId: 2, groupStatusId: 1 });
-    expect(RESOURCES.group?.managedFields({ name: "Team", groupTypeId: 2, groupStatusId: 1 })).toEqual({
+      RESOURCES.group?.managedFields({
+        name: "Team",
+        information: { groupTypeId: 2, groupStatusId: 1, campusId: 4 },
+      }),
+    ).toEqual({ name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 });
+    expect(
+      RESOURCES.group?.managedFields({ name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 }),
+    ).toEqual({
       name: "Team",
       groupTypeId: 2,
       groupStatusId: 1,
+      campusId: 4,
     });
+  });
+
+  it("normalises an unset group campus to null (never undefined) and preserves campus id 0", () => {
+    // No campus anywhere → null, so the actual side is a concrete value that assign/clear can diff against.
+    // (groupStatusId, un-normalised, stays undefined here — toEqual ignores it; only campusId is coalesced.)
+    expect(RESOURCES.group?.managedFields({ name: "Team", information: { groupTypeId: 2 } })).toEqual({
+      name: "Team",
+      groupTypeId: 2,
+      campusId: null,
+    });
+    // Mainz is campus id 0 — must survive the null-coalescing, not collapse to null.
+    expect(
+      RESOURCES.group?.managedFields({ name: "Team", information: { groupTypeId: 2, campusId: 0 } })?.campusId,
+    ).toBe(0);
   });
 });
 

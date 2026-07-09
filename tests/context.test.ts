@@ -68,6 +68,22 @@ describe("config context", () => {
     expect(resources[0]?.dependsOn).toEqual([]);
   });
 
+  it("passes a numeric campusId through as a plain field (the #21 escape hatch)", () => {
+    const { ct, resources } = createContext();
+    ct.group({ key: "team", name: "Team", groupTypeId: 2, campusId: 4 });
+    expect(resources[0]?.fields).toEqual({ name: "Team", groupTypeId: 2, campusId: 4 });
+    // null is allowed (clears the assignment).
+    const { ct: ct2, resources: r2 } = createContext();
+    ct2.group({ key: "team", name: "Team", campusId: null });
+    expect(r2[0]?.fields).toEqual({ name: "Team", campusId: null });
+  });
+
+  it("rejects a logical `campus` reference (deferred to #20) and a non-numeric campusId", () => {
+    const { ct } = createContext();
+    expect(() => ct.group({ key: "g", name: "G", campus: "mainz" })).toThrow(/not supported yet/);
+    expect(() => ct.group({ key: "h", name: "H", campusId: "4" as never })).toThrow(/must be a number/);
+  });
+
   it("rejects a non-array / non-string `parents`", () => {
     const { ct } = createContext();
     expect(() => ct.group({ key: "g", name: "G", parents: "area" as never })).toThrow(/array of string/);
