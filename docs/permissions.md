@@ -107,6 +107,41 @@ each key is re-resolved against the post-execute state. This means a group
 *created* or *recreated* in the same apply always gets its grant written with
 its fresh `dataId`, never a pending placeholder or a stale, dangling id.
 
+## Adopting existing grants — `ct adopt grants <domainType> <domainId>`
+
+To bring an instance's existing rights under management without hand-transcribing
+them, read the live rows and emit a paste-ready config block:
+
+```bash
+ct adopt grants group_type_role 42   # or: group_role, and the hyphenated group-type-role
+```
+
+It fetches `GET /permissions/<domainType>/<domainId>`, runs the rows through the
+**same** normalization the planner uses (`normalizeActual`), and prints a
+`ct.groupRole` / `ct.groupTypeRole` block. What you get back is exactly what a
+subsequent `ct plan` considers managed, so pasting it and re-planning is a no-op:
+
+- **Excluded, as reconciliation excludes them:** the system baseline
+  (`meta.modifiedPid === -1`) and inherited rows.
+- **Revoke/deny rows are preserved, not emitted.** The reconciler never deletes a
+  deny it did not author; if any exist, the block ends with a `NOTE` comment
+  saying so (authoring denies as config is a separate, unshipped feature).
+- **`authId` → `module:right` via the catalog** (reverse lookup). An `authId`
+  with no catalog entry becomes a `WARNING` comment (regenerate the catalog or add
+  the right by hand) rather than failing the whole adoption.
+- **Scoped rights** carry a group `dataId`. If it matches a group **managed in
+  your state file**, the scope is emitted as that group's logical key
+  (`scope: ["kids"]`). If it is unmanaged, you get a clearly-marked placeholder
+  comment telling you to `ct adopt group <id>` first — scope keys must be state
+  keys (see [Scope resolution](#scope-resolution)).
+- **Only `group_role` / `group_type_role`** are valid; people domains are
+  refused (the same hard boundary as everywhere else).
+
+Grants are **not** a state-tracked resource, so this prints config **only** — it
+never writes the state file (unlike `ct adopt <type> <id>`). Pick a real logical
+`key` (the emitted one is a rename-to-taste placeholder), paste into your config,
+and `ct plan`.
+
 ## Domain rules (validated, throw on violation)
 
 - **`group_type_role` requires `authId < 10000`.** Rights with `authId >=
