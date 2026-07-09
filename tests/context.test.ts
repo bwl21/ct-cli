@@ -107,9 +107,20 @@ describe("config context", () => {
     ct.ageGroup({ key: "d", name: "d" });
     ct.targetGroup({ key: "e", name: "e" });
     ct.relationshipType({ key: "f", name: "f" });
+    ct.roleDefinition({ key: "g", name: "g", groupTypeId: 2 });
     for (const r of resources) {
       expect(isKnownType(r.type), `type "${r.type}" is missing from TYPE_TIER`).toBe(true);
     }
+  });
+
+  it("declares the master-data group role as a plannable group-role resource (not the permission surface)", () => {
+    const { ct, resources, permissions } = createContext();
+    ct.roleDefinition({ key: "leiter", name: "Leiter", groupTypeId: 2 });
+    expect(permissions).toEqual([]); // roleDefinition is a resource, never a permission grant
+    expect(resources).toEqual([
+      expect.objectContaining({ type: "group-role", key: "leiter", fields: { name: "Leiter", groupTypeId: 2 } }),
+    ]);
+    expect(isKnownType(resources[0]!.type)).toBe(true); // has an apply tier → plannable
   });
 
   it("evaluateConfig runs a module against a fresh context (blueprints + loops)", async () => {

@@ -24,6 +24,20 @@ describe("coerceScalars", () => {
     expect(coerceScalars({ "==": [{ var: "groupmember.groupMemberStatus" }, "active"] }))
       .toEqual({ "==": [{ var: "groupmember.groupMemberStatus" }, "active"] });
   });
+  it("leaves leading-zero and >2^53 numeric strings as strings (no corruption, no precision loss)", () => {
+    // A leading-zero zip code is a semantic string; parseInt would drop the zero and break the compare.
+    expect(coerceScalars({ "==": [{ var: "person.zip" }, "01067"] }))
+      .toEqual({ "==": [{ var: "person.zip" }, "01067"] });
+    // A digit string beyond MAX_SAFE_INTEGER can't be represented exactly — must stay a string.
+    const big = "90071992547409910"; // > 2^53
+    expect(coerceScalars({ "==": [{ var: "x.id" }, big] }))
+      .toEqual({ "==": [{ var: "x.id" }, big] });
+    // Canonical ints still coerce, so a 5 vs "5" int/string pair keeps diffing equal.
+    expect(coerceScalars({ "==": [{ var: "x.n" }, "5"] }))
+      .toEqual({ "==": [{ var: "x.n" }, 5] });
+    expect(coerceScalars({ "==": [{ var: "x.n" }, "0"] }))
+      .toEqual({ "==": [{ var: "x.n" }, 0] });
+  });
 });
 
 describe("normalizeRuleset", () => {
@@ -47,6 +61,15 @@ describe("normalizeRuleset", () => {
     expect(out.description).toBe("2024"); // stays a string, not 2024
     expect(out.shorty).toBe("007");       // stays a string, not 7
     expect(out.query).toEqual({ "==": [{ var: "ctgroup.id" }, 112] }); // filter operand coerced
+  });
+
+  it("round-trips a leading-zero query leaf byte-identical (no retype on write-back)", () => {
+    const authored = { description: "Zip filter", query: { "==": [{ var: "person.zip" }, "01067"] }, process: {} };
+    const once = normalizeRuleset(authored);
+    // The zip leaf survives normalization untouched — apply PUTs `to.ruleset`, so any retype here
+    // would be written back to CT and silently break the JSONLogic string comparison.
+    expect(once.query).toEqual({ "==": [{ var: "person.zip" }, "01067"] });
+    expect(JSON.stringify(normalizeRuleset(once))).toBe(JSON.stringify(once)); // byte-identical + idempotent
   });
 
   it("read-then-normalize of every live fixture is stable and label-free", () => {

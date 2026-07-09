@@ -25,7 +25,16 @@ export function stripCosmeticLabels(node: unknown): unknown {
   return node;
 }
 
-/** Coerce numeric-string leaves to numbers (CT is int/string-inconsistent for `var` values). */
+/**
+ * Coerce numeric-string leaves to numbers (CT is int/string-inconsistent for `var` values).
+ *
+ * Only *canonical* integer strings are coerced: no leading zeros (`/^(-?[1-9]\d*|0)$/`) and
+ * within `Number.MAX_SAFE_INTEGER`. This leaves semantic strings that merely look numeric —
+ * leading-zero zip codes like `'01067'`, and >2^53 digit strings that would lose precision —
+ * untouched, so they round-trip byte-identical through normalize + write-back instead of being
+ * silently retyped (which broke their JSONLogic string comparisons). A canonical `"5"` still
+ * coerces to `5`, so a `5` vs `"5"` int/string pair still diffs equal.
+ */
 export function coerceScalars(node: unknown): unknown {
   if (Array.isArray(node)) return node.map(coerceScalars);
   if (node && typeof node === "object") {
@@ -33,7 +42,10 @@ export function coerceScalars(node: unknown): unknown {
     for (const [k, v] of Object.entries(node as Record<string, unknown>)) out[k] = coerceScalars(v);
     return out;
   }
-  if (typeof node === "string" && /^-?\d+$/.test(node)) return Number.parseInt(node, 10);
+  if (typeof node === "string" && /^(-?[1-9]\d*|0)$/.test(node)) {
+    const n = Number.parseInt(node, 10);
+    if (Number.isSafeInteger(n)) return n;
+  }
   return node;
 }
 

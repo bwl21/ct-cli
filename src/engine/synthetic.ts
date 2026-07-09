@@ -114,18 +114,31 @@ const dynamicField: SyntheticField = {
         errors.push(`dynamic ${managed.key} status (#${managed.id}): ${message}`);
       }
     }
-    const augmented = desired.map((d) =>
-      d.type === "group" && d.dynamic !== undefined
-        ? { ...d, fields: { ...d.fields, dynamic: normalizeDynamic({ status: d.dynamic.status, ruleset: resolveRulesetRef(d.dynamic.ruleset, configDir, d.key) }) } }
-        : d,
-    );
+    const augmented = desired.map((d) => {
+      if (d.type !== "group" || d.dynamic === undefined) return d;
+      // Demote-to-none: fold to the SAME sentinel the actual side uses for a non-dynamic group
+      // ({ status: "none", ruleset: {} }). The docs tell users to KEEP the dynamic block when
+      // demoting, so their authored ruleset is still present here — but folding it would diff
+      // forever against the sentinel actual. Collapsing both sides makes a demoted group converge.
+      const dynamic =
+        d.dynamic.status === "none"
+          ? { status: "none" as DynamicStatus, ruleset: {} }
+          : normalizeDynamic({ status: d.dynamic.status, ruleset: resolveRulesetRef(d.dynamic.ruleset, configDir, d.key) });
+      return { ...d, fields: { ...d.fields, dynamic } };
+    });
     return { desired: augmented, errors };
   },
   async apply({ client, id, change }) {
     const to = change.to as { status: DynamicStatus; ruleset: Record<string, unknown> } | undefined;
     if (!to || to.status === "none") {
       assertNotPeople(`/dynamicgroups/${id}/ruleset`);
-      await client.request("DELETE", `/dynamicgroups/${id}/ruleset`);
+      // A group that was never dynamic (or is already demoted) has no ruleset to delete — CT 404s.
+      // Tolerate that: the desired end-state (no ruleset) already holds, so treat it as done.
+      try {
+        await client.request("DELETE", `/dynamicgroups/${id}/ruleset`);
+      } catch (err) {
+        if (!(err instanceof CtApiError && err.status === 404)) throw err;
+      }
       assertNotPeople(`/dynamicgroups/${id}/status`);
       await client.request("PUT", `/dynamicgroups/${id}/status`, { dynamicGroupStatus: "none" });
       return;
