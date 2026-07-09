@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SYNTHETIC_FIELDS, syntheticField, foldSynthetic } from "../src/engine/synthetic.js";
 import { normalizeDynamic, resolveRulesetRef } from "../src/engine/dynamic.js";
+import { diffFields } from "../src/engine/plan.js";
 import { loadConfig } from "../src/config/load.js";
 import { CtApiError } from "../src/api/ctClient.js";
 import type { State } from "../src/state/state.js";
@@ -71,6 +72,28 @@ describe("dynamic synthetic field — fold", () => {
     expect(actual.get("g")).not.toHaveProperty("dynamic"); // NOT clobbered with the sentinel
   });
 
+  it("demote-to-none converges: a kept authored ruleset folds to the same sentinel as the actual side (no-op)", async () => {
+    // docs/dynamic-groups.md tells users to KEEP the dynamic block when demoting, so the authored
+    // ruleset is still present with status "none". The actual side is the { status:"none", ruleset:{} }
+    // sentinel — folding the full ruleset would diff forever. Both must collapse to the same sentinel.
+    const state: State = { version: 1, host: "h",
+      resources: { g: { type: "group", id: 5, key: "g", fields: { name: "G" }, adoptedAt: "t", updatedAt: "t" } } };
+    const actual = new Map<string, Record<string, unknown>>([["g", { name: "G" }]]);
+    const desired: DesiredResource[] = [
+      { type: "group", key: "g", fields: { name: "G" }, dependsOn: [],
+        dynamic: { status: "none", ruleset: { description: "kept", query: { "==": [{ var: "x" }, "1"] }, process: {} } } },
+    ];
+    // Group is already non-dynamic in CT → ruleset GET 404s → actual sentinel.
+    const client = { get: vi.fn(async () => { throw new CtApiError("Not Found", 404, null); }) };
+    const out = await dynamicField().fold({ client: getClient(client), state, desired, actual });
+    expect(out.errors).toEqual([]);
+    const sentinel = { status: "none", ruleset: {} };
+    expect(actual.get("g")?.dynamic).toEqual(sentinel);            // actual side sentinel
+    expect(out.desired[0]?.fields.dynamic).toEqual(sentinel);       // desired folds to the SAME sentinel
+    // Second plan is a no-op: the two sides are deep-equal, so diffFields reports no dynamic change.
+    expect(diffFields(out.desired[0]!.fields, actual.get("g")!).find((c) => c.field === "dynamic")).toBeUndefined();
+  });
+
   it("ignores groups that did not opt into dynamic", async () => {
     const state: State = { version: 1, host: "h",
       resources: { g: { type: "group", id: 5, key: "g", fields: { name: "G" }, adoptedAt: "t", updatedAt: "t" } } };
@@ -102,6 +125,32 @@ describe("dynamic synthetic field — apply", () => {
       change: { field: "dynamic", from: { status: "active", ruleset: {} }, to: { status: "none", ruleset: {} } } });
     expect(request).toHaveBeenNthCalledWith(1, "DELETE", "/dynamicgroups/5/ruleset");
     expect(request).toHaveBeenNthCalledWith(2, "PUT", "/dynamicgroups/5/status", { dynamicGroupStatus: "none" });
+  });
+
+  it("tolerates a 404 on the demote DELETE (never-dynamic / already-demoted group) and still PUTs status none", async () => {
+    const request = vi.fn(async (method: string, path: string) => {
+      if (method === "DELETE" && path.endsWith("/ruleset")) throw new CtApiError("Not Found", 404, null);
+      return {};
+    });
+    const state: State = { version: 1, host: "h", resources: {} };
+    await expect(
+      dynamicField().apply({ client: { request } as unknown as Pick<CtClient, "request">, state, id: 5,
+        change: { field: "dynamic", from: undefined, to: { status: "none", ruleset: {} } } }),
+    ).resolves.toBeUndefined(); // 404 swallowed — apply does not abort
+    expect(request).toHaveBeenNthCalledWith(1, "DELETE", "/dynamicgroups/5/ruleset");
+    expect(request).toHaveBeenNthCalledWith(2, "PUT", "/dynamicgroups/5/status", { dynamicGroupStatus: "none" });
+  });
+
+  it("re-throws a non-404 error on the demote DELETE (real failures still abort)", async () => {
+    const request = vi.fn(async (method: string, path: string) => {
+      if (method === "DELETE" && path.endsWith("/ruleset")) throw new CtApiError("Server Error", 500, null);
+      return {};
+    });
+    const state: State = { version: 1, host: "h", resources: {} };
+    await expect(
+      dynamicField().apply({ client: { request } as unknown as Pick<CtClient, "request">, state, id: 5,
+        change: { field: "dynamic", from: undefined, to: { status: "none", ruleset: {} } } }),
+    ).rejects.toThrow(/Server Error/);
   });
 });
 
