@@ -5,6 +5,8 @@ import { loadState, resolveStatePath } from "../state/state.js";
 import { loadConfig, resolveConfigPath } from "../config/load.js";
 import { buildPlan } from "../engine/build.js";
 import { renderPlan } from "../engine/render.js";
+import { buildPermissionPlan } from "../permissions/plan.js";
+import { renderPermissionPlan } from "../permissions/render.js";
 import { info, warn, out } from "../ui.js";
 
 interface PlanOptions {
@@ -22,24 +24,29 @@ export function planCommand(): Command {
     .action(async (opts: PlanOptions) => {
       const config = await resolveConfig();
       const configPath = resolveConfigPath(opts.config);
-      const desired = await loadConfig(configPath);
+      const { resources: desired, permissions, configDir } = await loadConfig(configPath);
       const state = await loadState(resolveStatePath(opts.state), config.host);
       if (state.host !== config.host) {
         throw new Error(`State host (${state.host}) does not match CT_HOST (${config.host}).`);
       }
 
       const { client } = await authedSession();
-      const { plan, fetchErrors } = await buildPlan(client, state, desired);
+      const { plan, fetchErrors } = await buildPlan(client, state, desired, { configDir });
+      const { items: permItems, fetchErrors: permFetchErrors } = await buildPermissionPlan(client, state, permissions);
       if (opts.json) {
-        out(plan);
+        out({ plan, permissions: permItems });
       } else {
         info(`config: ${configPath} · state host: ${state.host}`);
         process.stdout.write(`${renderPlan(plan)}\n`);
+        if (permItems.length > 0) {
+          process.stdout.write(`\n${renderPermissionPlan(permItems)}\n`);
+        }
       }
 
-      if (fetchErrors.length > 0) {
+      const allFetchErrors = [...fetchErrors, ...permFetchErrors];
+      if (allFetchErrors.length > 0) {
         warn(
-          `Plan is INCOMPLETE — ${fetchErrors.length} resource(s) could not be fetched; their diff is missing. Re-run to retry.`,
+          `Plan is INCOMPLETE — ${allFetchErrors.length} resource(s) could not be fetched; their diff is missing. Re-run to retry.`,
         );
         process.exitCode = 1;
       }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createContext, evaluateConfig } from "../src/config/context.js";
+import { createContext, evaluateConfig, type ConfigContext } from "../src/config/context.js";
 import { isKnownType } from "../src/engine/graph.js";
 
 describe("config context", () => {
@@ -113,7 +113,7 @@ describe("config context", () => {
   });
 
   it("evaluateConfig runs a module against a fresh context (blueprints + loops)", async () => {
-    const resources = await evaluateConfig((ct) => {
+    const { resources } = await evaluateConfig((ct) => {
       for (const c of ["mainz", "berlin"]) {
         ct.campus({ key: c, name: c });
         ct.group({ key: `${c}_kids`, name: `${c} kids`, parent: c });
@@ -123,9 +123,44 @@ describe("config context", () => {
   });
 });
 
+describe("dynamic block", () => {
+  it("attaches a validated dynamic spec to the group and drops it from plain fields", async () => {
+    const { ct, resources } = createContext();
+    ct.group({
+      key: "all_mainz",
+      name: "Alle Mainz",
+      groupTypeId: 1,
+      dynamic: { status: "manual", ruleset: { description: "x", method: "ChurchQuery", params: {} } },
+    });
+    const g = resources.find((r) => r.key === "all_mainz")!;
+    expect(g.dynamic).toEqual({ status: "manual", ruleset: { description: "x", method: "ChurchQuery", params: {} } });
+    expect(g.fields).not.toHaveProperty("dynamic"); // never a plain diffed field
+  });
+
+  it("rejects an invalid status", async () => {
+    const { ct } = createContext();
+    expect(() => ct.group({ key: "g", name: "G", dynamic: { status: "bogus", ruleset: {} } as never })).toThrow(
+      /dynamic.*status/i,
+    );
+  });
+
+  it("rejects dynamic on a non-group", async () => {
+    const { ct } = createContext();
+    expect(() =>
+      ct.campus({ key: "c", name: "C", dynamic: { status: "manual", ruleset: {} } } as never),
+    ).toThrow(/dynamic.*only.*group/i);
+  });
+
+  it("rejects a null dynamic block with a clean error", async () => {
+    const { ct } = createContext();
+    expect(() => ct.group({ key: "g", name: "G", dynamic: null } as never))
+      .toThrow(/dynamic/i);
+  });
+});
+
 describe("preventDestroy lifecycle flag", () => {
   it("is carried on the resource but kept out of managed fields", async () => {
-    const resources = await evaluateConfig((ct) => {
+    const { resources } = await evaluateConfig((ct) => {
       ct.group({ key: "kids_lead", name: "Kids Leitung", preventDestroy: true });
     });
     const group = resources.find((r) => r.key === "kids_lead")!;
@@ -134,9 +169,56 @@ describe("preventDestroy lifecycle flag", () => {
   });
 
   it("defaults to undefined when not declared", async () => {
-    const resources = await evaluateConfig((ct) => {
+    const { resources } = await evaluateConfig((ct) => {
       ct.campus({ key: "mainz", name: "Mainz", shortName: "MZ" });
     });
     expect(resources[0]!.preventDestroy).toBeUndefined();
+  });
+});
+
+describe("permission declarations", () => {
+  it("collects groupRole / groupTypeRole with validated grants", async () => {
+    const mod = (ct: ConfigContext) => {
+      ct.groupTypeRole({ key: "leiter_tpl", id: 8, grants: [
+        "churchgroup:view group",
+        { right: "churchdb:view group", scope: ["kids_area"] },
+      ]});
+      ct.groupRole({ key: "kids_lead", id: 2882, grants: ["churchgroup:edit group members"] });
+    };
+    const { permissions } = await evaluateConfig(mod); // evaluateConfig now returns {resources, permissions}
+    expect(permissions).toHaveLength(2);
+    expect(permissions[0]).toMatchObject({ key: "leiter_tpl", domainType: "group_type_role", domainId: 8 });
+    expect(permissions[1]).toMatchObject({ key: "kids_lead", domainType: "group_role", domainId: 2882 });
+  });
+  it("rejects a non-numeric id and an empty right name", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) => ct.groupRole({ key: "x", id: "nope", grants: [] } as never)),
+    ).rejects.toThrow(/id.*number/i);
+    await expect(
+      evaluateConfig((ct: ConfigContext) => ct.groupRole({ key: "x", id: 1, grants: [""] })),
+    ).rejects.toThrow(/grant/i);
+  });
+
+  it("rejects a non-finite id (NaN)", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) => ct.groupRole({ key: "x", id: NaN, grants: [] })),
+    ).rejects.toThrow(/id.*number/i);
+  });
+
+  it("rejects two declarations targeting the same (domainType, domainId)", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) => {
+        ct.groupTypeRole({ key: "leiter_tpl", id: 8, grants: ["churchgroup:view group"] });
+        ct.groupTypeRole({ key: "x", id: 8, grants: ["churchdb:view group members"] });
+      }),
+    ).rejects.toThrow(/Duplicate permission target.*group_type_role #8.*"leiter_tpl".*"x"/s);
+  });
+
+  it("allows the same domainId across different domainTypes (no false-positive dedup)", async () => {
+    const { permissions } = await evaluateConfig((ct: ConfigContext) => {
+      ct.groupTypeRole({ key: "a", id: 8, grants: ["churchgroup:view group"] });
+      ct.groupRole({ key: "b", id: 8, grants: ["churchgroup:view group"] });
+    });
+    expect(permissions).toHaveLength(2);
   });
 });

@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { authedSession } from "../api/session.js";
+import { loadCatalog } from "../permissions/catalog.js";
 import { out } from "../ui.js";
 
 /**
@@ -34,6 +35,19 @@ export function getCommand(): Command {
         out(await client.get(path));
       });
   }
+
+  cmd
+    .command("permissions-catalog")
+    .description("List the static permission-name → authId catalog (for use in config `grants`)")
+    .action(() => {
+      const catalog = loadCatalog();
+      for (const name of Object.keys(catalog).sort()) {
+        const entry = catalog[name];
+        if (!entry) continue;
+        const scoped = entry.scopeField ? "scoped" : "unscoped";
+        process.stdout.write(`${name} -> ${entry.authId} (${scoped})\n`);
+      }
+    });
 
   cmd
     .command("raw <path>")

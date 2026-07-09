@@ -11,7 +11,15 @@
  * The context is injected (no global state), so blueprints are just functions
  * and loops, and the whole thing is trivially testable without file I/O.
  */
-import type { DesiredResource } from "../engine/types.js";
+import type { DesiredResource, DynamicSpec, DynamicStatus } from "../engine/types.js";
+import type { DomainType } from "../permissions/grants.js";
+import type { DesiredPermission, Grant } from "../permissions/types.js";
+// Re-exported so a config file can pull the query DSL from the same module as
+// `ConfigContext`: `import { q, churchQuery } from "../../src/config/context.js"`.
+export { q, churchQuery } from "./query.js";
+export type { QueryNode } from "./query.js";
+
+const DYNAMIC_STATUSES = ["active", "inactive", "manual", "none"] as const;
 
 export interface ResourceInput {
   key: string;
@@ -29,6 +37,12 @@ export interface ResourceInput {
   [field: string]: unknown;
 }
 
+export interface PermissionInput {
+  key: string;
+  id: number;
+  grants: Grant[];
+}
+
 export interface ConfigContext {
   campus(input: ResourceInput): void;
   group(input: ResourceInput): void;
@@ -36,12 +50,14 @@ export interface ConfigContext {
   ageGroup(input: ResourceInput): void;
   targetGroup(input: ResourceInput): void;
   relationshipType(input: ResourceInput): void;
+  groupRole(input: PermissionInput): void;
+  groupTypeRole(input: PermissionInput): void;
 }
 
 export type ConfigModule = (ct: ConfigContext) => void | Promise<void>;
 
 function toDesired(type: string, input: ResourceInput): DesiredResource {
-  const { key, parent, parents, dependsOn = [], preventDestroy, ...fields } = input;
+  const { key, parent, parents, dependsOn = [], preventDestroy, dynamic, ...fields } = input;
   if (!key || typeof key !== "string") {
     throw new Error(`${type} declaration is missing a string "key".`);
   }
@@ -52,13 +68,37 @@ function toDesired(type: string, input: ResourceInput): DesiredResource {
   if (parents !== undefined && (!Array.isArray(parents) || parents.some((p) => typeof p !== "string"))) {
     throw new Error(`${type} "${key}": "parents" must be an array of string group keys.`);
   }
+  // `dynamic` is a synthetic field for auto-groups, handled separately from the plain diffed
+  // field bag. Opt-in: `undefined` means "not a dynamic group" (mirrors `parents`).
+  let dynamicSpec: DynamicSpec | undefined;
+  if (dynamic !== undefined) {
+    if (type !== "group") throw new Error(`${type} "${key}": "dynamic" is only valid on a group.`);
+    if (dynamic == null || typeof dynamic !== "object") {
+      throw new Error(`group "${key}": "dynamic" must be an object with { status, ruleset }.`);
+    }
+    const d = dynamic as Record<string, unknown>;
+    if (!DYNAMIC_STATUSES.includes(d.status as DynamicStatus))
+      throw new Error(`group "${key}": "dynamic.status" must be one of ${DYNAMIC_STATUSES.join(", ")}.`);
+    if (d.ruleset == null || typeof d.ruleset !== "object")
+      throw new Error(`group "${key}": "dynamic.ruleset" must be a RuleSet object or a { ref } reference.`);
+    dynamicSpec = { status: d.status as DynamicStatus, ruleset: d.ruleset };
+  }
   // `parent` is an ordering hint only — a dependency edge, never a diffed/managed field
   // (its pre-hierarchy meaning; a `parent` may point at a campus). Group hierarchy is
   // managed opt-in via `parents`: `undefined` → unmanaged, `[]` → managed with no parents.
   const parentKey = typeof parent === "string" && parent !== "" ? parent : undefined;
   const parentKeys = parents !== undefined ? [...new Set(parents)] : undefined;
   const edges = [...new Set([...dependsOn, ...(parentKey ? [parentKey] : []), ...(parentKeys ?? [])])];
-  return { type, key, fields, parent: parentKey, parents: parentKeys, dependsOn: edges, preventDestroy };
+  return {
+    type,
+    key,
+    fields,
+    parent: parentKey,
+    parents: parentKeys,
+    dynamic: dynamicSpec,
+    dependsOn: edges,
+    preventDestroy,
+  };
 }
 
 /**
@@ -87,9 +127,18 @@ function validateReferences(resources: DesiredResource[]): void {
   }
 }
 
-export function createContext(): { ct: ConfigContext; resources: DesiredResource[] } {
+export function createContext(): {
+  ct: ConfigContext;
+  resources: DesiredResource[];
+  permissions: DesiredPermission[];
+} {
   const resources: DesiredResource[] = [];
+  const permissions: DesiredPermission[] = [];
   const seen = new Set<string>();
+  // Tracks (domainType, domainId) -> declaring key, so two declarations aiming at the same
+  // permission target (even under different logical keys) are rejected at eval time instead
+  // of each diffing against the other's grants and proposing them as deletes forever.
+  const seenDomains = new Map<string, string>();
   const define =
     (type: string) =>
     (input: ResourceInput): void => {
@@ -100,6 +149,33 @@ export function createContext(): { ct: ConfigContext; resources: DesiredResource
       seen.add(resource.key);
       resources.push(resource);
     };
+  const definePermission =
+    (domainType: DomainType) =>
+    (input: PermissionInput): void => {
+      if (typeof input.key !== "string" || !input.key)
+        throw new Error(`${domainType} declaration missing a string "key".`);
+      if (typeof input.id !== "number" || !Number.isFinite(input.id))
+        throw new Error(`${domainType} "${input.key}": "id" must be a number (the domainId).`);
+      if (!Array.isArray(input.grants)) throw new Error(`${domainType} "${input.key}": "grants" must be an array.`);
+      for (const g of input.grants) {
+        const right = typeof g === "string" ? g : g?.right;
+        if (typeof right !== "string" || !right.includes(":"))
+          throw new Error(`${domainType} "${input.key}": each grant must be a "module:right" string or { right, scope }.`);
+        if (typeof g === "object" && !Array.isArray(g.scope))
+          throw new Error(`${domainType} "${input.key}": scoped grant needs "scope": string[].`);
+      }
+      if (seen.has(input.key)) throw new Error(`Duplicate logical key "${input.key}" in config.`);
+      seen.add(input.key);
+      const domainKey = `${domainType}:${input.id}`;
+      const existingKey = seenDomains.get(domainKey);
+      if (existingKey) {
+        throw new Error(
+          `Duplicate permission target: ${domainType} #${input.id} is declared by both "${existingKey}" and "${input.key}". Merge their grants into one declaration.`,
+        );
+      }
+      seenDomains.set(domainKey, input.key);
+      permissions.push({ key: input.key, domainType, domainId: input.id, grants: input.grants });
+    };
   // Every type emitted here MUST have an apply tier in engine/graph.ts TYPE_TIER
   // (locked by tests/context.test.ts), else computePlan rejects it at plan time.
   const ct: ConfigContext = {
@@ -109,14 +185,18 @@ export function createContext(): { ct: ConfigContext; resources: DesiredResource
     ageGroup: define("age-group"),
     targetGroup: define("target-group"),
     relationshipType: define("relationship-type"),
+    groupRole: definePermission("group_role"),
+    groupTypeRole: definePermission("group_type_role"),
   };
-  return { ct, resources };
+  return { ct, resources, permissions };
 }
 
-/** Run a loaded config module against a fresh context and collect its resources. */
-export async function evaluateConfig(mod: ConfigModule): Promise<DesiredResource[]> {
-  const { ct, resources } = createContext();
+/** Run a loaded config module against a fresh context and collect its resources + permissions. */
+export async function evaluateConfig(
+  mod: ConfigModule,
+): Promise<{ resources: DesiredResource[]; permissions: DesiredPermission[] }> {
+  const { ct, resources, permissions } = createContext();
   await mod(ct);
   validateReferences(resources);
-  return resources;
+  return { resources, permissions };
 }

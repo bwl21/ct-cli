@@ -3,6 +3,14 @@
  * plan produced by diffing desired vs state vs actual.
  */
 
+export type DynamicStatus = "active" | "inactive" | "manual" | "none";
+
+export interface DynamicSpec {
+  status: DynamicStatus;
+  /** RuleSet object, or a { ref: "./path.json" } reference, or a typed-query build result. */
+  ruleset: unknown;
+}
+
 export interface DesiredResource {
   type: string;
   key: string;
@@ -12,6 +20,8 @@ export interface DesiredResource {
   parent?: string;
   /** Managed parent group keys (hierarchy). `undefined` = hierarchy not managed for this group; `[]` = should have no managed parents. */
   parents?: string[];
+  /** Auto-group / dynamic-group config. Opt-in: `undefined` = not a dynamic group. Only valid on a group. */
+  dynamic?: DynamicSpec;
   /** Logical keys this resource must be applied after (includes `parent`/`parents`). */
   dependsOn: string[];
   /** Lifecycle flag: block `ct destroy` for this resource. Never diffed or sent to the API. */

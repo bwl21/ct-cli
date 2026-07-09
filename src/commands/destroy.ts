@@ -64,7 +64,7 @@ export function destroyCommand(): Command {
       }
 
       // preventDestroy guard: a target still declared with the flag is blocked.
-      const desired = await loadConfig(resolveConfigPath(opts.config));
+      const { resources: desired } = await loadConfig(resolveConfigPath(opts.config));
       const protectedKeys = new Set(desired.filter((d) => d.preventDestroy).map((d) => d.key));
       const blocked = targets.filter((k) => protectedKeys.has(k));
       if (blocked.length > 0) {

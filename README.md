@@ -28,7 +28,13 @@ Early scaffold. See the [epic (#1)](https://github.com/eqrm/ct-cli/issues/1) and
 - ✅ **Phase 2 — Read/Adopt** ([#4](https://github.com/eqrm/ct-cli/issues/4)): `ct adopt` + JSON state file.
 - ✅ **Phase 3 — Declarative engine** ([#5](https://github.com/eqrm/ct-cli/issues/5)): config DSL, `plan`/diff, dependency graph, group hierarchy.
 - ✅ **Phase 4 — Apply + guardrails** ([#6](https://github.com/eqrm/ct-cli/issues/6)): `ct apply` / `ct destroy`, confirmation, backup, `preventDestroy`.
-- ⬜ Phase 5: blueprints.
+- ✅ **Phase 5 — Blueprints** ([#7](https://github.com/eqrm/ct-cli/issues/7)):
+  all three planned features landed — auto-groups / dynamic groups
+  ([#14](https://github.com/eqrm/ct-cli/issues/14)), permissions
+  ([#13](https://github.com/eqrm/ct-cli/issues/13)), and blueprints
+  ([#7](https://github.com/eqrm/ct-cli/issues/7)) — see
+  [Auto-groups](#auto-groups), [Permissions](#permissions), and
+  [Blueprints](#blueprints) below.
 
 ## Requirements
 
@@ -94,6 +100,68 @@ export default (ct) => {
 
 Machine-readable output goes to **stdout** (pipe/`jq` it); human status lines go
 to **stderr**.
+
+### Blueprints
+
+A "blueprint" is a plain function over the injected `ConfigContext` — no
+special machinery. Pull a repeated structure (e.g. a campus's Kids area)
+into a function and call it once per campus, prefixing every key with
+`${campus}_` to keep each instantiation's resources unique and its managed
+hierarchy (`parents`) scoped to that campus. `ct plan`/`ct apply` order
+campuses → groups → hierarchy automatically via the dependency graph, and
+an undeclared `parents` reference throws at config-load time (typo guard).
+See [`docs/blueprints.md`](docs/blueprints.md) for the full guide and
+[`examples/campus-blueprint.config.ts`](examples/campus-blueprint.config.ts)
+for a runnable example.
+
+### Auto-groups
+
+A group can opt in to a `dynamic` block to manage its ChurchTools "dynamic
+group" (auto-group) ruleset + status alongside its plain fields:
+
+```ts
+ct.group({
+  key: "all_mainz",
+  name: "Alle Mainz",
+  groupTypeId: 1,
+  dynamic: { status: "manual", ruleset: churchQueryRuleset /* inline object | { ref } | q + churchQuery */ },
+});
+```
+
+`ct apply --refresh` opts in to a post-apply, per-group membership
+recompute for every dynamic group that changed. See
+[`docs/dynamic-groups.md`](docs/dynamic-groups.md) for the full guide (the
+`status` states, the three ways to supply a ruleset, the typed query DSL,
+and how drift normalization avoids cosmetic false diffs) and
+[`examples/dynamic-group.config.ts`](examples/dynamic-group.config.ts) for a
+runnable example.
+
+### Permissions
+
+`ct.groupRole` / `ct.groupTypeRole` declare ChurchTools permission grants
+(group-role and group-type-role rights) as code, reconciled with the same
+`plan`/`apply` workflow:
+
+```ts
+ct.groupTypeRole({
+  key: "leiter_tpl",
+  id: 1, // the domainId — the group type's own id for group_type_role
+  grants: [
+    "churchgroup:view",                                          // unscoped
+    { right: "churchgroup:view group", scope: ["kids_area"] },   // scoped to a managed group
+  ],
+});
+```
+
+Right names (`"module:right"`) are validated against a static, offline
+catalog — discover them with `ct get permissions-catalog`. Grants you remove
+from the config are diffed as deletions and reconciled via `ct apply`, same
+as any other resource; system-default and inherited grants are never touched
+or surfaced. See [`docs/permissions.md`](docs/permissions.md) for the full
+guide (domainId semantics, scope resolution, domain rules, the
+baseline-tolerance model) and
+[`examples/permissions.config.ts`](examples/permissions.config.ts) for a
+runnable example.
 
 ## Auth model
 

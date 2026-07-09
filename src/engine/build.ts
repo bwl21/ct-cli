@@ -1,8 +1,9 @@
 /**
  * Shared plan building: fetch the actual ChurchTools values of every managed
- * resource, fold group hierarchy into a `parents` set-field, and diff against
- * the desired config + state. Used by both `ct plan` and `ct apply`, so apply
- * fetches exactly once (its `actual` map is reused for the backup).
+ * resource, fold synthetic sub-resource fields (group hierarchy's `parents`, …)
+ * into the diff, and diff against the desired config + state. Used by both
+ * `ct plan` and `ct apply`, so apply fetches exactly once (its `actual` map is
+ * reused for the backup).
  */
 import type { CtClient } from "../api/ctClient.js";
 import { CtApiError } from "../api/ctClient.js";
@@ -10,7 +11,7 @@ import type { State } from "../state/state.js";
 import type { DesiredResource, Plan } from "./types.js";
 import { RESOURCES } from "../resources/registry.js";
 import { computePlan } from "./plan.js";
-import { parentIdsByGroupId, applyHierarchy, type HierarchyEntry } from "./hierarchy.js";
+import { foldSynthetic } from "./synthetic.js";
 import { mapConcurrent } from "../util/concurrency.js";
 import { warn } from "../ui.js";
 
@@ -23,10 +24,16 @@ export interface BuildResult {
   fetchErrors: string[];
 }
 
+export interface BuildOptions {
+  /** Directory of the config file — `{ ref }` ruleset paths resolve relative to it (not the cwd). */
+  configDir?: string;
+}
+
 export async function buildPlan(
   client: Pick<CtClient, "get">,
   state: State,
   desired: DesiredResource[],
+  opts: BuildOptions = {},
 ): Promise<BuildResult> {
   // Keyed by logical key (globally unique), not CT id (unique only within a type — the Mainz campus is id 0).
   const actual = new Map<string, Record<string, unknown>>();
@@ -56,24 +63,9 @@ export async function buildPlan(
     }
   });
 
-  // Group hierarchy: one bulk call, folded into each opted-in group's `parents` set-field.
-  let parentIds = new Map<number, number[]>();
-  let hierarchyOk = true;
-  const hasManagedGroups = Object.values(state.resources).some((m) => m.type === "group");
-  if (hasManagedGroups) {
-    try {
-      const raw = await client.get<HierarchyEntry[]>("/groups/hierarchies");
-      parentIds = parentIdsByGroupId(Array.isArray(raw) ? raw : []);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      fetchErrors.push(`group hierarchies: ${message}`);
-      warn(`Failed to fetch group hierarchies: ${message}`);
-      hierarchyOk = false;
-    }
-  }
-  // On a hierarchy-fetch failure, leave `parents` undiffed rather than folding an empty map
-  // (which would fabricate spurious "add all parents" changes). The plan is flagged INCOMPLETE.
-  const desiredWithHierarchy = hierarchyOk ? applyHierarchy(desired, state, actual, parentIds) : desired;
-  const plan = computePlan(desiredWithHierarchy, state, actual, { unresolved });
+  // Synthetic sub-resource fields (parents, dynamic, …) fold into the diff on both sides.
+  const folded = await foldSynthetic({ client, state, desired, actual, configDir: opts.configDir });
+  fetchErrors.push(...folded.errors);
+  const plan = computePlan(folded.desired, state, actual, { unresolved });
   return { plan, actual, fetchErrors };
 }

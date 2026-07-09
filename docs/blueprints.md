@@ -1,0 +1,213 @@
+# Blueprints (parametrized, reusable config)
+
+A "blueprint" is not a feature the tool implements — it's a naming for a
+pattern the existing config DSL already supports for free. `ct.config.ts`
+default-exports a plain function that receives the injected
+[`ConfigContext`](../src/config/context.ts) (`ct.campus`, `ct.group`,
+`ct.groupTypeRole`, ...) and calls it however you like: in a loop, from a
+helper function, across multiple files. There is no special "blueprint"
+API, decorator, or registration step — just TypeScript functions closing
+over `ct` (issue #7).
+
+See [`examples/campus-blueprint.config.ts`](../examples/campus-blueprint.config.ts)
+for a complete, runnable example; this doc walks through what it does and
+why.
+
+## A blueprint is a function over `ConfigContext`
+
+Pull the campus-specific parts of a config out into a function that takes
+`ct: ConfigContext` plus whatever varies per instantiation (a campus key, a
+label, an id):
+
+```ts
+import type { ConfigContext } from "../src/config/context.js";
+
+function kidsArea(ct: ConfigContext, campus: string): void {
+  const lead = `${campus}_kids_lead`;
+  ct.group({ key: lead, name: `${campus} · Kids Leitung`, groupTypeId: 2, parents: [] });
+  // ...more ct.group(...) calls scoped to this campus
+}
+```
+
+Calling `kidsArea(ct, "mainz")` and `kidsArea(ct, "berlin")` from the same
+default export declares two independent Kids-area structures — one per
+campus — using the same code. That's the whole mechanism: no templating
+language, no generated files, just a function called twice.
+
+## The loop-over-campuses pattern and `${campus}_`-prefixed keys
+
+Because every declared resource needs a config-wide-unique `key`
+(`createContext`'s `define` throws on a duplicate), a blueprint that's
+instantiated per campus must prefix every key it declares with the thing
+that makes it unique — typically the campus key:
+
+```ts
+const CAMPUSES = ["mainz", "berlin"] as const;
+
+export default (ct: ConfigContext): void => {
+  for (const campus of CAMPUSES) {
+    ct.campus({ key: campus, name: `Campus ${campus}`, shorty: campus.slice(0, 3).toUpperCase() });
+    kidsArea(ct, campus); // declares mainz_kids_lead, mainz_kids_0_3, ... / berlin_kids_lead, ...
+  }
+};
+```
+
+`${campus}_kids_lead`, `${campus}_kids_0_3`, `${campus}_kids_checkin`, and so
+on give every campus's copy of the structure its own non-colliding key
+namespace, while the *shape* (lead group + N ministry teams) stays defined
+once in `kidsArea`. Add a third campus to `CAMPUSES` and the same function
+produces a third, fully independent structure — no changes to `kidsArea`
+itself.
+
+## `parents` scopes hierarchy per campus
+
+Group hierarchy (`parents`) is opt-in and references other groups **by
+key** (see [`docs/dynamic-groups.md`](dynamic-groups.md) and the DSL doc
+comment in [`src/config/context.ts`](../src/config/context.ts)). Because
+each campus's group keys are prefixed, a blueprint's `parents: [lead]`
+inside `kidsArea` naturally scopes hierarchy to that one campus's own
+`lead` variable — `berlin_kids_0_3`'s `parents` can only ever point at
+`berlin_kids_lead` (the closure captured `lead = "berlin_kids_lead"` for
+that call), never at Mainz's tree:
+
+```ts
+function kidsArea(ct: ConfigContext, campus: string): void {
+  const lead = `${campus}_kids_lead`;
+  ct.group({ key: lead, name: `${campus} · Kids Leitung`, groupTypeId: 2, parents: [] });
+  for (const [suffix, label] of [["0_3", "0–3"], ["4_6", "4–6"], ["checkin", "Check-in"]] as const) {
+    ct.group({
+      key: `${campus}_kids_${suffix}`,
+      name: `${campus} · Kids ${label}`,
+      groupTypeId: 2,
+      parents: [lead], // always this campus's own lead group
+    });
+  }
+}
+```
+
+No cross-campus hierarchy edges can leak in by accident — the prefixing
+convention and lexical scoping do that for you.
+
+## Composing an auto-group and a permission grant inside a blueprint
+
+Because a blueprint is just code calling `ct.*`, it can freely mix resource
+types. `kidsArea` declares a `dynamic` block (an auto-group, #14 — see
+[`docs/dynamic-groups.md`](dynamic-groups.md)) on the "all members" group
+right alongside the plain groups:
+
+```ts
+ct.group({
+  key: `${campus}_kids_all`,
+  name: `${campus} · Kids (alle)`,
+  groupTypeId: 2,
+  parents: [lead],
+  dynamic: {
+    status: "manual",
+    ruleset: {
+      description: `Alle aktiven Kids-Mitarbeiter ${campus}`,
+      importance: 0,
+      personIdFieldName: "person.id",
+      process: {},
+      query: churchQuery(q.eq("person.isArchived", false)),
+    },
+  },
+});
+```
+
+And the outer default export layers a permission grant (#13 — see
+[`docs/permissions.md`](permissions.md)) on a shared `groupTypeRole`
+template, declared once and applying across every campus's groups of that
+type:
+
+```ts
+export default (ct: ConfigContext): void => {
+  for (const campus of CAMPUSES) {
+    ct.campus({ key: campus, name: `Campus ${campus}`, shorty: campus.slice(0, 3).toUpperCase() });
+    kidsArea(ct, campus);
+  }
+  const kidsLeads = CAMPUSES.map((c) => `${c}_kids_lead`);
+  ct.groupTypeRole({
+    key: "kids_lead_tpl",
+    id: 2,
+    grants: [
+      { right: "churchgroup:view group", scope: kidsLeads },
+      { right: "churchgroup:edit group memberships of group", scope: kidsLeads },
+    ],
+  });
+};
+```
+
+There's nothing blueprint-specific about `dynamic` or `groupTypeRole` here
+— they're the same DSL calls documented in
+[`docs/dynamic-groups.md`](dynamic-groups.md) and
+[`docs/permissions.md`](permissions.md), just invoked from inside a
+reusable function instead of inline at the top level.
+
+## Ordering is automatic
+
+`ct plan` / `ct apply` order every declared resource with
+[`orderKeys`](../src/engine/graph.ts), which sorts by a fixed type tier
+(`campus` / `group-type` / ... at tier 0, `group` at tier 1) and then, within
+a tier, by dependency edges — honouring ties by original declaration order.
+A blueprint doesn't need to worry about sequencing:
+
+- **Campuses before groups.** `ct.campus(...)` is tier 0; `ct.group(...)` is
+  tier 1, so every campus in the loop is created before any of that campus's
+  groups, regardless of call order inside the loop body.
+- **Parent groups before child groups.** `parents: [lead]` adds `lead` as a
+  dependency edge on the child (`toDesired` folds `parents` into
+  `dependsOn`), so `orderKeys` always places `${campus}_kids_lead` before
+  `${campus}_kids_0_3`/`_4_6`/`_checkin`/`_all` — the topological sort
+  guarantees it structurally, not by declaration order.
+- **Hierarchy and auto-group state ride along with their group.** `parents`
+  and `dynamic` are *synthetic fields* on the `group` resource itself (see
+  `SYNTHETIC_FIELDS` in [`src/engine/synthetic.ts`](../src/engine/synthetic.ts)),
+  not separate resources with their own tier — they're diffed and applied as
+  part of that same group's create/update, once the group (and, for
+  `parents`, its referenced parent groups) already exist.
+- **Permissions apply after the structural plan.** `ct.groupTypeRole` /
+  `ct.groupRole` declarations aren't part of `orderKeys`'s dependency graph
+  at all — they go through a separate plan/apply pass
+  (`buildPermissionPlan` / `applyPermissionPlan`) that `ct apply` runs only
+  after the structural plan (campuses, groups, hierarchy, auto-groups) has
+  been applied. So a scoped grant's `scope: ["some_group_key"]` can safely
+  reference a group declared earlier in the same blueprint, even one created
+  in this very run.
+
+Net effect for a two-campus blueprint like the example: `ct plan` always
+produces campuses → lead groups → ministry-team groups (in per-campus,
+per-group declaration order) → permission grants, for as many campuses as
+the loop instantiates, with no manual `parent:`/`dependsOn` bookkeeping
+beyond the `parents: [lead]` you'd write anyway.
+
+## The managed-parent typo guard
+
+`parents` references are validated **at config-evaluation time**, before
+any plan or diff is computed (`validateReferences` in
+[`src/config/context.ts`](../src/config/context.ts), run by
+`evaluateConfig`). Every key listed in a `parents` array must resolve to a
+`group` declared *somewhere in the same config* — including inside a
+blueprint function called from the top-level export. A typo, a forgotten
+`kidsArea(ct, campus)` call, or a `parents` key pointing at a non-group
+resource throws immediately:
+
+```
+Group "berlin_kids_0_3" declares hierarchy parent "berlin_kids_laed", which is not declared in this config.
+Managed parents must reference a group by its key (omit unmanaged parents entirely).
+```
+
+This matters more in a blueprint than in a hand-written flat config,
+because the `${campus}_`-prefixed key is itself computed
+(`` `${campus}_kids_lead` ``, not a literal string) — a copy-paste slip in
+one branch of a blueprint (e.g. reusing `mainz`'s lead key inside the
+`berlin` iteration) is exactly the kind of mistake this guard exists to
+catch before it ever reaches `ct plan` against a live instance.
+
+## Full example
+
+See [`examples/campus-blueprint.config.ts`](../examples/campus-blueprint.config.ts)
+for the complete, runnable config this doc describes: a `kidsArea(ct,
+campus)` blueprint instantiated over two campuses (`mainz`, `berlin`),
+each producing a lead group, three ministry-team groups (managed hierarchy
+under the lead), and a dynamic "all members" auto-group — plus one
+`groupTypeRole` permission grant shared across both campuses.
