@@ -34,6 +34,21 @@ default export declares two independent Kids-area structures — one per
 campus — using the same code. That's the whole mechanism: no templating
 language, no generated files, just a function called twice.
 
+### Assigning the blueprint's groups to their campus
+
+A group is linked to a campus with a numeric `campusId: <existing campus id>`
+(CT stores it at `information.campusId`; `campusId: null` clears it). `ct plan`
+diffs a campus assign/move/clear as a normal field update — see
+[`docs/group-field-decisions.md`](group-field-decisions.md).
+
+The catch for a per-campus blueprint: the blueprint usually *creates* the campus
+in the same apply, and a numeric id doesn't exist until after that create. So
+linking a group to a **same-run** campus by key (`campus: "mainz"`) needs the
+logical-reference resolver and is deferred to
+[#20](https://github.com/eqrm/ct-cli/issues/20). Until then, assign to an
+**existing** campus by hardcoding its numeric id, or apply the campuses first and
+fill in the ids on a second pass.
+
 ## The loop-over-campuses pattern and `${campus}_`-prefixed keys
 
 Because every declared resource needs a config-wide-unique `key`
