@@ -22,4 +22,18 @@ describe("ct program", () => {
     const cmd = buildProgram().commands.find((c) => c.name() === "destroy")!;
     expect(cmd.options.some((o) => o.long === "--target")).toBe(true);
   });
+
+  it("registers --env on the state/host-touching commands (#22)", () => {
+    for (const name of ["plan", "apply", "destroy"]) {
+      const cmd = buildProgram().commands.find((c) => c.name() === name)!;
+      expect(cmd.options.some((o) => o.long === "--env")).toBe(true);
+    }
+  });
+
+  it("registers --confirm-env on apply and destroy (protected-env CI path, #22)", () => {
+    for (const name of ["apply", "destroy"]) {
+      const cmd = buildProgram().commands.find((c) => c.name() === name)!;
+      expect(cmd.options.some((o) => o.long === "--confirm-env")).toBe(true);
+    }
+  });
 });
