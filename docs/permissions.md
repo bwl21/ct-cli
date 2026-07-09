@@ -118,8 +118,8 @@ ct adopt grants group_type_role 42   # or: group_role, and the hyphenated group-
 
 It fetches `GET /permissions/<domainType>/<domainId>`, runs the rows through the
 **same** normalization the planner uses (`normalizeActual`), and prints a
-`ct.groupRole` / `ct.groupTypeRole` block. What you get back is exactly what a
-subsequent `ct plan` considers managed, so pasting it and re-planning is a no-op:
+`ct.groupRole` / `ct.groupTypeRole` block whose every emitted grant is guaranteed
+to be accepted by `ct plan` (the round trip is locked by tests):
 
 - **Excluded, as reconciliation excludes them:** the system baseline
   (`meta.modifiedPid === -1`) and inherited rows.
@@ -133,9 +133,24 @@ subsequent `ct plan` considers managed, so pasting it and re-planning is a no-op
   your state file**, the scope is emitted as that group's logical key
   (`scope: ["kids"]`). If it is unmanaged, you get a clearly-marked placeholder
   comment telling you to `ct adopt group <id>` first — scope keys must be state
-  keys (see [Scope resolution](#scope-resolution)).
+  keys (see [Scope resolution](#scope-resolution)). A scoped right granted
+  **globally** in CT (row with no `dataId`) is a `WARNING` comment too — the DSL
+  deliberately cannot declare a global grant of a scoped right.
+- **Not-writable rights become `NOTE` comments.** On `group_type_role`, rights
+  with `authId >= 10000` (the `churchdb:+…` family) are readable via inheritance
+  but rejected at plan time (see "Domain rules" below), so they are never
+  emitted as grants.
 - **Only `group_role` / `group_type_role`** are valid; people domains are
   refused (the same hard boundary as everywhere else).
+
+> **Warning — comment-only grants are pending revocations.** Reconciliation is
+> set-based: a live grant absent from the pasted declaration lands in
+> `toDelete`. So any grant the adopter could only express as a `WARNING`/`NOTE`
+> comment is still **live on the instance but missing from your config** —
+> applying the block as-is will **revoke** it. The block prints a header saying
+> exactly how many such grants exist; resolve every one (adopt the group,
+> regenerate the catalog, …) before `ct apply`. `ct plan` is only a no-op once
+> no comment-only grants remain.
 
 Grants are **not** a state-tracked resource, so this prints config **only** — it
 never writes the state file (unlike `ct adopt <type> <id>`). Pick a real logical

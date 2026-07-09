@@ -52,8 +52,12 @@ export function adoptGrantsCommand(): Command {
       const block = emitAdoptedGrants({ domainType, domainId, rows, state });
 
       info(`Grants are not state-tracked — this prints config only and does NOT write ${statePath}.`);
-      info(`Paste the block below into your config, then run \`ct plan\` (it should be a no-op if unchanged):`);
+      info(`Paste the block below into your config, then run \`ct plan\`:`);
       process.stdout.write(`${block}\n`);
-      warn("Review any WARNING/NOTE comments in the block before committing.");
+      warn(
+        "Any grant left as a WARNING/NOTE comment in the block is still LIVE on the instance but absent " +
+          "from the declaration — applying the block will REVOKE it. Resolve every comment first; `ct plan` " +
+          "is only a no-op once none remain.",
+      );
     });
 }

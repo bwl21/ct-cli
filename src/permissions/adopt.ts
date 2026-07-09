@@ -93,22 +93,37 @@ export function emitAdoptedGrants(args: {
   const revokes = normalized.filter((t) => t.type !== "grant");
   const rev = reverseCatalog();
 
-  const lines: string[] = [];
-  lines.push(`${DSL_FN[domainType]}({`);
-  lines.push(`  key: "${domainType}_${domainId}", // a logical key, unique across the config — rename to taste`);
-  lines.push(`  id: ${domainId},`);
+  const body: string[] = [];
+  let omitted = 0;
+  body.push(`${DSL_FN[domainType]}({`);
+  body.push(`  key: "${domainType}_${domainId}", // a logical key, unique across the config — rename to taste`);
+  body.push(`  id: ${domainId},`);
 
   if (grants.length === 0) {
-    lines.push("  grants: [], // no user-authored grants on this domain (baseline/inherited rows excluded)");
+    body.push("  grants: [], // no user-authored grants on this domain (baseline/inherited rows excluded)");
   } else {
-    lines.push("  grants: [");
+    body.push("  grants: [");
     for (const g of collapse(grants)) {
-      lines.push(...grantLines(g, rev, state));
+      const r = grantLines(g, rev, state, domainType);
+      body.push(...r.lines);
+      if (r.omitted) omitted += 1;
     }
-    lines.push("  ],");
+    body.push("  ],");
   }
 
-  lines.push("});");
+  body.push("});");
+
+  const lines: string[] = [];
+  if (omitted > 0) {
+    // Reconciliation is set-based: a live grant absent from the declaration lands in `toDelete`.
+    // So every grant left below as a comment WILL BE REVOKED by the next apply of this block —
+    // this must be impossible to miss, hence the header.
+    lines.push(`// WARNING: ${omitted} live grant(s) could not be expressed as config and are left as comments below.`);
+    lines.push("// They are still ACTIVE on the instance — applying this block as-is will REVOKE them, because");
+    lines.push("// reconciliation deletes any live grant missing from the declaration. Resolve every WARNING/NOTE");
+    lines.push("// comment (adopt the group, regenerate the catalog, …) before running `ct apply`.");
+  }
+  lines.push(...body);
 
   if (revokes.length > 0) {
     lines.push(
@@ -123,48 +138,114 @@ export function emitAdoptedGrants(args: {
   return lines.join("\n");
 }
 
-/** Emit the grant line(s) for one collapsed grant, resolving scope dataIds back to state keys. */
-function grantLines(g: CollapsedGrant, rev: Map<number, ReverseEntry>, state: State): string[] {
+/** The lines emitted for one collapsed grant, plus whether a LIVE grant was left as a comment
+ *  (⇒ reconciliation would revoke it — counted into the block-level header warning). */
+interface GrantLinesResult {
+  lines: string[];
+  omitted: boolean;
+}
+
+/**
+ * Emit the grant line(s) for one collapsed grant, resolving scope dataIds back to state keys.
+ *
+ * Round-trip invariant (locked by tests): every ACTIVE (non-comment) line this emits must pass
+ * `desiredTuples` (`src/permissions/plan.ts`) without throwing — anything the planner would
+ * reject (group_type_role authIds >= 10000, a scoped right without a declarable scope, an
+ * unscoped right carrying dataIds) is emitted as a comment instead.
+ */
+function grantLines(
+  g: CollapsedGrant,
+  rev: Map<number, ReverseEntry>,
+  state: State,
+  domainType: DomainType,
+): GrantLinesResult {
   const entry = rev.get(g.authId);
   if (!entry) {
-    // Unknown authId → no name to emit. A numeric grant is not valid DSL, so surface it as a
-    // clearly-marked comment rather than emitting invalid config or failing the whole adoption.
-    return [
-      `    // WARNING: authId ${g.authId} has no catalog entry — cannot map to a "module:right" name.`,
-      "    //          Regenerate the catalog (see docs) or add this right by hand.",
-    ];
+    // Unknown authId → no name to emit, and a numeric right is not declarable in the DSL. Surface
+    // it as a clearly-marked comment rather than emitting invalid config or failing the adoption.
+    return {
+      omitted: true,
+      lines: [
+        `    // WARNING: authId ${g.authId} has no catalog entry — cannot map to a "module:right" name.`,
+        "    //          Regenerate the catalog (see docs) or add this right by hand.",
+      ],
+    };
   }
 
-  // Unscoped grant → a bare "module:right" string.
-  if (g.dataIds.length === 0) {
-    return [`    ${JSON.stringify(entry.name)},`];
+  // Mirror the planner's writability guard: `desiredTuples` throws for group_type_role grants
+  // with authId >= 10000 (the `churchdb:+…` family) — they are readable here via inheritance but
+  // not writable on this domain type, so emitting them would break the paste-and-plan round trip.
+  if (domainType === "group_type_role" && g.authId >= 10000) {
+    return {
+      omitted: true,
+      lines: [
+        `    // NOTE: "${entry.name}" (authId ${g.authId}) is not writable on group_type_role — this right`,
+        "    //       reaches roles via inheritance only (authId >= 10000). Declaring it here would be",
+        "    //       rejected at plan time, so it is intentionally left as a comment.",
+      ],
+    };
   }
 
-  // Scoped grant → resolve each dataId (a group id) back to a MANAGED group's logical key. Scope
-  // keys must be state keys (see src/permissions/scope.ts), so an unmanaged dataId cannot be
-  // emitted as a key — it becomes a placeholder comment telling the user to adopt/declare it first.
-  const resolvedKeys: string[] = [];
-  const unmanaged: number[] = [];
-  for (const id of g.dataIds) {
-    const group = findByTypeId(state, "group", id);
-    if (group) resolvedKeys.push(group.key);
-    else unmanaged.push(id);
+  if (entry.scoped) {
+    // Scoped right → resolve each dataId back to a MANAGED group's logical key. Scope keys must be
+    // state keys (see src/permissions/scope.ts), so an unmanaged dataId cannot be emitted as a key.
+    //
+    // NOTE on the lookup: `findByTypeId(state, "group", id)` assumes every scoped dataId is a GROUP
+    // id, but only `cdb_gruppe`-scoped rights actually scope by group — other scopeFields
+    // (cdb_station, cc_securitylevel, …) carry ids from different namespaces that could collide
+    // with a managed group's id. This mirrors the tool-wide constraint that scope declarations
+    // only support managed groups today (src/permissions/scope.ts); revisit if non-group scopes
+    // ever become declarable.
+    const resolvedKeys: string[] = [];
+    const unmanaged: number[] = [];
+    for (const id of g.dataIds) {
+      const group = findByTypeId(state, "group", id);
+      if (group) resolvedKeys.push(group.key);
+      else unmanaged.push(id);
+    }
+
+    const out: string[] = [];
+    let omitted = false;
+    if (g.hasUnscoped) {
+      // A scoped right granted with dataId null = granted GLOBALLY in CT. The DSL cannot declare
+      // that (a bare string for a scoped right is rejected at plan time precisely to prevent
+      // accidental global grants), so it can only be surfaced as a comment.
+      out.push(`    // WARNING: "${entry.name}" is granted GLOBALLY here (scoped right, no dataId). The config`);
+      out.push("    //          DSL cannot declare a global grant of a scoped right; re-grant it with an explicit");
+      out.push("    //          scope in CT, or leave this domain unmanaged.");
+      omitted = true;
+    }
+    for (const id of unmanaged) {
+      out.push(
+        `    // WARNING: scope target group #${id} is not managed — run \`ct adopt group ${id}\` (or declare it),`,
+      );
+      out.push(`    //          then add its logical key to the scope array below.`);
+      omitted = true;
+    }
+    if (resolvedKeys.length > 0) {
+      const scope = resolvedKeys.map((k) => JSON.stringify(k)).join(", ");
+      out.push(`    { right: ${JSON.stringify(entry.name)}, scope: [${scope}] },`);
+    } else if (unmanaged.length > 0) {
+      // Every scope target is unmanaged: there is no valid key to emit, so the grant itself is a
+      // commented placeholder the user completes after adopting the group(s) above.
+      out.push(`    // { right: ${JSON.stringify(entry.name)}, scope: [/* adopt the group(s) above first */] },`);
+    }
+    return { lines: out, omitted };
   }
 
+  // Unscoped right. dataId rows on it contradict the catalog (which says it takes no scope) —
+  // likely a stale catalog; emitting a scope for it would be rejected at plan time, so comment.
   const out: string[] = [];
-  for (const id of unmanaged) {
+  let omitted = false;
+  if (g.dataIds.length > 0) {
     out.push(
-      `    // WARNING: scope target group #${id} is not managed — run \`ct adopt group ${id}\` (or declare it),`,
+      `    // WARNING: "${entry.name}" is unscoped per the catalog, but CT returned it with dataId(s)`,
     );
-    out.push(`    //          then add its logical key to the scope array below.`);
+    out.push(`    //          ${g.dataIds.join(", ")} — the catalog may be stale. Regenerate it, then re-adopt.`);
+    omitted = true;
   }
-  if (resolvedKeys.length > 0) {
-    const scope = resolvedKeys.map((k) => JSON.stringify(k)).join(", ");
-    out.push(`    { right: ${JSON.stringify(entry.name)}, scope: [${scope}] },`);
-  } else {
-    // Every scope target is unmanaged: there is no valid key to emit, so the grant itself is a
-    // commented placeholder the user completes after adopting the group(s) above.
-    out.push(`    // { right: ${JSON.stringify(entry.name)}, scope: [/* adopt the group(s) above first */] },`);
+  if (g.hasUnscoped) {
+    out.push(`    ${JSON.stringify(entry.name)},`);
   }
-  return out;
+  return { lines: out, omitted };
 }
