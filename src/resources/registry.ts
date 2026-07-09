@@ -57,7 +57,7 @@ function str(resource: Record<string, unknown>, key: string): string {
 }
 
 /** Read a field, preferring a nested `information` object but falling back to the top level. */
-function fromInformation(resource: Record<string, unknown>, key: string): unknown {
+export function fromInformation(resource: Record<string, unknown>, key: string): unknown {
   const information = (resource.information as Record<string, unknown> | undefined) ?? {};
   return information[key] ?? resource[key];
 }
@@ -143,6 +143,18 @@ export function resourceType(type: string): AdoptableResource {
     throw new Error(`Unknown resource type "${type}". Adoptable types: ${known}.`);
   }
   return entry;
+}
+
+/**
+ * The field names a declaration of `type` may manage — derived from the registry's own
+ * `managedFields`, not hand-copied, so this can never drift from what `adopt`/`plan`/`apply`
+ * actually read and write. `managedFields({})` still returns every key it would on a real
+ * resource: each key is written as an object-literal property (`{ name: r.name, ... }`), so it
+ * is present with value `undefined` even when the source object is empty — JS object literals
+ * always create the property, independent of the expression's runtime value.
+ */
+export function knownFields(type: string): Set<string> {
+  return new Set(Object.keys(resourceType(type).managedFields({})));
 }
 
 /** Camel-case a hyphenated type name: `group-type` → `groupType`. */

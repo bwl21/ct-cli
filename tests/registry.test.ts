@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { slug, resourceType, configSnippet, RESOURCES } from "../src/resources/registry.js";
+import { slug, resourceType, configSnippet, knownFields, RESOURCES } from "../src/resources/registry.js";
 import { loadConfig } from "../src/config/load.js";
 
 describe("slug", () => {
@@ -63,7 +63,8 @@ describe("resourceType", () => {
     });
     // Mainz is campus id 0 — must survive the null-coalescing, not collapse to null.
     expect(
-      RESOURCES.group?.managedFields({ name: "Team", information: { groupTypeId: 2, campusId: 0 } })?.campusId,
+      RESOURCES.group?.managedFields({ name: "Team", information: { groupTypeId: 2, campusId: 0 } })
+        ?.campusId,
     ).toBe(0);
   });
 });
@@ -152,8 +153,33 @@ describe("write specs", () => {
       RESOURCES["age-group"]?.managedFields({ name: "NextGen", nameTranslated: "NextGen", sortKey: 8 }),
     ).toEqual({ name: "NextGen", nameTranslated: "NextGen", sortKey: 8 });
     expect(
-      RESOURCES["group-role"]?.managedFields({ name: "Mitglied", nameTranslated: "Mitglied", groupTypeId: 2 }),
+      RESOURCES["group-role"]?.managedFields({
+        name: "Mitglied",
+        nameTranslated: "Mitglied",
+        groupTypeId: 2,
+      }),
     ).toEqual({ name: "Mitglied", nameTranslated: "Mitglied", groupTypeId: 2 });
+  });
+});
+
+describe("knownFields (#51)", () => {
+  it("derives the campus allowlist from managedFields — 'shorty', not the vestigial 'shortName'", () => {
+    expect(knownFields("campus")).toEqual(new Set(["name", "shorty"]));
+  });
+
+  it("derives the group allowlist, including fields read via fromInformation", () => {
+    expect(knownFields("group")).toEqual(new Set(["name", "groupTypeId", "groupStatusId", "campusId"]));
+  });
+
+  it("derives an allowlist for every registered resource type without throwing", () => {
+    for (const type of Object.keys(RESOURCES)) {
+      expect(() => knownFields(type)).not.toThrow();
+      expect(knownFields(type).size).toBeGreaterThan(0);
+    }
+  });
+
+  it("throws the same 'Adoptable types' error as resourceType for an unknown type", () => {
+    expect(() => knownFields("widget")).toThrow(/Adoptable types/);
   });
 });
 

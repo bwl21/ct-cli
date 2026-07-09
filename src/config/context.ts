@@ -15,6 +15,8 @@ import type { DesiredResource, DynamicSpec, DynamicStatus } from "../engine/type
 import type { DomainType } from "../permissions/grants.js";
 import type { DesiredPermission, Grant } from "../permissions/types.js";
 import { isRef, ref, refKey, type Ref } from "../resolve/refs.js";
+import { knownFields } from "../resources/registry.js";
+import { warn } from "../ui.js";
 // Re-exported so a config file can pull the query DSL from the same module as
 // `ConfigContext`: `import { q, churchQuery } from "../../src/config/context.js"`.
 export { q, churchQuery } from "./query.js";
@@ -83,7 +85,9 @@ function domainKeyPart(domainId: number | Ref): string {
 function resolveDomainInput(domainType: DomainType, input: PermissionInput): number | Ref {
   const hasId = input.id !== undefined;
   const bothError = (logical: string): Error =>
-    new Error(`${domainType} "${input.key}": declare either "id" (numeric) or ${logical} (logical), not both.`);
+    new Error(
+      `${domainType} "${input.key}": declare either "id" (numeric) or ${logical} (logical), not both.`,
+    );
   if (domainType === "group_type_role") {
     if (input.groupType !== undefined) {
       if (hasId) throw bothError('"groupType"');
@@ -102,7 +106,9 @@ function resolveDomainInput(domainType: DomainType, input: PermissionInput): num
   }
   if (typeof input.id !== "number" || !Number.isFinite(input.id)) {
     const logical = domainType === "group_type_role" ? '"groupType"' : '"group" + "role"';
-    throw new Error(`${domainType} "${input.key}": provide a numeric "id" (the domainId) or the logical ${logical} form.`);
+    throw new Error(
+      `${domainType} "${input.key}": provide a numeric "id" (the domainId) or the logical ${logical} form.`,
+    );
   }
   return input.id;
 }
@@ -148,7 +154,9 @@ function toDesired(type: string, input: ResourceInput): DesiredResource {
     }
     const value = fields[logical];
     if (typeof value !== "string" || value.length === 0) {
-      throw new Error(`${type} "${key}": "${logical}" must be a non-empty string key (e.g. "${logical}: \\"mainz\\"").`);
+      throw new Error(
+        `${type} "${key}": "${logical}" must be a non-empty string key (e.g. "${logical}: \\"mainz\\"").`,
+      );
     }
     fields[idField] = make(value);
     delete fields[logical];
@@ -163,6 +171,19 @@ function toDesired(type: string, input: ResourceInput): DesiredResource {
         `reference (use the "${Object.entries(ID_SUGAR).find(([, s]) => s.idField === idField)?.[0] ?? "logical"}" ` +
         `field, or ref.*).`,
     );
+  }
+  // Warn (never throw) on a declared field the registry does not manage for this type — e.g. a
+  // seeded config using campus's vestigial `shortName` instead of the real `shorty` (#51). The
+  // field still passes through into `fields` unchanged (unrecognised fields have always been sent
+  // as-is); this only surfaces the mistake instead of leaving it silently un-diffed forever. The
+  // allowlist comes from `knownFields` (the registry's own `managedFields`), never hand-copied, so
+  // it can't drift from what `adopt`/`plan`/`apply` actually read and write. Issue #52 will add
+  // file:line locations to this warning — not built here.
+  const allowed = knownFields(type);
+  for (const fieldKey of Object.keys(fields)) {
+    if (!allowed.has(fieldKey)) {
+      warn(`${type} "${key}": unknown field "${fieldKey}" (ignored)`);
+    }
   }
   // `dynamic` is a synthetic field for auto-groups, handled separately from the plain diffed
   // field bag. Opt-in: `undefined` means "not a dynamic group" (mirrors `parents`).
@@ -253,11 +274,14 @@ export function createContext(): {
       if (typeof input.key !== "string" || !input.key)
         throw new Error(`${domainType} declaration missing a string "key".`);
       const domainId = resolveDomainInput(domainType, input);
-      if (!Array.isArray(input.grants)) throw new Error(`${domainType} "${input.key}": "grants" must be an array.`);
+      if (!Array.isArray(input.grants))
+        throw new Error(`${domainType} "${input.key}": "grants" must be an array.`);
       for (const g of input.grants) {
         const right = typeof g === "string" ? g : g?.right;
         if (typeof right !== "string" || !right.includes(":"))
-          throw new Error(`${domainType} "${input.key}": each grant must be a "module:right" string or { right, scope }.`);
+          throw new Error(
+            `${domainType} "${input.key}": each grant must be a "module:right" string or { right, scope }.`,
+          );
         if (typeof g === "object") {
           if (!Array.isArray(g.scope))
             throw new Error(`${domainType} "${input.key}": scoped grant needs "scope": (string | number)[].`);
