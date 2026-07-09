@@ -4,6 +4,7 @@ import { resolveConfig } from "../config.js";
 import { resourceType, configSnippet } from "../resources/registry.js";
 import { loadState, saveState, resolveStatePath, upsert } from "../state/state.js";
 import { success, info, warn, out } from "../ui.js";
+import { adoptGrantsCommand } from "./adopt-grants.js";
 
 interface AdoptOptions {
   key?: string;
@@ -12,7 +13,7 @@ interface AdoptOptions {
 }
 
 export function adoptCommand(): Command {
-  return new Command("adopt")
+  const cmd = new Command("adopt")
     .description("Put one existing ChurchTools resource under management (adds it to the state file)")
     .argument("<type>", "resource type, e.g. campus | group | group-type")
     .argument("<id>", "ChurchTools id of the resource")
@@ -59,4 +60,10 @@ export function adoptCommand(): Command {
         warn("This resource was already managed — its snapshot was refreshed.");
       }
     });
+
+  // `ct adopt grants <domainType> <domainId>` — grants are not state-tracked, so this subcommand
+  // prints a config block only and never writes state. Commander matches the "grants" subcommand
+  // name before falling through to the `<type> <id>` action above.
+  cmd.addCommand(adoptGrantsCommand());
+  return cmd;
 }
