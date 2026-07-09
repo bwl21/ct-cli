@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { RawPermission } from "../src/permissions/grants.js";
+import type { State } from "../src/state/state.js";
 
 const rows: RawPermission[] = [
   { authId: 1, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
@@ -70,5 +74,40 @@ describe("ct adopt grants", () => {
     getMock.mockResolvedValueOnce({ id: 0, name: "Mainz", shorty: "MZ" } as never);
     await run(["campus", "0", "--dry-run"]);
     expect(getMock).toHaveBeenCalledWith("/campuses/0");
+  });
+
+  it("actually honours --state (regression, #51): resolves a scoped grant's dataId to the group's key from the given state file, not the default", async () => {
+    // Both `adopt` (the parent) and `grants` (this subcommand) declare `-s/--state` — a Commander
+    // option-name collision that used to silently swallow the value into neither level's `.opts()`,
+    // so `--state` was never actually honoured here (only ever exercised with the default/missing
+    // state file, which no test caught). Prove it now by giving a scoped grant a group that is ONLY
+    // resolvable via a real, non-default state file.
+    const dir = mkdtempSync(join(tmpdir(), "ct-adopt-grants-state-"));
+    const statePath = join(dir, "custom-state.json");
+    const state: State = {
+      version: 1,
+      host: HOST,
+      resources: { kids: { type: "group", id: 7, key: "kids", fields: {}, adoptedAt: "t", updatedAt: "t" } },
+    };
+    writeFileSync(statePath, JSON.stringify(state));
+
+    getMock.mockResolvedValueOnce([
+      { authId: 1104, dataId: 7, type: "grant", domainId: 42 }, // churchgroup:view group, scoped to group #7
+    ] as never);
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((s) => {
+      writes.push(String(s));
+      return true;
+    });
+    try {
+      await run(["grants", "group_role", "42", "--state", statePath]);
+    } finally {
+      spy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+    // Resolved via the custom state file's "kids" key — proves --state was actually read, not
+    // silently ignored in favour of an empty default state (which would leave this as an "unmanaged"
+    // WARNING comment instead of a real scope entry).
+    expect(writes.join("")).toContain('scope: ["kids"]');
   });
 });
