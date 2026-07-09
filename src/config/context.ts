@@ -11,6 +11,8 @@
  * The context is injected (no global state), so blueprints are just functions
  * and loops, and the whole thing is trivially testable without file I/O.
  */
+import { basename } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { DesiredResource, DynamicSpec, DynamicStatus } from "../engine/types.js";
 import type { DomainType } from "../permissions/grants.js";
 import type { DesiredPermission, Grant } from "../permissions/types.js";
@@ -26,6 +28,54 @@ export type { QueryNode } from "./query.js";
 export { ref } from "../resolve/refs.js";
 
 const DYNAMIC_STATUSES = ["active", "inactive", "manual", "none"] as const;
+
+/** This module's own filesystem path — used to skip our own frames when locating a user call site. */
+const SELF_FILE = fileURLToPath(import.meta.url);
+
+/**
+ * Best-effort source location of the user's `ct.*(...)` call, for located config errors/warnings (#52).
+ * Walks `new Error().stack` for the first frame outside this module, node internals, and node_modules.
+ * jiti transpiles the user's `.ts` config but maps stack frames back to the ORIGINAL file + line
+ * (verified against the real loader), so the frame yields the author's actual location. Returns
+ * `basename:line` (e.g. `ct.config.ts:42`), or `undefined` when no user frame is identifiable — callers
+ * then omit the location rather than crash (V8-only `.stack`; a runtime without it degrades gracefully).
+ */
+function captureCallSite(): string | undefined {
+  const stack = new Error().stack;
+  if (typeof stack !== "string") return undefined;
+  for (const raw of stack.split("\n").slice(1)) {
+    const line = raw.trim();
+    if (!line.startsWith("at ")) continue;
+    // `at fn (PATH:LINE:COL)` (function named) or `at PATH:LINE:COL` (top-level/anonymous).
+    const m = /\((.+):(\d+):(\d+)\)$/.exec(line) ?? /^at\s+(.+):(\d+):(\d+)$/.exec(line);
+    if (!m) continue;
+    let file = m[1]!;
+    if (file.startsWith("file://")) file = fileURLToPath(file);
+    if (file === SELF_FILE) continue; // our own wrapper / helper frames
+    if (file.startsWith("node:")) continue; // node internals
+    if (file.includes("/node_modules/")) continue; // jiti & other deps
+    return `${basename(file)}:${m[2]}`;
+  }
+  return undefined;
+}
+
+/** Prefix a config error/warning message with its source location when known (#52). */
+function located(location: string | undefined, message: string): string {
+  return location ? `${location} — ${message}` : message;
+}
+
+/**
+ * Prefix a thrown eval-time config error with its user call site (#52), once. Mutating `.message`
+ * (rather than wrapping) keeps the original stack; the `__ctLocated` marker guards against a second
+ * prefix if the same error somehow passes through another wrapper.
+ */
+function relocate(err: unknown, location: string | undefined): unknown {
+  if (location && err instanceof Error && !(err as { __ctLocated?: boolean }).__ctLocated) {
+    err.message = located(location, err.message);
+    (err as { __ctLocated?: boolean }).__ctLocated = true;
+  }
+  return err;
+}
 
 export interface ResourceInput {
   key: string;
@@ -129,7 +179,7 @@ export interface ConfigContext {
 
 export type ConfigModule = (ct: ConfigContext) => void | Promise<void>;
 
-function toDesired(type: string, input: ResourceInput): DesiredResource {
+function toDesired(type: string, input: ResourceInput, location?: string): DesiredResource {
   const { key, parent, parents, dependsOn = [], preventDestroy, dynamic, ...fields } = input;
   if (!key || typeof key !== "string") {
     throw new Error(`${type} declaration is missing a string "key".`);
@@ -177,12 +227,12 @@ function toDesired(type: string, input: ResourceInput): DesiredResource {
   // field still passes through into `fields` unchanged (unrecognised fields have always been sent
   // as-is); this only surfaces the mistake instead of leaving it silently un-diffed forever. The
   // allowlist comes from `knownFields` (the registry's own `managedFields`), never hand-copied, so
-  // it can't drift from what `adopt`/`plan`/`apply` actually read and write. Issue #52 will add
-  // file:line locations to this warning — not built here.
+  // it can't drift from what `adopt`/`plan`/`apply` actually read and write. The `location` prefix
+  // (#52) points the author at the exact config file + line of the offending declaration.
   const allowed = knownFields(type);
   for (const fieldKey of Object.keys(fields)) {
     if (!allowed.has(fieldKey)) {
-      warn(`${type} "${key}": unknown field "${fieldKey}" (ignored)`);
+      warn(located(location, `${type} "${key}": unknown field "${fieldKey}" (ignored)`));
     }
   }
   // `dynamic` is a synthetic field for auto-groups, handled separately from the plain diffed
@@ -261,55 +311,70 @@ export function createContext(): {
   const define =
     (type: string) =>
     (input: ResourceInput): void => {
-      const resource = toDesired(type, input);
-      if (seen.has(resource.key)) {
-        throw new Error(`Duplicate logical key "${resource.key}" in config.`);
+      // Capture the user's call site FIRST (top of the wrapper = the frame is the author's
+      // `ct.<type>({...})` call), then locate any eval-time error or unknown-field warning it raises (#52).
+      const location = captureCallSite();
+      try {
+        const resource = toDesired(type, input, location);
+        if (seen.has(resource.key)) {
+          throw new Error(`Duplicate logical key "${resource.key}" in config.`);
+        }
+        seen.add(resource.key);
+        resources.push(resource);
+      } catch (err) {
+        throw relocate(err, location);
       }
-      seen.add(resource.key);
-      resources.push(resource);
     };
+  const definePermissionInner = (domainType: DomainType, input: PermissionInput): void => {
+    if (typeof input.key !== "string" || !input.key)
+      throw new Error(`${domainType} declaration missing a string "key".`);
+    const domainId = resolveDomainInput(domainType, input);
+    if (!Array.isArray(input.grants))
+      throw new Error(`${domainType} "${input.key}": "grants" must be an array.`);
+    for (const g of input.grants) {
+      const right = typeof g === "string" ? g : g?.right;
+      if (typeof right !== "string" || !right.includes(":"))
+        throw new Error(
+          `${domainType} "${input.key}": each grant must be a "module:right" string or { right, scope }.`,
+        );
+      if (typeof g === "object") {
+        if (!Array.isArray(g.scope))
+          throw new Error(`${domainType} "${input.key}": scoped grant needs "scope": (string | number)[].`);
+        // Each entry is a logical group key, or a raw numeric dataId (#49 escape hatch — for scope
+        // dimensions that aren't groups, e.g. security levels, which have no logical/managed form).
+        for (const s of g.scope) {
+          if (typeof s === "string" ? s.length === 0 : typeof s !== "number")
+            throw new Error(
+              `${domainType} "${input.key}": scope entries must be a non-empty string (logical group key) or a number (raw dataId), got ${JSON.stringify(s)}.`,
+            );
+        }
+      }
+    }
+    if (seen.has(input.key)) throw new Error(`Duplicate logical key "${input.key}" in config.`);
+    seen.add(input.key);
+    // Duplicate-target guard, keyed by the canonical domain string (numeric id or Ref key). This
+    // catches obvious eval-time collisions early; the authoritative check runs post-resolution in
+    // buildPermissionPlan (two different refs, or a ref and a number, can resolve to the same id).
+    const domainKey = `${domainType}:${domainKeyPart(domainId)}`;
+    const existingKey = seenDomains.get(domainKey);
+    if (existingKey) {
+      const label = typeof domainId === "number" ? `#${domainId}` : refKey(domainId);
+      throw new Error(
+        `Duplicate permission target: ${domainType} ${label} is declared by both "${existingKey}" and "${input.key}". Merge their grants into one declaration.`,
+      );
+    }
+    seenDomains.set(domainKey, input.key);
+    permissions.push({ key: input.key, domainType, domainId, grants: input.grants });
+  };
   const definePermission =
     (domainType: DomainType) =>
     (input: PermissionInput): void => {
-      if (typeof input.key !== "string" || !input.key)
-        throw new Error(`${domainType} declaration missing a string "key".`);
-      const domainId = resolveDomainInput(domainType, input);
-      if (!Array.isArray(input.grants))
-        throw new Error(`${domainType} "${input.key}": "grants" must be an array.`);
-      for (const g of input.grants) {
-        const right = typeof g === "string" ? g : g?.right;
-        if (typeof right !== "string" || !right.includes(":"))
-          throw new Error(
-            `${domainType} "${input.key}": each grant must be a "module:right" string or { right, scope }.`,
-          );
-        if (typeof g === "object") {
-          if (!Array.isArray(g.scope))
-            throw new Error(`${domainType} "${input.key}": scoped grant needs "scope": (string | number)[].`);
-          // Each entry is a logical group key, or a raw numeric dataId (#49 escape hatch — for scope
-          // dimensions that aren't groups, e.g. security levels, which have no logical/managed form).
-          for (const s of g.scope) {
-            if (typeof s === "string" ? s.length === 0 : typeof s !== "number")
-              throw new Error(
-                `${domainType} "${input.key}": scope entries must be a non-empty string (logical group key) or a number (raw dataId), got ${JSON.stringify(s)}.`,
-              );
-          }
-        }
+      const location = captureCallSite();
+      try {
+        definePermissionInner(domainType, input);
+      } catch (err) {
+        throw relocate(err, location);
       }
-      if (seen.has(input.key)) throw new Error(`Duplicate logical key "${input.key}" in config.`);
-      seen.add(input.key);
-      // Duplicate-target guard, keyed by the canonical domain string (numeric id or Ref key). This
-      // catches obvious eval-time collisions early; the authoritative check runs post-resolution in
-      // buildPermissionPlan (two different refs, or a ref and a number, can resolve to the same id).
-      const domainKey = `${domainType}:${domainKeyPart(domainId)}`;
-      const existingKey = seenDomains.get(domainKey);
-      if (existingKey) {
-        const label = typeof domainId === "number" ? `#${domainId}` : refKey(domainId);
-        throw new Error(
-          `Duplicate permission target: ${domainType} ${label} is declared by both "${existingKey}" and "${input.key}". Merge their grants into one declaration.`,
-        );
-      }
-      seenDomains.set(domainKey, input.key);
-      permissions.push({ key: input.key, domainType, domainId, grants: input.grants });
     };
   // Every type emitted here MUST have an apply tier in engine/graph.ts TYPE_TIER
   // (locked by tests/context.test.ts), else computePlan rejects it at plan time.

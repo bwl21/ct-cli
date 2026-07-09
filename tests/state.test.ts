@@ -67,11 +67,7 @@ describe("state.upsert", () => {
     const path = join(tmpdir(), `ct-cli-quiet-${process.pid}.json`);
     await saveState(path, state);
     const before = await import("node:fs/promises").then((fs) => fs.readFile(path, "utf8"));
-    upsert(
-      state,
-      { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz", shorty: "MZ" } },
-      LATER,
-    );
+    upsert(state, { type: "campus", id: 0, key: "mainz", fields: { name: "Mainz", shorty: "MZ" } }, LATER);
     await saveState(path, state);
     const after = await import("node:fs/promises").then((fs) => fs.readFile(path, "utf8"));
     await rm(path, { force: true });
