@@ -48,6 +48,11 @@ export class CtClient {
 
   /** Run the login-token handshake and cache the session cookie + CSRF token. */
   async authenticate(loginToken: string): Promise<WhoAmI> {
+    // The token rides as a URL query param (it lands in the server's access logs). This is
+    // unavoidable for this token class: the handshake above is documented to require the
+    // `login_token` query param — an `Authorization` header yields a null CSRF token and breaks
+    // writes. The token↔host binding enforced in `authedSession` (issue #30) makes this safe by
+    // guaranteeing the token is only ever sent to the host it was captured against.
     const url = `${this.config.host}/api/whoami?login_token=${encodeURIComponent(loginToken)}`;
     const res = await fetchWithRetry(
       url,
