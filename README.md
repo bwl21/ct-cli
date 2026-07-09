@@ -44,24 +44,44 @@ Early scaffold. See the [epic (#1)](https://github.com/eqrm/ct-cli/issues/1) and
 
 ## Requirements
 
-- Node ≥ 20 (repo pins 22 via `.nvmrc`)
+- Node ≥ 20 (repo pins 22 via `.nvmrc`) — only for the npm tarball or dev install;
+  the standalone binaries below need nothing but the OS
 - A ChurchTools **personal login token** (ChurchTools → your user settings)
 
 ## Install
 
-Grab the latest tarball from the [Releases page](https://github.com/eqrm/ct-cli/releases/latest)
-and install it globally with npm — no clone, no build step:
+Grab the standalone binary from the [Releases page](https://github.com/eqrm/ct-cli/releases/latest) —
+**no Node required**:
 
 ```bash
-npm install -g https://github.com/eqrm/ct-cli/releases/latest/download/ct-cli-<version>.tgz
+# macOS, Apple Silicon
+curl -L -o ct https://github.com/eqrm/ct-cli/releases/latest/download/ct-darwin-arm64
+# macOS, Intel
+curl -L -o ct https://github.com/eqrm/ct-cli/releases/latest/download/ct-darwin-x64
+# Linux, x64
+curl -L -o ct https://github.com/eqrm/ct-cli/releases/latest/download/ct-linux-x64
+
+chmod +x ct
+sudo mv ct /usr/local/bin/ct   # or anywhere on your PATH
 ct --help
 ```
 
-(Replace `<version>` with the tag of the release you're installing, e.g. `v0.1.0`.)
-Each release also attaches an `INSTALL.md` with the exact command for that tag.
+Or, with Node ≥ 20 already installed, the npm-pack tarball:
 
-Every push of a `v*` tag runs lint/typecheck/test/build and publishes the
-resulting package as a GitHub Release ([`.github/workflows/release.yml`](.github/workflows/release.yml)).
+```bash
+npm install -g https://github.com/eqrm/ct-cli/releases/latest/download/ct-cli.tgz
+ct --help
+```
+
+Each release also attaches an `INSTALL.md` with the exact commands.
+
+Every push to `main` that lands a `feat:`/`fix:`/breaking-change commit runs the
+full CI gate, compiles the binaries above, smoke-tests each one on its native
+OS/arch, and — only if all of that is green — cuts the version + changelog via
+[semantic-release](https://semantic-release.gitbook.io/) and publishes the GitHub
+Release. No manual tag push. See
+[`.github/workflows/release.yml`](.github/workflows/release.yml) and
+[`.releaserc.json`](.releaserc.json).
 
 ## Install (dev)
 
