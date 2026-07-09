@@ -172,6 +172,15 @@ never applied to ruleset-level string fields like `description`/`shorty`, so
 a numeric-looking label (e.g. a `description` of `"2024"`) is never silently
 retyped to a number and corrupted on write-back.
 
+**Pinned assumption (#36):** the no-op-plan property above relies on every
+RuleSet-level field OTHER than `query` (`description`, `shorty`, `importance`,
+`personIdFieldName`, `process`) round-tripping through ChurchTools
+byte-for-byte on `PUT`/`GET` — `normalizeRuleset` does not canonicalize them.
+This is pinned by a live-gated test in `tests/dynamic.integration.test.ts`
+(see `tests/fixtures/dynamic/README.md` for how to run it and what to do if
+it fails); it is skipped by default and requires an explicit opt-in against a
+dev instance.
+
 ## Managed guard: undeclared groups stay invisible
 
 Dynamic-group state is only ever fetched for a group that is **both**: (a)
