@@ -13,6 +13,7 @@ import { RESOURCES } from "../resources/registry.js";
 import { computePlan } from "./plan.js";
 import { foldSynthetic } from "./synthetic.js";
 import { Resolver } from "../resolve/resolver.js";
+import { collectPendingRefKeys } from "../resolve/refs.js";
 import { mapConcurrent } from "../util/concurrency.js";
 import { warn } from "../ui.js";
 
@@ -122,6 +123,18 @@ export async function buildPlan(
     }),
   );
 
-  const plan = computePlan(resolved, state, actual, { unresolved, fetchFailed });
+  // A pending ref names a resource created in this same run, but tier ordering alone doesn't put
+  // the target first when both share a tier (e.g. a group's ruleset ref.group()-ing another group:
+  // declaration order would apply the referencer first and the pending id could never resolve).
+  // Inject the dependency edge so orderKeys sequences the target before the referencer.
+  const desiredKeys = new Set(resolved.map((d) => d.key));
+  const ordered = resolved.map((d) => {
+    const targets = [
+      ...new Set(collectPendingRefKeys(d.fields).filter((k) => k !== d.key && desiredKeys.has(k))),
+    ].filter((k) => !d.dependsOn.includes(k));
+    return targets.length === 0 ? d : { ...d, dependsOn: [...d.dependsOn, ...targets] };
+  });
+
+  const plan = computePlan(ordered, state, actual, { unresolved, fetchFailed });
   return { plan, actual, fetchErrors };
 }

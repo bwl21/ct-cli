@@ -137,6 +137,31 @@ export function collectRefs(value: unknown): Ref[] {
   return out;
 }
 
+/**
+ * Collect the managed logical keys named by every {@link PendingRef} in a value. Pending markers
+ * always point at a same-run declared resource, so these keys are exactly the apply-order
+ * dependencies the referencing resource needs (group-role refs are gated and never go pending).
+ */
+export function collectPendingRefKeys(value: unknown): string[] {
+  const out: string[] = [];
+  const walk = (v: unknown): void => {
+    if (isPendingRef(v)) {
+      const r = v.__pendingRef;
+      if (r.kind !== "group-role") out.push(r.key);
+      return;
+    }
+    if (Array.isArray(v)) {
+      v.forEach(walk);
+      return;
+    }
+    if (v !== null && typeof v === "object") {
+      for (const x of Object.values(v as Record<string, unknown>)) walk(x);
+    }
+  };
+  walk(value);
+  return out;
+}
+
 /** True when a value contains at least one {@link PendingRef} marker (short-circuit for apply-time rewrite). */
 export function hasPendingRef(value: unknown): boolean {
   if (isPendingRef(value)) return true;

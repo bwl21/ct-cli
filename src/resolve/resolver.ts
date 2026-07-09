@@ -226,7 +226,8 @@ function pendingIdFromState(r: Ref, state: State): number {
   if (!managed) {
     throw new Error(
       `Pending reference ${refLabel(r)} did not resolve after apply — "${r.key}" is not in state. ` +
-        `Its tier should have applied first.`,
+        `buildPlan orders the target before its referencer (injected dependency edge), so this ` +
+        `usually means the target's create failed earlier in this run.`,
     );
   }
   return managed.id;

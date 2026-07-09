@@ -116,6 +116,38 @@ describe("apply-time pending re-resolution (same-run campus + group)", () => {
     // The campus ref, pending at plan time, is the freshly-created id (42) in the PUT — not a sentinel.
     expect(body.dynamicGroupRuleSet.query.params.filter["=="][1]).toBe(42);
   });
+
+  it("orders a same-tier pending ref target before its referencer (group → ref.group)", async () => {
+    // PR #46 review finding: both groups are tier 1, and the referencer is declared FIRST.
+    // Declaration order alone would apply "all_kids" before "b_target" and the pending id could
+    // never resolve — the injected dependency edge must put the target first.
+    const { resources } = await evaluateConfig((ct) => {
+      ct.group({
+        key: "all_kids",
+        name: "All Kids",
+        groupTypeId: 1,
+        dynamic: {
+          status: "manual",
+          ruleset: { query: churchQuery(q.eq("ctgroup.parentId", ref.group("b_target"))) },
+        },
+      });
+      ct.group({ key: "b_target", name: "Target", groupTypeId: 1 });
+    });
+    const state = emptyState("h");
+    state.resources.all_kids = {
+      type: "group", id: 100, key: "all_kids", fields: { name: "All Kids", groupTypeId: 1 }, adoptedAt: "t", updatedAt: "t",
+    };
+    const host = fakeHost({ "/groups/100": { name: "All Kids", groupTypeId: 1 } }, { "POST /groups": 55 });
+    const { plan } = await buildPlan(host, state, resources);
+    await executePlan(plan, { client: host, state, statePath: "s.json", save: noSave, now: () => "t" });
+
+    const createIdx = host.calls.findIndex((c) => c.method === "POST" && c.path === "/groups");
+    const putIdx = host.calls.findIndex((c) => c.method === "PUT" && c.path === "/dynamicgroups/100/ruleset");
+    expect(createIdx).toBeGreaterThanOrEqual(0);
+    expect(putIdx).toBeGreaterThan(createIdx); // target created before the referencing ruleset writes
+    const body = host.calls[putIdx]!.body as { dynamicGroupRuleSet: { query: { params: { filter: { "==": unknown[] } } } } };
+    expect(body.dynamicGroupRuleSet.query.params.filter["=="][1]).toBe(55); // the fresh id, not a sentinel
+  });
 });
 
 describe("permission domainId resolution", () => {
