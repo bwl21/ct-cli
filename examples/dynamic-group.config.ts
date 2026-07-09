@@ -3,14 +3,14 @@
  * built with the typed query DSL. See docs/dynamic-groups.md for the full
  * feature guide.
  *
- * This is illustrative only — `mainzCampusId` below is a placeholder. In a
- * real config, resolve name → id lookups (e.g. from `ct get campuses`) at
- * config-build time before calling `q.eq`.
+ * Portable references (#20): the ruleset's `campusId` filter is written as a
+ * logical `ref.campus("mainz")` instead of a hardcoded numeric id — the per-host
+ * resolver fills in that instance's campus id at plan time. Here "mainz" is even
+ * created in the same run, so the resolver links to its freshly-created id at
+ * apply time. The numeric escape hatch still works: pass a plain number to `q.eq`.
  */
 import type { ConfigContext } from "../src/config/context.js";
-import { q, churchQuery } from "../src/config/context.js";
-
-const mainzCampusId = 0; // placeholder — replace with the real campus id
+import { q, churchQuery, ref } from "../src/config/context.js";
 
 export default (ct: ConfigContext): void => {
   ct.campus({ key: "mainz", name: "Mainz", shorty: "MZ" });
@@ -40,7 +40,7 @@ export default (ct: ConfigContext): void => {
         personIdFieldName: "person.id",
         process: {},
         query: churchQuery(
-          q.and(q.eq("ctgroup.campusId", mainzCampusId), q.eq("person.isArchived", false)),
+          q.and(q.eq("ctgroup.campusId", ref.campus("mainz")), q.eq("person.isArchived", false)),
         ),
       },
     },
