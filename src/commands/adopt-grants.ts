@@ -1,14 +1,16 @@
 import { Command } from "commander";
 import { authedSession } from "../api/session.js";
 import { resolveConfig } from "../config.js";
+import { prepareEnv } from "../env/context.js";
 import { assertNotPeople } from "../engine/guard.js";
 import { emitAdoptedGrants } from "../permissions/adopt.js";
 import type { DomainType, RawPermission } from "../permissions/grants.js";
-import { loadState, resolveStatePath } from "../state/state.js";
+import { loadState } from "../state/state.js";
 import { info, warn } from "../ui.js";
 
 interface AdoptGrantsOptions {
   state?: string;
+  env?: string;
 }
 
 /** Accept the DSL's `group_role` and the hyphenated CLI-friendly `group-role`; reject anything else. */
@@ -31,6 +33,7 @@ export function adoptGrantsCommand(): Command {
     .argument("<domainType>", "group_role | group_type_role")
     .argument("<domainId>", "the domainId of the permission domain object")
     .option("-s, --state <path>", "state file path (or set CT_STATE) — used to resolve scope group ids to keys")
+    .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
     .action(async (rawType: string, rawId: string, opts: AdoptGrantsOptions) => {
       const domainType = normalizeDomainType(rawType);
       if (!/^\d+$/.test(rawId.trim())) {
@@ -42,8 +45,9 @@ export function adoptGrantsCommand(): Command {
 
       // Load + validate the state file (host guard) BEFORE any network call, mirroring `ct adopt`,
       // so a state file recorded against another instance never triggers a request to the wrong host.
+      const cmdEnv = await prepareEnv(opts);
       const config = await resolveConfig();
-      const statePath = resolveStatePath(opts.state);
+      const statePath = cmdEnv.statePath;
       const state = await loadState(statePath, config.host);
 
       const { client } = await authedSession();

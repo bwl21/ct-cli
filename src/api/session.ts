@@ -27,7 +27,9 @@ export interface AuthedSession {
 export async function authedSession(): Promise<AuthedSession> {
   const config = await resolveConfig();
   const envToken = process.env.CT_LOGINTOKEN?.trim();
-  const stored = await readCredentials();
+  // Resolve the stored token for the host we intend to hit (multi-host, #22): with several logins on
+  // one machine, the per-host account is picked by host, keeping the token↔host binding below intact.
+  const stored = await readCredentials(config.host);
   const token = envToken || stored?.token;
   if (!token) {
     throw new Error("Not logged in. Run `ct auth login --host <url> --token <token>` first.");

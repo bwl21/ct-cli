@@ -3,13 +3,20 @@
  * personal **login token**, stored together so a token is always bound to the
  * instance it authenticates against.
  *
- * They live in the macOS Keychain (via the `security` CLI) as a single JSON
- * blob. There is no file fallback: on CI or non-macOS hosts, supply the host and
- * token through the `CT_HOST` / `CT_LOGINTOKEN` environment variables instead.
+ * They live in the macOS Keychain (via the `security` CLI) as JSON blobs. There
+ * is no file fallback: on CI or non-macOS hosts, supply the host and token
+ * through the `CT_HOST` / `CT_LOGINTOKEN` environment variables instead.
+ *
+ * Multi-host (#22): each host's credentials are stored under a **per-host account**
+ * (account name = the host), so one machine can hold logins for several instances
+ * (e.g. `eqrm-dev` and `prod`) at once. A legacy single `"credentials"` account is
+ * still written as the "default / last login" pointer (so the single-host path —
+ * `readStoredHost()` with no host — keeps working) and is still READ as a fallback
+ * for a host that has no per-host account yet (a login made before this change).
  *
  * Read precedence is applied by the callers:
- *   - token: `CT_LOGINTOKEN` env  → stored credentials
- *   - host:  `CT_HOST` env        → stored credentials  (see config.ts)
+ *   - token: `CT_LOGINTOKEN` env  → stored credentials for the host
+ *   - host:  `CT_HOST` env        → stored default host  (see config.ts)
  *
  * Note: `security ... -w <value>` passes the value as an argv, briefly visible
  * to `ps`. Acceptable for a local developer CLI; the value never touches git.
@@ -20,7 +27,8 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 const KEYCHAIN_SERVICE = "ct-cli";
-const KEYCHAIN_ACCOUNT = "credentials";
+/** The "default / last login" account — a single blob, also the single-host (pre-#22) location. */
+const DEFAULT_ACCOUNT = "credentials";
 /** Pre-host account name; a bare token used to live here. Cleared on logout so no secret is orphaned. */
 const LEGACY_KEYCHAIN_ACCOUNT = "login-token";
 
@@ -51,52 +59,56 @@ export function parseCredentials(raw: string): Credentials | null {
   return { host, token };
 }
 
-async function keychainSet(value: string): Promise<void> {
+async function keychainSet(account: string, value: string): Promise<void> {
   await run("security", [
     "add-generic-password",
     "-U",
     "-s",
     KEYCHAIN_SERVICE,
     "-a",
-    KEYCHAIN_ACCOUNT,
+    account,
     "-w",
     value,
   ]);
 }
 
 /**
- * Memoized keychain blob for this process. A single run resolves the host
- * (via `resolveConfig`) AND the token (via `authedSession`) — each of which
- * reaches for the stored credentials — so without this cache the same entry is
- * fetched up to 3× per command, spawning `security find-generic-password`
- * (and prompting to unlock a locked Keychain) every time. `undefined` = not yet
- * read; `null` = read and absent. Invalidated on any write (`resetKeychainCache`).
+ * Memoized keychain reads for this process, keyed by account. A single run
+ * resolves the host (via `resolveConfig`) AND the token (via `authedSession`) —
+ * each of which reaches for the stored credentials — so without this cache the
+ * same entry is fetched multiple times per command, spawning
+ * `security find-generic-password` (and prompting to unlock a locked Keychain)
+ * every time. A cached value of `null` = read and absent. Invalidated wholesale
+ * on any write (`resetKeychainCache`).
  */
-let cachedKeychainBlob: string | null | undefined;
+const cachedBlobs = new Map<string, string | null>();
 
-/** Drop the memoized keychain read. Called after every store/clear; exported for tests. */
+/** Drop the memoized keychain reads. Called after every store/clear; exported for tests. */
 export function resetKeychainCache(): void {
-  cachedKeychainBlob = undefined;
+  cachedBlobs.clear();
 }
 
-async function keychainGet(): Promise<string | null> {
-  if (cachedKeychainBlob !== undefined) {
-    return cachedKeychainBlob;
+async function keychainGet(account: string): Promise<string | null> {
+  const cached = cachedBlobs.get(account);
+  if (cached !== undefined) {
+    return cached;
   }
+  let value: string | null;
   try {
     const { stdout } = await run("security", [
       "find-generic-password",
       "-s",
       KEYCHAIN_SERVICE,
       "-a",
-      KEYCHAIN_ACCOUNT,
+      account,
       "-w",
     ]);
-    cachedKeychainBlob = stdout.trim() || null;
+    value = stdout.trim() || null;
   } catch {
-    cachedKeychainBlob = null;
+    value = null;
   }
-  return cachedKeychainBlob;
+  cachedBlobs.set(account, value);
+  return value;
 }
 
 async function keychainDelete(account: string): Promise<void> {
@@ -107,44 +119,76 @@ async function keychainDelete(account: string): Promise<void> {
   }
 }
 
-/** Persist host + token in the macOS Keychain; returns a human-readable location. */
+/**
+ * Persist host + token in the macOS Keychain; returns a human-readable location.
+ * Written to BOTH the per-host account (so `readCredentials(host)` finds it) and
+ * the default `"credentials"` account (so the single-host path — resolve the host
+ * with no `--env` — keeps working, and this login becomes the default).
+ */
 export async function storeCredentials(creds: Credentials): Promise<string> {
   if (!isMac()) {
     throw new Error(
       "Credential storage requires the macOS Keychain. On other platforms, set CT_HOST and CT_LOGINTOKEN instead.",
     );
   }
-  await keychainSet(JSON.stringify(creds));
+  const blob = JSON.stringify(creds);
+  await keychainSet(creds.host, blob);
+  await keychainSet(DEFAULT_ACCOUNT, blob);
   resetKeychainCache(); // a fresh login must invalidate any read the process already cached
-  return `macOS Keychain (service "${KEYCHAIN_SERVICE}", account "${KEYCHAIN_ACCOUNT}")`;
+  return `macOS Keychain (service "${KEYCHAIN_SERVICE}", account "${creds.host}")`;
 }
 
-/** The stored credentials, or null when nothing valid is stored. */
-export async function readCredentials(): Promise<Credentials | null> {
+/**
+ * The stored credentials. With a `host`, prefer that host's per-host account,
+ * then fall back to the legacy default blob ONLY when its host matches (so a
+ * pre-#22 single login keeps working, but one host's token never leaks for
+ * another). With no `host`, return the default / last-login blob (single-host path).
+ */
+export async function readCredentials(host?: string): Promise<Credentials | null> {
   if (!isMac()) {
     return null;
   }
-  const raw = await keychainGet();
-  return raw ? parseCredentials(raw) : null;
+  if (host === undefined) {
+    const raw = await keychainGet(DEFAULT_ACCOUNT);
+    return raw ? parseCredentials(raw) : null;
+  }
+  const keyed = await keychainGet(host);
+  const keyedCreds = keyed ? parseCredentials(keyed) : null;
+  if (keyedCreds) {
+    return keyedCreds;
+  }
+  const fallbackRaw = await keychainGet(DEFAULT_ACCOUNT);
+  const fallback = fallbackRaw ? parseCredentials(fallbackRaw) : null;
+  return fallback && fallback.host === host ? fallback : null;
 }
 
-/** The login token: `CT_LOGINTOKEN` env wins, else the stored credentials. */
-export async function readToken(): Promise<string | null> {
+/** The login token: `CT_LOGINTOKEN` env wins, else the stored credentials for `host`. */
+export async function readToken(host?: string): Promise<string | null> {
   const fromEnv = process.env.CT_LOGINTOKEN?.trim();
   if (fromEnv) {
     return fromEnv;
   }
-  return (await readCredentials())?.token ?? null;
+  return (await readCredentials(host))?.token ?? null;
 }
 
-/** The stored instance host (no env fallback — env precedence lives in resolveConfig). */
+/** The stored default instance host (no env fallback — env precedence lives in resolveConfig). */
 export async function readStoredHost(): Promise<string | null> {
   return (await readCredentials())?.host ?? null;
 }
 
+/**
+ * Remove stored credentials. Clears the default blob, the pre-host bare-token
+ * entry, and — for the current default login — its per-host account, so a
+ * single-host logout leaves no secret behind. (Additional per-host logins for
+ * OTHER hosts are left in place; re-login overwrites them.)
+ */
 export async function clearCredentials(): Promise<void> {
   if (isMac()) {
-    await keychainDelete(KEYCHAIN_ACCOUNT);
+    const current = await readCredentials(); // default blob → its host's per-host account
+    if (current) {
+      await keychainDelete(current.host);
+    }
+    await keychainDelete(DEFAULT_ACCOUNT);
     // Also drop the pre-host bare-token entry so an upgrade doesn't leave a secret behind.
     await keychainDelete(LEGACY_KEYCHAIN_ACCOUNT);
   }

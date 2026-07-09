@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { authedSession } from "../api/session.js";
+import { prepareEnvHost } from "../env/context.js";
 import { CATALOG } from "../permissions/catalog.js";
 import { info, out } from "../ui.js";
 
@@ -44,7 +45,9 @@ export function getCommand(): Command {
     cmd
       .command(name)
       .description(`GET ${spec.path}`)
-      .action(async () => {
+      .option("-e, --env <name>", "environment profile from ct.envs.json (targets that host)")
+      .action(async (opts: { env?: string }) => {
+        await prepareEnvHost(opts); // #22: wire the env's host/token before authenticating
         const { client } = await authedSession();
         if (spec.paginated === false) {
           out(await client.get(spec.path));
@@ -76,7 +79,9 @@ export function getCommand(): Command {
   cmd
     .command("raw <path>")
     .description("GET an arbitrary API path, e.g. `ct get raw /groups/42`")
-    .action(async (path: string) => {
+    .option("-e, --env <name>", "environment profile from ct.envs.json (targets that host)")
+    .action(async (path: string, opts: { env?: string }) => {
+      await prepareEnvHost(opts); // #22: wire the env's host/token before authenticating
       const { client } = await authedSession();
       out(await client.get(path.startsWith("/") ? path : `/${path}`));
     });

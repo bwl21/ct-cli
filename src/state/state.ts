@@ -41,8 +41,17 @@ export interface State {
 
 export const DEFAULT_STATE_PATH = "ct-state.json";
 
-export function resolveStatePath(explicit?: string, env: NodeJS.ProcessEnv = process.env): string {
-  return resolveWithEnv(explicit, env.CT_STATE, DEFAULT_STATE_PATH);
+/**
+ * State-file precedence: explicit `--state` → `CT_STATE` → `fallback`.
+ * `fallback` defaults to `ct-state.json` (single-host); under `--env`, the caller
+ * passes the env profile's state path (e.g. `ct-state.<env>.json`) as the fallback.
+ */
+export function resolveStatePath(
+  explicit?: string,
+  env: NodeJS.ProcessEnv = process.env,
+  fallback: string = DEFAULT_STATE_PATH,
+): string {
+  return resolveWithEnv(explicit, env.CT_STATE, fallback);
 }
 
 export function emptyState(host: string): State {

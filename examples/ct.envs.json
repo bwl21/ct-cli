@@ -1,0 +1,13 @@
+{
+  "environments": {
+    "dev": {
+      "host": "https://eqrm-dev.church.tools"
+    },
+    "prod": {
+      "host": "https://eqrm.church.tools",
+      "state": "ct-state.prod.json",
+      "protected": true,
+      "tokenEnv": "CT_PROD_TOKEN"
+    }
+  }
+}

@@ -2,7 +2,8 @@ import { dirname, join } from "node:path";
 import { Command } from "commander";
 import { authedSession } from "../api/session.js";
 import { resolveConfig } from "../config.js";
-import { loadState, resolveStatePath, saveState } from "../state/state.js";
+import { prepareEnv } from "../env/context.js";
+import { loadState, saveState } from "../state/state.js";
 import { loadConfig, resolveConfigPath } from "../config/load.js";
 import { buildPlan } from "../engine/build.js";
 import { Resolver } from "../resolve/resolver.js";
@@ -14,13 +15,15 @@ import { summarize } from "../engine/types.js";
 import { buildPermissionPlan } from "../permissions/plan.js";
 import { renderPermissionPlan } from "../permissions/render.js";
 import { applyPermissionPlan } from "../permissions/apply.js";
-import { confirm } from "../ui/prompt.js";
+import { confirm, confirmEnv } from "../ui/prompt.js";
 import { resolveWithEnv } from "../util/resolve.js";
 import { info, warn, success, error } from "../ui.js";
 
 interface ApplyOptions {
   config?: string;
   state?: string;
+  env?: string;
+  confirmEnv?: string;
   backupDir?: string;
   autoApprove?: boolean;
   refresh?: boolean;
@@ -40,6 +43,11 @@ export function applyCommand(): Command {
     .description("Apply the plan: idempotent create + update in dependency order (never deletes)")
     .option("-c, --config <path>", "config file (or set CT_CONFIG)")
     .option("-s, --state <path>", "state file (or set CT_STATE)")
+    .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
+    .option(
+      "--confirm-env <name>",
+      "confirm a protected env non-interactively (must match --env exactly)",
+    )
     .option("--backup-dir <path>", "directory for the pre-apply backup (or set CT_BACKUP_DIR)")
     .option("-y, --auto-approve", "skip the confirmation prompt")
     .option(
@@ -47,9 +55,10 @@ export function applyCommand(): Command {
       "after a successful apply, POST /dynamicgroups/{id}/refresh for each changed dynamic group (per-group only)",
     )
     .action(async (opts: ApplyOptions) => {
+      const cmdEnv = await prepareEnv(opts);
       const config = await resolveConfig();
       const configPath = resolveConfigPath(opts.config);
-      const statePath = resolveStatePath(opts.state);
+      const statePath = cmdEnv.statePath;
       const { resources: desired, permissions, configDir } = await loadConfig(configPath);
       const state = await loadState(statePath, config.host);
 
@@ -97,9 +106,18 @@ export function applyCommand(): Command {
         return;
       }
 
-      const ok = await confirm(`Apply ${changeCount} change(s)?`, { assumeYes: opts.autoApprove });
+      // Protected env (#22): typed confirmation of the env name is MANDATORY — --auto-approve does not
+      // bypass it. --confirm-env <name> substitutes for the typed input in CI. Otherwise the normal
+      // y/N (skippable with --auto-approve) applies.
+      const ok = cmdEnv.protected
+        ? await confirmEnv(cmdEnv.name!, { confirmFlag: opts.confirmEnv })
+        : await confirm(`Apply ${changeCount} change(s)?`, { assumeYes: opts.autoApprove });
       if (!ok) {
-        warn("Aborted — no changes made.");
+        warn(
+          cmdEnv.protected
+            ? `Aborted — protected environment "${cmdEnv.name}" was not confirmed (no changes made).`
+            : "Aborted — no changes made.",
+        );
         process.exitCode = 1;
         return;
       }
