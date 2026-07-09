@@ -8,7 +8,14 @@ import { q, churchQuery } from "../src/config/context.js";
 
 const CAMPUSES = ["mainz", "berlin"] as const;
 
-/** One campus's Kids area: a lead group with three ministry teams under it, plus a dynamic "all members" group. */
+/**
+ * One campus's Kids area: a lead group with three ministry teams under it, plus a dynamic "all members" group.
+ *
+ * Campus assignment note (#21): a group is assigned to a campus with a numeric `campusId: <existing id>`.
+ * These campuses are created in this same apply, so their ids are unknowable at eval time — linking a group
+ * to a *same-run* campus by key (`campus: "mainz"`) is the logical-reference resolver's job and lands with #20.
+ * To assign to an existing campus today, pass its numeric id, e.g. `campusId: 3`.
+ */
 function kidsArea(ct: ConfigContext, campus: string): void {
   const lead = `${campus}_kids_lead`;
   ct.group({ key: lead, name: `${campus} · Kids Leitung`, groupTypeId: 2, parents: [] });

@@ -75,6 +75,19 @@ function toDesired(type: string, input: ResourceInput): DesiredResource {
   if (parents !== undefined && (!Array.isArray(parents) || parents.some((p) => typeof p !== "string"))) {
     throw new Error(`${type} "${key}": "parents" must be an array of string group keys.`);
   }
+  // Campus assignment is a numeric escape hatch only (mirrors `groupTypeId`): `campusId: <id>`.
+  // A logical `campus: "mainz"` reference is #20's resolver, not built yet — reject it up front
+  // rather than let an un-diffable `campus` field slip into the bag and drift against the
+  // managed-only actual forever. Also pin `campusId`'s type so a stray string fails at eval time.
+  if (fields.campus !== undefined) {
+    throw new Error(
+      `${type} "${key}": logical campus references ("campus") are not supported yet — ` +
+        `use a numeric "campusId" (the existing CT campus id). Logical references land with #20.`,
+    );
+  }
+  if (fields.campusId !== undefined && fields.campusId !== null && typeof fields.campusId !== "number") {
+    throw new Error(`${type} "${key}": "campusId" must be a number (the CT campus id) or null to clear.`);
+  }
   // `dynamic` is a synthetic field for auto-groups, handled separately from the plain diffed
   // field bag. Opt-in: `undefined` means "not a dynamic group" (mirrors `parents`).
   let dynamicSpec: DynamicSpec | undefined;

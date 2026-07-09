@@ -143,6 +143,37 @@ describe("executePlan", () => {
     expect(state.resources.team!.fields).toEqual({ name: "Team A", groupTypeId: 2, groupStatusId: 1 });
   });
 
+  it("assigns a campus by PATCHing a top-level campusId (#21)", async () => {
+    const state = emptyState("h");
+    state.resources.team = {
+      type: "group",
+      id: 9,
+      key: "team",
+      fields: { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: null },
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
+    const { client, calls } = recorder();
+    const plan: Plan = {
+      items: [
+        {
+          type: "group",
+          key: "team",
+          id: 9,
+          action: "update",
+          changes: [{ field: "campusId", from: null, to: 4 }],
+          actual: { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: null },
+        },
+      ],
+    };
+    const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    expect(result.updated).toEqual(["team"]);
+    // CT reads campus at information.campusId but accepts a top-level campusId on PATCH — mirroring
+    // how groupTypeId/groupStatusId are written. PATCH carries only the changed field.
+    expect(calls[0]).toEqual({ method: "PATCH", path: "/groups/9", body: { campusId: 4 } });
+    expect(state.resources.team!.fields).toEqual({ name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 });
+  });
+
   it("does NOT revert a field that drifted in CT when a sibling field is updated (#27)", async () => {
     // Campus adopted with { name, shorty }; an admin edited `shorty` in the CT UI after adoption,
     // so state carries the adopt-time "MZ" while the fetched actual is "MZX". The user changed `name`.

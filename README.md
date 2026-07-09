@@ -117,8 +117,17 @@ export default (ct) => {
   // in this config. Omit it to leave a group's hierarchy unmanaged; edges to unmanaged
   // groups stay invisible. (`parent:` is unrelated — an ordering hint only, not hierarchy.)
   ct.group({ key: "mainz_kids_lead", name: "Mainz · Kids Leitung", groupTypeId: 2, parents: ["mainz_area"] });
+  // Assign a group to a campus by its numeric id (CT stores it at `information.campusId`).
+  // `campusId: null` clears the assignment. A *logical* `campus: "mainz"` reference — resolving a
+  // same-run campus by key — is deferred to #20; use the existing campus's numeric id for now.
+  ct.group({ key: "mainz_kids", name: "Mainz · Kids", groupTypeId: 2, campusId: 3, parents: ["mainz_kids_lead"] });
 };
 ```
+
+`campusId` is a managed group field: `ct plan` shows a campus assign/move/clear
+as a normal field update, and `ct adopt group <id>` captures it. Which group
+fields are managed vs. deliberately left to the CT UI is recorded in
+[`docs/group-field-decisions.md`](docs/group-field-decisions.md).
 
 Machine-readable output goes to **stdout** (pipe/`jq` it); human status lines go
 to **stderr**.
