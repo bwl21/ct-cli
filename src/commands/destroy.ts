@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { authedSession } from "../api/session.js";
-import { CtApiError } from "../api/ctClient.js";
+import { CtApiError, type CtClient } from "../api/ctClient.js";
 import { resolveConfig } from "../config.js";
 import { loadState, resolveStatePath, saveState, type State } from "../state/state.js";
 import { loadConfig, resolveConfigPath } from "../config/load.js";
@@ -105,28 +105,57 @@ export function destroyCommand(): Command {
         return;
       }
 
-      for (const key of ordered) {
-        const managed = state.resources[key]!;
-        const spec = RESOURCES[managed.type];
-        if (!spec) {
-          error(`No write spec for type "${managed.type}" — skipping ${key}.`);
-          continue;
-        }
-        const path = spec.itemPath(managed.id);
-        assertNotPeople(path);
-        try {
-          await client.request("DELETE", path);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          error(
-            `Stopped at ${key}: ${message}. Already-deleted targets are removed from state — re-run with the remaining targets to resume.`,
-          );
-          process.exitCode = 1;
-          return;
-        }
-        delete state.resources[key];
-        await saveState(statePath, state);
-        success(`Destroyed ${managed.type}.${key} (#${managed.id})`);
-      }
+      await runDeleteLoop({ client, state, statePath, ordered });
     });
+}
+
+export interface DeleteLoopCtx {
+  client: Pick<CtClient, "request">;
+  state: State;
+  statePath: string;
+  ordered: string[];
+  /** Injection seam for tests; defaults to the real state writer. */
+  save?: (path: string, state: State) => Promise<void>;
+}
+
+/**
+ * Delete each ordered target, removing it from state and saving after each success.
+ *
+ * A 404 means the target was already deleted in ChurchTools (e.g. by hand in the UI):
+ * treat it as success-with-note — drop the state entry, save, and continue to the next
+ * target. Any non-404 error stops the run with state saved up to that point, so a re-run
+ * can resume with the remaining targets. (Mirrors the backup loop's 404 tolerance.)
+ */
+export async function runDeleteLoop(ctx: DeleteLoopCtx): Promise<void> {
+  const { client, state, statePath, ordered } = ctx;
+  const save = ctx.save ?? saveState;
+  for (const key of ordered) {
+    const managed = state.resources[key]!;
+    const spec = RESOURCES[managed.type];
+    if (!spec) {
+      error(`No write spec for type "${managed.type}" — skipping ${key}.`);
+      continue;
+    }
+    const path = spec.itemPath(managed.id);
+    assertNotPeople(path);
+    try {
+      await client.request("DELETE", path);
+    } catch (err) {
+      if (err instanceof CtApiError && err.status === 404) {
+        delete state.resources[key];
+        await save(statePath, state);
+        success(`${managed.type}.${key} (#${managed.id}) already deleted in ChurchTools — removed from state`);
+        continue;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      error(
+        `Stopped at ${key}: ${message}. State saved up to this point — re-run with the remaining targets to resume.`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    delete state.resources[key];
+    await save(statePath, state);
+    success(`Destroyed ${managed.type}.${key} (#${managed.id})`);
+  }
 }
