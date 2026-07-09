@@ -35,8 +35,10 @@ export type PlanAction = "create" | "update" | "delete" | "no-op";
  *  - `recreate`         — desired + managed, but vanished from ChurchTools (a create that replaces a dead id).
  *  - `stale`            — managed + dropped from config + already gone from ChurchTools (nothing to delete; prune from state).
  *  - `unresolved-type`  — managed but its type has no registry entry, so it cannot be fetched/diffed (left untouched).
+ *  - `fetch-failed`     — managed but its actual value could not be fetched (non-404 error); NOT a vanish, so it is
+ *                         excluded from create/recreate/stale classification and rendered as a fetch failure.
  */
-export type PlanNote = "recreate" | "stale" | "unresolved-type";
+export type PlanNote = "recreate" | "stale" | "unresolved-type" | "fetch-failed";
 
 export interface FieldChange {
   field: string;
@@ -52,10 +54,18 @@ export interface PlanItem {
   action: PlanAction;
   /** For create: every desired field; update: only the differences; delete/no-op: empty. */
   changes: FieldChange[];
+  /**
+   * The fetched actual managed fields (updates only). The write body is built from
+   * THIS, not the stale state snapshot — so a field that drifted in the CT UI but
+   * isn't in `changes` passes through untouched instead of being reverted (#27).
+   */
+  actual?: Record<string, unknown>;
   /** Manual changes in ChurchTools since adoption (last-known snapshot vs actual). */
   drift?: FieldChange[];
   /** A non-standard state the plan must surface (see {@link PlanNote}). */
   note?: PlanNote;
+  /** Extra human-readable context for a note (e.g. the HTTP status behind `fetch-failed`). */
+  detail?: string;
 }
 
 export interface Plan {

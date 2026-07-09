@@ -102,7 +102,7 @@ describe("executePlan", () => {
     expect(state.resources.zurich).toMatchObject({ id: 8, key: "zurich" });
   });
 
-  it("updates a group via PATCH with the full managed snapshot", async () => {
+  it("updates a group via PATCH with only the changed field (siblings left alone)", async () => {
     const state = emptyState("h");
     state.resources.team = {
       type: "group",
@@ -121,6 +121,7 @@ describe("executePlan", () => {
           id: 9,
           action: "update",
           changes: [{ field: "name", from: "Team", to: "Team A" }],
+          actual: { name: "Team", groupTypeId: 2, groupStatusId: 1 },
         },
       ],
     };
@@ -132,12 +133,50 @@ describe("executePlan", () => {
       now: fixedNow,
     });
     expect(result.updated).toEqual(["team"]);
+    // PATCH carries ONLY the planned change — CT keeps the untouched siblings.
     expect(calls[0]).toEqual({
       method: "PATCH",
       path: "/groups/9",
-      body: { name: "Team A", groupTypeId: 2, groupStatusId: 1 },
+      body: { name: "Team A" },
     });
+    // Post-apply state reflects what CT now holds: actual ∪ changes.
     expect(state.resources.team!.fields).toEqual({ name: "Team A", groupTypeId: 2, groupStatusId: 1 });
+  });
+
+  it("does NOT revert a field that drifted in CT when a sibling field is updated (#27)", async () => {
+    // Campus adopted with { name, shorty }; an admin edited `shorty` in the CT UI after adoption,
+    // so state carries the adopt-time "MZ" while the fetched actual is "MZX". The user changed `name`.
+    const state = emptyState("h");
+    state.resources.mainz = {
+      type: "campus",
+      id: 0,
+      key: "mainz",
+      fields: { name: "Mainz", shorty: "MZ" }, // stale adopt-time snapshot
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
+    const { client, calls } = recorder();
+    const plan: Plan = {
+      items: [
+        {
+          type: "campus",
+          key: "mainz",
+          id: 0,
+          action: "update",
+          changes: [{ field: "name", from: "Mainz", to: "Mainz HQ" }],
+          actual: { name: "Mainz", shorty: "MZX" }, // shorty drifted in CT
+        },
+      ],
+    };
+    await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    // PUT replaces the whole object, so it must carry the drifted actual `shorty`, never the stale "MZ".
+    expect(calls[0]).toEqual({
+      method: "PUT",
+      path: "/campuses/0",
+      body: { name: "Mainz HQ", shorty: "MZX" },
+    });
+    // Post-apply state reflects the written body, not the stale snapshot.
+    expect(state.resources.mainz!.fields).toEqual({ name: "Mainz HQ", shorty: "MZX" });
   });
 
   it("reconciles hierarchy edges via PUT/DELETE and never stores parents in state", async () => {
@@ -173,6 +212,46 @@ describe("executePlan", () => {
     await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
     expect(calls).toEqual([{ method: "PUT", path: "/groups/2/parents/1", body: undefined }]);
     expect(state.resources.child!.fields.parents).toBeUndefined();
+  });
+
+  it("writes hierarchy edges on a first apply (creates carry a parents change) (#28)", async () => {
+    // Fresh state: parent + child both created in dependency order, and the child's create carries
+    // a `parents` change so the edge is written on the very first apply.
+    const state = emptyState("h");
+    const { client, calls } = recorder({ "POST /groups": { id: 0 } });
+    // Return distinct ids for the two POSTs so resolveId can find the parent.
+    let nextId = 1;
+    client.request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+      calls.push({ method, path, body });
+      if (method === "POST" && path === "/groups") return { id: nextId++ } as T;
+      return {} as T;
+    };
+    const plan: Plan = {
+      items: [
+        {
+          type: "group",
+          key: "parent",
+          id: null,
+          action: "create",
+          changes: [{ field: "name", from: undefined, to: "parent" }],
+        },
+        {
+          type: "group",
+          key: "child",
+          id: null,
+          action: "create",
+          changes: [
+            { field: "name", from: undefined, to: "child" },
+            { field: "parents", from: undefined, to: ["parent"] },
+          ],
+        },
+      ],
+    };
+    const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    expect(result.failed).toBeUndefined();
+    expect(result.created).toEqual(["parent", "child"]);
+    // The edge PUT resolves the parent's freshly-assigned id (1) against the child's (2).
+    expect(calls).toContainEqual({ method: "PUT", path: "/groups/2/parents/1", body: undefined });
   });
 
   it("skips deletes (apply never deletes)", async () => {
