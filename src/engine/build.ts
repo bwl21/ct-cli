@@ -38,6 +38,8 @@ export async function buildPlan(
   // Keyed by logical key (globally unique), not CT id (unique only within a type — the Mainz campus is id 0).
   const actual = new Map<string, Record<string, unknown>>();
   const unresolved = new Set<string>();
+  // Keys whose fetch errored (non-404), mapped to a short status descriptor for the plan render.
+  const fetchFailed = new Map<string, string>();
   const fetchErrors: string[] = [];
 
   await mapConcurrent(Object.values(state.resources), FETCH_CONCURRENCY, async (managed) => {
@@ -57,7 +59,10 @@ export async function buildPlan(
         return; // vanished in CT — the plan will propose recreating (or pruning) it
       }
       // A read-only plan should not abort on one bad fetch: record it, keep going, flag the plan as partial.
+      // Track the key separately from a real 404 so computePlan renders it as a fetch failure, not a recreate.
       const message = err instanceof Error ? err.message : String(err);
+      const status = err instanceof CtApiError ? String(err.status) : "error";
+      fetchFailed.set(managed.key, status);
       fetchErrors.push(`${managed.type}.${managed.key} (#${managed.id}): ${message}`);
       warn(`Failed to fetch ${managed.type}.${managed.key} (#${managed.id}): ${message}`);
     }
@@ -66,6 +71,6 @@ export async function buildPlan(
   // Synthetic sub-resource fields (parents, dynamic, …) fold into the diff on both sides.
   const folded = await foldSynthetic({ client, state, desired, actual, configDir: opts.configDir });
   fetchErrors.push(...folded.errors);
-  const plan = computePlan(folded.desired, state, actual, { unresolved });
+  const plan = computePlan(folded.desired, state, actual, { unresolved, fetchFailed });
   return { plan, actual, fetchErrors };
 }

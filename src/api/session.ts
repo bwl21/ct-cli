@@ -19,5 +19,8 @@ export async function authedSession(): Promise<AuthedSession> {
   }
   const client = new CtClient(config);
   const me = await client.authenticate(token);
+  // Hard-fail below the minimum CT version before any command reads or writes —
+  // a stale instance half-applies (tier-0 writes succeed, hierarchy endpoints 404).
+  await client.assertMinVersion();
   return { client, me };
 }

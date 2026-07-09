@@ -15,6 +15,7 @@
  */
 import { type CtConfig } from "../config.js";
 import { fetchWithRetry } from "./http.js";
+import { meetsMinVersion, MIN_CT_VERSION, type CtInfo } from "./version.js";
 
 export interface WhoAmI {
   id: number;
@@ -39,11 +40,40 @@ type Json = Record<string, unknown>;
 export class CtClient {
   private cookie: string | null = null;
   private csrfToken: string | null = null;
+  private ctVersion: string | null = null;
 
   constructor(private readonly config: CtConfig) {}
 
   get host(): string {
     return this.config.host;
+  }
+
+  /**
+   * Hard-fail if the ChurchTools instance is below the minimum version the CLI
+   * requires (group hierarchy / metadata CRUD need v3.96+). One `/info` GET,
+   * cached so repeated calls in a session cost nothing. plan/apply/destroy call
+   * this via {@link authedSession} — a half-applied structure from a stale
+   * instance is exactly what the gate exists to prevent.
+   */
+  async assertMinVersion(min: string = MIN_CT_VERSION): Promise<void> {
+    if (this.ctVersion === null) {
+      const info = await this.get<CtInfo>("/info");
+      this.ctVersion = info?.version ?? "";
+    }
+    const version = this.ctVersion;
+    if (!version) {
+      throw new CtApiError(
+        `ChurchTools did not report a version (GET /info) — cannot verify the required minimum ${min}.`,
+        0,
+        null,
+      );
+    }
+    if (!meetsMinVersion(version, min)) {
+      throw new Error(
+        `ChurchTools ${version} is below the required minimum ${min}. ` +
+          `Upgrade ChurchTools before running plan/apply/destroy.`,
+      );
+    }
   }
 
   /** Run the login-token handshake and cache the session cookie + CSRF token. */
@@ -103,7 +133,19 @@ export class CtClient {
     if (res.status === 204) {
       return undefined as T;
     }
-    const parsed = (await res.json()) as { data?: T };
+    // Any 2xx may carry an empty or non-JSON body (DELETEs commonly do). A bare
+    // res.json() there throws a raw SyntaxError naming no request. Read the text
+    // first: empty → undefined; unparseable → a CtApiError that names method+path.
+    const text = await res.text();
+    if (text.trim() === "") {
+      return undefined as T;
+    }
+    let parsed: { data?: T };
+    try {
+      parsed = JSON.parse(text) as { data?: T };
+    } catch {
+      throw new CtApiError(`${method} ${path} returned a non-JSON body`, res.status, text);
+    }
     return (parsed.data ?? parsed) as T;
   }
 
