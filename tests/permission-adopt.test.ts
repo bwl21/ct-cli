@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { emitAdoptedGrants } from "../src/permissions/adopt.js";
-import type { DomainType, RawPermission } from "../src/permissions/grants.js";
+import { diffGrants, normalizeActual, type DomainType, type RawPermission } from "../src/permissions/grants.js";
 import { desiredTuples } from "../src/permissions/plan.js";
 import type { Grant } from "../src/permissions/types.js";
 import type { State } from "../src/state/state.js";
@@ -42,7 +42,7 @@ function parseEmittedGrants(block: string): Grant[] {
     }
     const m = /^\{ right: ("(?:[^"\\]|\\.)*"), scope: \[(.*)\] \}$/.exec(entry);
     if (!m?.[1] || m[2] == null) throw new Error(`Unparseable emitted grant line: ${line}`);
-    grants.push({ right: JSON.parse(m[1]) as string, scope: JSON.parse(`[${m[2]}]`) as string[] });
+    grants.push({ right: JSON.parse(m[1]) as string, scope: JSON.parse(`[${m[2]}]`) as (string | number)[] });
   }
   return grants;
 }
@@ -193,6 +193,63 @@ describe("emitAdoptedGrants", () => {
       state: emptyState(),
     });
     expect(clean).not.toContain("REVOKE");
+  });
+
+  it("scoped grant on a non-group scope dimension → emits the numeric scope form directly, never 'ct adopt group' (#49)", () => {
+    // churchdb:view comments (authId 113) is scoped by "cdb_comment_viewer", not a group — dataIds
+    // 1/2 will never resolve via `findByTypeId(state, "group", …)`. The right can still be declared:
+    // the numeric escape hatch lets adopt emit it as an ACTIVE grant instead of an unresolvable WARNING.
+    const rows: RawPermission[] = [
+      { authId: 113, dataId: 1, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
+      { authId: 113, dataId: 2, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 9, rows, state: emptyState() });
+
+    expect(block).toContain('{ right: "churchdb:view comments", scope: [1, 2] }');
+    expect(block).not.toContain("ct adopt group");
+    expect(block).not.toContain("WARNING");
+    // names the right's actual scope dimension in the hint, per catalog scopeField
+    expect(block).toContain("cdb_comment_viewer");
+  });
+
+  it("scoped grant on the churchdb security-level dimension (cc_securitylevel) round-trips numerically (#49 repro)", () => {
+    // Mirrors the real-world case from issue #49: churchdb:security level view/edit own data,
+    // scoped to dataIds 1,2,3,5 — none of which are groups (GET /groups/{1,2,3,5} 404s).
+    const rows: RawPermission[] = [
+      { authId: 131, dataId: 1, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
+      { authId: 131, dataId: 2, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
+      { authId: 131, dataId: 3, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
+      { authId: 131, dataId: 5, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
+      { authId: 132, dataId: 1, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 9, rows, state: emptyState() });
+    const grants = parseEmittedGrants(block);
+
+    expect(block).not.toContain("WARNING");
+    expect(block).not.toContain("ct adopt group");
+    expect(grants).toEqual([
+      { right: "churchdb:security level view own data", scope: [1, 2, 3, 5] },
+      { right: "churchdb:security level edit own data", scope: [1] },
+    ]);
+
+    // Full round-trip: pasting this block into config and diffing against the SAME live rows must
+    // be a no-op — no toPut, and critically no toDelete (a partial block must never revoke a live
+    // grant it could not express).
+    const desired = grants.flatMap((g) => desiredTuples({ key: "adopted", domainType: "group_type_role", domainId: 9, grants: [g] }, emptyState()));
+    const actual = normalizeActual(rows);
+    const diff = diffGrants(desired, actual);
+    expect(diff.toPut).toEqual([]);
+    expect(diff.toDelete).toEqual([]);
+  });
+
+  it("unmanaged group-dimension scope still gets the 'ct adopt group' hint (unchanged behavior)", () => {
+    // Regression guard: only NON-group scope dimensions bypass the group-resolution path — a
+    // cdb_gruppe-scoped right with an unmanaged dataId must still point at `ct adopt group <id>`.
+    const rows: RawPermission[] = [
+      { authId: 1104, dataId: 777, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 42, rows, state: emptyState() });
+    expect(block).toContain("ct adopt group 777");
   });
 
   it("round trip — every emitted grant passes the real desiredTuples, for any mix of rows", () => {

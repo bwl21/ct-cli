@@ -7,7 +7,12 @@
 import type { DomainType } from "./grants.js";
 import type { Ref } from "../resolve/refs.js";
 
-export type Grant = string | { right: string; scope: string[] };
+/**
+ * A scope entry is either a logical key of a group managed by this tool, or a raw numeric dataId
+ * (#49 escape hatch) — required for scoped rights whose scope dimension (catalog `scopeField`) is
+ * not a group, since there is no logical/managed representation to reference by key there.
+ */
+export type Grant = string | { right: string; scope: (string | number)[] };
 
 export interface DesiredPermission {
   key: string;

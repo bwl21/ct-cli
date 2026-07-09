@@ -265,6 +265,27 @@ describe("permission declarations", () => {
     ).rejects.toThrow(/numeric "id"/i);
   });
 
+  it("accepts a raw numeric scope entry alongside logical group keys (#49 escape hatch)", async () => {
+    const { permissions } = await evaluateConfig((ct: ConfigContext) => {
+      ct.groupTypeRole({ key: "leiter_tpl", id: 8, grants: [
+        { right: "churchdb:view comments", scope: [1, 2, 3] },
+        { right: "churchdb:view group", scope: ["kids_area", 5] },
+      ]});
+    });
+    expect(permissions[0]!.grants).toEqual([
+      { right: "churchdb:view comments", scope: [1, 2, 3] },
+      { right: "churchdb:view group", scope: ["kids_area", 5] },
+    ]);
+  });
+
+  it("rejects a scope array with a non-string/non-number entry", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) =>
+        ct.groupTypeRole({ key: "x", id: 8, grants: [{ right: "churchdb:view comments", scope: [null] }] } as never),
+      ),
+    ).rejects.toThrow(/scope/i);
+  });
+
   it("rejects two declarations targeting the same (domainType, domainId)", async () => {
     await expect(
       evaluateConfig((ct: ConfigContext) => {

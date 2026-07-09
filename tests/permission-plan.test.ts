@@ -53,6 +53,33 @@ describe("desiredTuples", () => {
       ]}, state),
     ).toThrow(/not a scoped right/);
   });
+
+  it("accepts a raw numeric scope entry (escape hatch, #49) for a right scoped by a non-group dimension", () => {
+    // churchdb:view comments (authId 113) is scoped by "cdb_comment_viewer" — not a group. There is
+    // no managed-group representation for it, so the DSL's numeric escape hatch is the only way to
+    // declare it. Numeric entries fan out just like logical keys, and MUST NOT retain a scopeKey —
+    // there is no state resource to re-resolve at apply time.
+    const tuples = desiredTuples(
+      { key: "t", domainType: "group_type_role", domainId: 8, grants: [
+        { right: "churchdb:view comments", scope: [1, 2] },
+      ]}, state);
+    expect(tuples).toEqual([
+      { authId: 113, dataId: [1], type: "grant" },
+      { authId: 113, dataId: [2], type: "grant" },
+    ]);
+    expect(tuples.every((t) => t.scopeKey === undefined)).toBe(true);
+  });
+
+  it("mixes a numeric scope entry with a logical group key in the same declaration", () => {
+    const tuples = desiredTuples(
+      { key: "t", domainType: "group_type_role", domainId: 8, grants: [
+        { right: "churchgroup:view group", scope: ["kids_area", 3] },
+      ]}, state);
+    expect(tuples).toEqual([
+      { authId: 1104, dataId: [3], type: "grant" },
+      { authId: 1104, dataId: [42], type: "grant", scopeKey: "kids_area" },
+    ]);
+  });
 });
 
 describe("buildPermissionPlan", () => {

@@ -25,9 +25,18 @@ const DSL_FN: Record<DomainType, string> = {
   group_type_role: "ct.groupTypeRole",
 };
 
+/**
+ * The catalog `scopeField` value for rights that scope by GROUP. Only rights carrying this exact
+ * scopeField have a logical/managed representation (`ct.group` / state) to resolve their dataIds
+ * against — every other non-null scopeField (`cc_securitylevel`, `cdb_comment_viewer`, `cdb_station`,
+ * …) names a different ChurchTools dimension with no group under management to look up, so their
+ * dataIds pass through as the numeric scope escape hatch (#49) instead.
+ */
+const GROUP_SCOPE_FIELD = "cdb_gruppe";
+
 interface ReverseEntry {
   name: string;
-  scoped: boolean;
+  scopeField: string | null;
 }
 
 /**
@@ -39,7 +48,7 @@ function reverseCatalog(): Map<number, ReverseEntry> {
   const rev = new Map<number, ReverseEntry>();
   for (const [name, entry] of Object.entries(CATALOG)) {
     if (!rev.has(entry.authId)) {
-      rev.set(entry.authId, { name, scoped: entry.scopeField != null });
+      rev.set(entry.authId, { name, scopeField: entry.scopeField });
     }
   }
   return rev;
@@ -186,16 +195,35 @@ function grantLines(
     };
   }
 
-  if (entry.scoped) {
-    // Scoped right → resolve each dataId back to a MANAGED group's logical key. Scope keys must be
-    // state keys (see src/permissions/scope.ts), so an unmanaged dataId cannot be emitted as a key.
-    //
-    // NOTE on the lookup: `findByTypeId(state, "group", id)` assumes every scoped dataId is a GROUP
-    // id, but only `cdb_gruppe`-scoped rights actually scope by group — other scopeFields
-    // (cdb_station, cc_securitylevel, …) carry ids from different namespaces that could collide
-    // with a managed group's id. This mirrors the tool-wide constraint that scope declarations
-    // only support managed groups today (src/permissions/scope.ts); revisit if non-group scopes
-    // ever become declarable.
+  if (entry.scopeField != null && entry.scopeField !== GROUP_SCOPE_FIELD) {
+    // Scoped right whose scope dimension is NOT a group (e.g. "cc_securitylevel", "cdb_comment_viewer")
+    // — its dataIds name something this tool has no managed/logical representation for (a security
+    // level, a comment-viewer bucket, …), so `findByTypeId(state, "group", id)` would never find them
+    // (and could even collide with an unrelated group's id in a different namespace). There is nothing
+    // to "adopt" here: the numeric scope escape hatch (#49, src/permissions/scope.ts) declares these
+    // dataIds directly, so the grant is always emitted as an ACTIVE line, never a WARNING placeholder.
+    const out: string[] = [];
+    let omitted = false;
+    if (g.hasUnscoped) {
+      out.push(`    // WARNING: "${entry.name}" is granted GLOBALLY here (scoped right, no dataId). The config`);
+      out.push("    //          DSL cannot declare a global grant of a scoped right; re-grant it with an explicit");
+      out.push("    //          scope in CT, or leave this domain unmanaged.");
+      omitted = true;
+    }
+    if (g.dataIds.length > 0) {
+      const scope = [...g.dataIds].sort((a, b) => a - b).join(", ");
+      out.push(`    // "${entry.name}" scopes by "${entry.scopeField}", not a group — using its numeric dataId(s) directly.`);
+      out.push(`    { right: ${JSON.stringify(entry.name)}, scope: [${scope}] },`);
+    }
+    return { lines: out, omitted };
+  }
+
+  if (entry.scopeField != null) {
+    // Scoped right on the GROUP dimension → resolve each dataId back to a MANAGED group's logical
+    // key. Scope keys must be state keys (see src/permissions/scope.ts), so an unmanaged dataId
+    // cannot be emitted as a key — the numeric escape hatch is not offered here on purpose: a
+    // `cdb_gruppe` dataId names an actual group, and `ct adopt group <id>` is the guided path to
+    // bring it under management (rather than silently declaring an opaque numeric scope for it).
     const resolvedKeys: string[] = [];
     const unmanaged: number[] = [];
     for (const id of g.dataIds) {

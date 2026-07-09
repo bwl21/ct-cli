@@ -50,11 +50,15 @@ export function desiredTuples(
     }
     // Retain the symbolic scopeKey on every scoped tuple so its dataId is re-resolved against
     // post-execute state at apply time. `id === null` means the group is declared but not yet
-    // created (pending); it renders in the plan and always diffs into toPut (#29, #33.3).
-    return resolveScope(g.scope, state, declaredGroupKeys).map(({ key, id }) =>
+    // created (pending); it renders in the plan and always diffs into toPut (#29, #33.3). A `numeric`
+    // resolution (#49 escape hatch) carries no state-backed key to re-resolve — its dataId is already
+    // final, so no scopeKey is retained (apply.ts's `reresolveTuple` passes such a tuple through as-is).
+    return resolveScope(g.scope, state, declaredGroupKeys).map(({ key, id, numeric }) =>
       id === null
         ? { authId: entry.authId, dataId: [], type: "grant" as const, scopeKey: key, pending: true }
-        : { authId: entry.authId, dataId: [id], type: "grant" as const, scopeKey: key },
+        : numeric
+          ? { authId: entry.authId, dataId: [id], type: "grant" as const }
+          : { authId: entry.authId, dataId: [id], type: "grant" as const, scopeKey: key },
     );
   });
 }

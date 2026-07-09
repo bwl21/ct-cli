@@ -42,10 +42,10 @@ reference or a numeric `id`:
     logical form and a numeric `id` is a conflict and throws.
 - **`grants`** — an array of `Grant`s, each either:
   - a bare string, `"module:right"` — an **unscoped** grant, or
-  - an object `{ right: "module:right", scope: string[] }` — a **scoped**
-    grant, where `scope` is a list of logical keys of managed groups
-    (resolved to their ChurchTools `dataId`s at plan time — see "Scope
-    resolution" below).
+  - an object `{ right: "module:right", scope: (string | number)[] }` — a
+    **scoped** grant, where each `scope` entry is either a logical key of a
+    managed group, or a raw numeric `dataId` (the escape hatch, #49 — see
+    "Scope resolution" below).
 
 ## Discovering right names — `ct get permissions-catalog`
 
@@ -96,9 +96,10 @@ other's grants forever) — even if one used a name and the other a raw id.
 
 ## Scope resolution
 
-A scoped grant's `scope: [...]` is a list of **logical keys of groups managed
-by this tool** (declared via `ct.group` or adopted into state) — not raw
-ChurchTools ids. Each key is resolved against **desired ∪ state**
+A scoped grant's `scope: [...]` is a list where each entry is either a
+**logical key of a group managed by this tool** (declared via `ct.group` or
+adopted into state), or a **raw numeric `dataId`** (the escape hatch — see
+below). String entries are resolved against **desired ∪ state**
 (`src/permissions/scope.ts`):
 
 - A key already in state resolves to that group's `dataId`.
@@ -110,18 +111,48 @@ ChurchTools ids. Each key is resolved against **desired ∪ state**
 
   ```
   Scope key "kids_area" does not resolve to a managed group. Declare/adopt it,
-  or use a group already under management.
+  use a group already under management, or pass a raw numeric dataId if this
+  right's scope is not a group (see the catalog's scopeField).
   ```
 
 The requirement that scope targets be tool-visible is deliberate: so `ct plan`
 can show what a grant resolves to, and so renaming/re-keying a group doesn't
 silently orphan a grant's scope.
 
-**Re-resolution at apply time.** Every scoped tuple retains its symbolic scope
-key. Immediately before grants are written (after the resource tier has run),
-each key is re-resolved against the post-execute state. This means a group
-*created* or *recreated* in the same apply always gets its grant written with
-its fresh `dataId`, never a pending placeholder or a stale, dangling id.
+**Re-resolution at apply time.** Every scoped tuple resolved from a logical
+group key retains its symbolic scope key. Immediately before grants are
+written (after the resource tier has run), each key is re-resolved against the
+post-execute state. This means a group *created* or *recreated* in the same
+apply always gets its grant written with its fresh `dataId`, never a pending
+placeholder or a stale, dangling id.
+
+### Numeric scope escape hatch (#49)
+
+Not every scoped right's `scope` dimension is a **group**. The catalog's
+`scopeField` names the actual ChurchTools data-field a scoped right applies
+to (`src/permissions/catalog.json`) — for most scoped rights that field is
+`"cdb_gruppe"` (a group), but some rights scope by something else entirely,
+e.g.:
+
+- `churchdb:view comments` → `scopeField: "cdb_comment_viewer"`
+- `churchdb:security level view own data` / `edit own data` → `scopeField:
+  "cc_securitylevel"`
+
+For these, a `dataId` like `1`, `2`, `3` names a security level or a
+comment-viewer bucket — **not** a group — so `GET /groups/{1,2,3}` 404s and
+there is no logical/managed key to reference it by. A `scope` array entry may
+therefore be a plain number instead of a string:
+
+```ts
+{ right: "churchdb:security level view own data", scope: [1, 2, 3, 5] },
+```
+
+Numeric entries pass straight through with no state lookup, no pending
+resolution, and no re-resolution at apply time (their `dataId` is already
+final). They can be freely mixed with logical group keys in the same `scope`
+array. `ct adopt grants` emits this form automatically for any scoped right
+whose `scopeField` is not the group dimension (see below) — never a `ct adopt
+group <id>` hint for a dataId that was never a group.
 
 ## Adopting existing grants — `ct adopt grants <domainType> <domainId>`
 
@@ -145,13 +176,25 @@ to be accepted by `ct plan` (the round trip is locked by tests):
 - **`authId` → `module:right` via the catalog** (reverse lookup). An `authId`
   with no catalog entry becomes a `WARNING` comment (regenerate the catalog or add
   the right by hand) rather than failing the whole adoption.
-- **Scoped rights** carry a group `dataId`. If it matches a group **managed in
-  your state file**, the scope is emitted as that group's logical key
-  (`scope: ["kids"]`). If it is unmanaged, you get a clearly-marked placeholder
-  comment telling you to `ct adopt group <id>` first — scope keys must be state
-  keys (see [Scope resolution](#scope-resolution)). A scoped right granted
-  **globally** in CT (row with no `dataId`) is a `WARNING` comment too — the DSL
-  deliberately cannot declare a global grant of a scoped right.
+- **Scoped rights** are resolved by the right's actual `scopeField`
+  (#49) — only rights scoped by the **group** dimension
+  (`scopeField: "cdb_gruppe"`) are round-tripped as logical group refs; every
+  other scope dimension is emitted as the [numeric escape
+  hatch](#numeric-scope-escape-hatch-49) instead:
+  - **Group-scoped** (`cdb_gruppe`): if the `dataId` matches a group
+    **managed in your state file**, the scope is emitted as that group's
+    logical key (`scope: ["kids"]`). If it is unmanaged, you get a
+    clearly-marked placeholder comment telling you to `ct adopt group <id>`
+    first — scope keys must be state keys (see [Scope
+    resolution](#scope-resolution)).
+  - **Any other scope dimension** (`cc_securitylevel`, `cdb_comment_viewer`,
+    …): there is no group to adopt, so the `dataId`(s) are emitted directly
+    as a numeric `scope: [1, 2, 3]` — always an active line, with a comment
+    naming the right's actual scope dimension. `ct adopt group <id>` is never
+    suggested for these.
+  - A scoped right granted **globally** in CT (row with no `dataId`) is a
+    `WARNING` comment either way — the DSL deliberately cannot declare a
+    global grant of a scoped right.
 - **Not-writable rights become `NOTE` comments.** On `group_type_role`, rights
   with `authId >= 10000` (the `churchdb:+…` family) are readable via inheritance
   but rejected at plan time (see "Domain rules" below), so they are never
