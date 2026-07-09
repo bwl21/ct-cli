@@ -27,9 +27,16 @@ export function renderPlan(plan: Plan): string {
   const drifted = plan.items.filter((i) => i.drift && i.drift.length > 0);
   const stale = plan.items.filter((i) => i.note === "stale");
   const unresolved = plan.items.filter((i) => i.note === "unresolved-type");
+  const fetchFailed = plan.items.filter((i) => i.note === "fetch-failed");
   const lines: string[] = [];
 
-  if (changed.length === 0 && drifted.length === 0 && stale.length === 0 && unresolved.length === 0) {
+  if (
+    changed.length === 0 &&
+    drifted.length === 0 &&
+    stale.length === 0 &&
+    unresolved.length === 0 &&
+    fetchFailed.length === 0
+  ) {
     return pc.green("No changes. Desired state matches ChurchTools.");
   }
 
@@ -71,6 +78,14 @@ export function renderPlan(plan: Plan): string {
     lines.push(pc.yellow("Unresolved types (no registry entry — not diffed, left untouched):"));
     for (const item of unresolved) {
       lines.push(`  ? ${item.type}.${item.key} (#${item.id})`);
+    }
+  }
+
+  if (fetchFailed.length > 0) {
+    lines.push("");
+    lines.push(pc.yellow("Fetch failed (could not read from ChurchTools — diff unavailable, left untouched):"));
+    for (const item of fetchFailed) {
+      lines.push(`  ? ${item.type}.${item.key} (#${item.id}) — fetch failed (${item.detail ?? "error"})`);
     }
   }
 

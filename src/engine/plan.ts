@@ -71,6 +71,13 @@ export function driftFields(
 export interface ComputePlanOptions {
   /** Logical keys whose managed type has no registry entry — cannot be fetched, so left untouched (not recreated/deleted). */
   unresolved?: ReadonlySet<string>;
+  /**
+   * Logical keys whose actual value could not be fetched (a non-404 error). Mapped
+   * to a short status descriptor (e.g. "500"). These are NOT vanished resources, so
+   * they must be excluded from create/recreate/stale classification and surfaced as
+   * a fetch failure — otherwise a transient 500 reads as "recreate — missing in CT".
+   */
+  fetchFailed?: ReadonlyMap<string, string>;
 }
 
 export function computePlan(
@@ -80,6 +87,7 @@ export function computePlan(
   opts: ComputePlanOptions = {},
 ): Plan {
   const unresolved = opts.unresolved ?? new Set<string>();
+  const fetchFailed = opts.fetchFailed ?? new Map<string, string>();
 
   for (const d of desired) {
     if (!isKnownType(d.type)) {
@@ -124,6 +132,19 @@ export function computePlan(
       });
       continue;
     }
+    if (fetchFailed.has(d.key)) {
+      // Fetch errored (non-404). We can't diff it, and it is NOT gone — do not propose a recreate.
+      updates.push({
+        type: d.type,
+        key: d.key,
+        id: managed.id,
+        action: "no-op",
+        changes: [],
+        note: "fetch-failed",
+        detail: fetchFailed.get(d.key),
+      });
+      continue;
+    }
     const a = actual.get(d.key);
     if (!a) {
       creates.push({
@@ -144,6 +165,8 @@ export function computePlan(
       id: managed.id,
       action: changes.length > 0 ? "update" : "no-op",
       changes,
+      // The fetched actual — the write body is built from this, not the stale state snapshot (#27).
+      actual: a,
       drift: drift.length > 0 ? drift : undefined,
     });
   }
@@ -160,6 +183,19 @@ export function computePlan(
         action: "no-op",
         changes: [],
         note: "unresolved-type",
+      });
+      continue;
+    }
+    if (fetchFailed.has(managed.key)) {
+      // Fetch errored — we can't tell if it is gone, so do not propose a stale-prune.
+      deletes.push({
+        type: managed.type,
+        key: managed.key,
+        id: managed.id,
+        action: "no-op",
+        changes: [],
+        note: "fetch-failed",
+        detail: fetchFailed.get(managed.key),
       });
       continue;
     }

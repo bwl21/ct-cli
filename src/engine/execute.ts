@@ -96,13 +96,20 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         if (id === null) {
           throw new Error("update item has no id");
         }
-        const base = state.resources[item.key]?.fields ?? {};
-        const snapshot = snapshotFromChanges(base, item.changes);
+        // Base the write body on the FETCHED ACTUAL, not the stale state snapshot: a field that
+        // drifted in the CT UI but isn't in `changes` must pass through, never be reverted (#27).
+        // The post-write snapshot (actual ∪ changes) is what CT holds afterward, so state records
+        // exactly that regardless of verb.
+        const actualFields = item.actual ?? state.resources[item.key]?.fields ?? {};
+        const snapshot = snapshotFromChanges(actualFields, item.changes);
         const hasFieldChange = item.changes.some((c) => !isSyntheticField(c.field));
         if (hasFieldChange) {
+          // PATCH resources take only the changed fields (unchanged/drifted siblings are left alone);
+          // PUT resources replace the whole object, so send actual ∪ changes to preserve those siblings.
+          const body = spec.updateMethod === "PATCH" ? snapshotFromChanges({}, item.changes) : snapshot;
           const path = spec.itemPath(id);
           assertNotPeople(path);
-          await client.request(spec.updateMethod, path, snapshot);
+          await client.request(spec.updateMethod, path, body);
         }
         upsert(state, { type: item.type, id, key: item.key, fields: snapshot }, now());
         await save(statePath, state);
