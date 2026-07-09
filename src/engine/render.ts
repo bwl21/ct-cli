@@ -4,6 +4,7 @@
  */
 import pc from "picocolors";
 import { type Plan, type PlanAction, summarize } from "./types.js";
+import { isPendingRef, refLabel } from "../resolve/refs.js";
 
 function sigil(action: PlanAction): string {
   switch (action) {
@@ -19,7 +20,11 @@ function sigil(action: PlanAction): string {
 }
 
 function fmt(value: unknown): string {
-  return value === undefined ? "(none)" : JSON.stringify(value);
+  if (value === undefined) return "(none)";
+  // A pending reference (#20): its target is created in this same apply, so its id is unknown until
+  // then. Render it like the permission scope pending marker instead of a raw sentinel object.
+  if (isPendingRef(value)) return `<${refLabel(value.__pendingRef)} (created this apply)>`;
+  return JSON.stringify(value);
 }
 
 export function renderPlan(plan: Plan): string {

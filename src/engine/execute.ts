@@ -15,6 +15,8 @@ import type { FieldChange, Plan } from "./types.js";
 import { RESOURCES } from "../resources/registry.js";
 import { assertNotPeople } from "./guard.js";
 import { isSyntheticField, syntheticField } from "./synthetic.js";
+import { reresolvePendingValue } from "../resolve/resolver.js";
+import { hasPendingRef } from "../resolve/refs.js";
 
 export interface ExecuteDeps {
   client: Pick<CtClient, "request">;
@@ -56,6 +58,11 @@ async function applySyntheticFields(
 
 export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<ExecuteResult> {
   const { client, state, statePath } = deps;
+  // Re-resolve any pending logical reference (#20) against the current state before a body/snapshot
+  // is used. Tier ordering guarantees a referenced target (e.g. a same-run campus, tier 0) is already
+  // in state by the time its referencer (a group, tier 1) applies. No-op when nothing is pending.
+  const reresolve = (fields: Record<string, unknown>): Record<string, unknown> =>
+    hasPendingRef(fields) ? (reresolvePendingValue(fields, state) as Record<string, unknown>) : fields;
   const now = deps.now ?? (() => new Date().toISOString());
   const save = deps.save ?? saveState;
   const created: string[] = [];
@@ -91,7 +98,7 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
 
     try {
       if (item.action === "create") {
-        const body = snapshotFromChanges({}, item.changes);
+        const body = reresolve(snapshotFromChanges({}, item.changes));
         assertNotPeople(spec.collectionPath);
         const res = await client.request<{ id: number }>("POST", spec.collectionPath, body);
         if (typeof res.id !== "number") {
@@ -117,12 +124,12 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         // The post-write snapshot (actual ∪ changes) is what CT holds afterward, so state records
         // exactly that regardless of verb.
         const actualFields = item.actual ?? state.resources[item.key]?.fields ?? {};
-        const snapshot = snapshotFromChanges(actualFields, item.changes);
+        const snapshot = reresolve(snapshotFromChanges(actualFields, item.changes));
         const hasFieldChange = item.changes.some((c) => !isSyntheticField(c.field));
         if (hasFieldChange) {
           // PATCH resources take only the changed fields (unchanged/drifted siblings are left alone);
           // PUT resources replace the whole object, so send actual ∪ changes to preserve those siblings.
-          const body = spec.updateMethod === "PATCH" ? snapshotFromChanges({}, item.changes) : snapshot;
+          const body = spec.updateMethod === "PATCH" ? reresolve(snapshotFromChanges({}, item.changes)) : snapshot;
           const path = spec.itemPath(id);
           assertNotPeople(path);
           await client.request(spec.updateMethod, path, body);

@@ -12,6 +12,8 @@ import { resolveAuthId } from "./catalog.js";
 import { resolveScope } from "./scope.js";
 import { normalizeActual, diffGrants, type GrantTuple, type GrantDiff, type DomainType, type RawPermission } from "./grants.js";
 import type { DesiredPermission } from "./types.js";
+import { Resolver } from "../resolve/resolver.js";
+import { isPendingRef } from "../resolve/refs.js";
 
 export interface PermissionPlanItem { key: string; domainType: DomainType; domainId: number; diff: GrantDiff }
 
@@ -57,16 +59,67 @@ export function desiredTuples(
   });
 }
 
+/** A permission whose domainId has been resolved from a logical Ref to a concrete numeric id. */
+type ResolvedPermission = DesiredPermission & { domainId: number };
+
+/**
+ * Resolve every permission's domainId to a number (#20). A numeric domainId passes straight through;
+ * a Ref (e.g. `groupType: "…"`) resolves against the live catalog. A domainId that resolves to a
+ * same-run-created resource (PendingRef) is rejected — the permission plan needs a concrete id to
+ * fetch actuals and build the write path, and the permission subsystem does not defer that. A
+ * group_role ref throws its own gated "pass a numeric id" error from the resolver.
+ *
+ * After resolution, the authoritative duplicate-target guard runs on the CONCRETE ids: two different
+ * refs (or a ref and a number) that collide on one (domainType, domainId) would otherwise each diff
+ * against the other's grants and churn forever. Mirrors the eval-time guard in config/context.ts.
+ */
+async function resolveDomainIds(
+  permissions: DesiredPermission[], resolver: Resolver,
+): Promise<ResolvedPermission[]> {
+  const resolved: ResolvedPermission[] = [];
+  for (const p of permissions) {
+    if (typeof p.domainId === "number") {
+      resolved.push(p as ResolvedPermission);
+      continue;
+    }
+    const site = `${p.domainType} "${p.key}".domainId`;
+    const res = await resolver.resolve(p.domainId, site);
+    if (isPendingRef(res)) {
+      throw new Error(
+        `${site}: references a resource created in the same run — apply it first, or use a numeric id.`,
+      );
+    }
+    resolved.push({ ...p, domainId: res });
+  }
+  const seen = new Map<string, string>();
+  for (const p of resolved) {
+    const key = `${p.domainType}:${p.domainId}`;
+    const prev = seen.get(key);
+    if (prev) {
+      throw new Error(
+        `Duplicate permission target after resolution: ${p.domainType} #${p.domainId} is declared by ` +
+          `both "${prev}" and "${p.key}". Merge their grants into one declaration.`,
+      );
+    }
+    seen.set(key, p.key);
+  }
+  return resolved;
+}
+
 export async function buildPermissionPlan(
   client: Pick<CtClient, "get">, state: State, permissions: DesiredPermission[], desired: DesiredResource[] = [],
+  resolver?: Resolver,
 ): Promise<{ items: PermissionPlanItem[]; fetchErrors: string[] }> {
   const items: PermissionPlanItem[] = [];
   const fetchErrors: string[] = [];
+  // Resolve logical domainIds (#20) up front. Shares the command layer's resolver so master-data
+  // catalogs are fetched once across buildPlan + buildPermissionPlan; falls back to a private one.
+  const resolved = await resolveDomainIds(permissions, resolver ?? new Resolver({ client, state, desired }));
   // Keys declared as groups in the config — valid scope targets even before they are created.
   const declaredGroupKeys = new Set(desired.filter((r) => r.type === "group").map((r) => r.key));
   // one bulk fetch per distinct domainType
   const byType = new Map<DomainType, RawPermission[] | null>();
-  for (const dt of new Set(permissions.map((p) => p.domainType))) {
+  for (const dt of new Set(resolved.map((p) => p.domainType))) {
     try {
       byType.set(dt, await client.get<RawPermission[]>(`/permissions/${dt}`));
     } catch (err) {
@@ -75,7 +128,7 @@ export async function buildPermissionPlan(
       byType.set(dt, null);
     }
   }
-  for (const p of permissions) {
+  for (const p of resolved) {
     const all = byType.get(p.domainType);
     if (all == null) continue; // fetch failed for this domainType — recorded above
     const actual = normalizeActual(all.filter((r) => r.domainId === p.domainId));
