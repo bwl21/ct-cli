@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type pcType from "picocolors";
 import { renderPlan } from "../src/engine/render.js";
 
 describe("renderPlan", () => {
@@ -82,5 +83,69 @@ describe("renderPlan", () => {
       ],
     });
     expect(out).toMatch(/recreate/);
+  });
+});
+
+// PR-comment rendering (#24): a plan pasted into a GitHub `<details>` block must read cleanly with
+// no ANSI at all. picocolors decides at MODULE LOAD time whether color is enabled (NO_COLOR /
+// non-TTY / --no-color turn it off) and is externalized by vitest, so flipping `process.env` here
+// cannot re-evaluate it — and the ambient CI env var would force color ON on a runner anyway.
+// Instead, mock it with its own `createColors(false)` — the exact object it exports when NO_COLOR
+// is set — and dynamically re-import render.js against that.
+describe("renderPlan without color support (NO_COLOR / non-TTY, #24)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.doMock("picocolors", async (importOriginal) => {
+      const orig = await importOriginal<{ default: typeof pcType }>();
+      return { default: orig.default.createColors(false) };
+    });
+  });
+
+  afterEach(() => {
+    vi.doUnmock("picocolors");
+    vi.resetModules();
+  });
+
+  it("emits no ANSI escape codes and keeps the +/~/-/! prefixes as the sole signal", async () => {
+    const { renderPlan: renderPlanNoColor } = await import("../src/engine/render.js");
+    const out = renderPlanNoColor({
+      items: [
+        {
+          type: "campus",
+          key: "mainz",
+          id: null,
+          action: "create",
+          changes: [{ field: "name", from: undefined, to: "Mainz" }],
+        },
+        {
+          type: "group",
+          key: "kids",
+          id: 7,
+          action: "update",
+          changes: [{ field: "name", from: "K", to: "Kids" }],
+        },
+        {
+          type: "group",
+          key: "area",
+          id: 3,
+          action: "delete",
+          changes: [],
+        },
+        {
+          type: "campus",
+          key: "drifted",
+          id: 9,
+          action: "no-op",
+          changes: [],
+          drift: [{ field: "shortName", from: "MZ", to: "CHANGED" }],
+        },
+      ],
+    });
+    // eslint-disable-next-line no-control-regex -- asserting the ABSENCE of ANSI escape sequences
+    expect(out).not.toMatch(/\x1b\[/);
+    expect(out).toMatch(/^\s*\+ campus\.mainz/m);
+    expect(out).toMatch(/^\s*~ group\.kids/m);
+    expect(out).toMatch(/^\s*- group\.area/m);
+    expect(out).toMatch(/^\s*! campus\.drifted.*shortName/m);
   });
 });
