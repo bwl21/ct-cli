@@ -136,8 +136,17 @@ export function destroyCommand(): Command {
       const ordered = orderDestroy(state, targets, parentEdges);
 
       // Backup: fetch each target's current actual values via the same fetchActual as plan/apply
-      // (best-effort; 404 → skip, so backup and plan read actuals identically and can't drift).
-      const { actual } = await fetchActual(client, ordered.map((k) => state.resources[k]!));
+      // (404 → skip: already gone in CT, nothing to back up). A non-404 failure must ABORT before
+      // any DELETE — proceeding would irreversibly delete a target with no backup of its state.
+      const { actual, fetchErrors } = await fetchActual(client, ordered.map((k) => state.resources[k]!));
+      if (fetchErrors.length > 0) {
+        error(
+          `Backup fetch failed for: ${fetchErrors.join("; ")}. ` +
+            `Nothing was deleted — resolve the error (or wait out the outage) and re-run.`,
+        );
+        process.exitCode = 1;
+        return;
+      }
       const backupPath = await writeBackup(resolveBackupDir(opts.backupDir, statePath), config.host, actual);
       info(`Backup written: ${backupPath}`);
 

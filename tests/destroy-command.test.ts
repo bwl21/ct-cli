@@ -95,4 +95,46 @@ describe("ct destroy (command level)", () => {
     const after = await loadState(statePath, HOST);
     expect(after.resources).toEqual({});
   });
+
+  it("aborts before any DELETE when a target's backup fetch fails with a non-404", async () => {
+    const state = emptyState(HOST);
+    state.resources.area = group("area", 1);
+    state.resources.kids = group("kids", 2);
+    await saveState(statePath, state);
+
+    const { CtApiError } = await import("../src/api/ctClient.js");
+    getMock.mockImplementation(async (path: string) => {
+      if (path === "/groups/hierarchies") {
+        return [
+          { groupId: 1, parents: [] },
+          { groupId: 2, parents: [1] },
+        ];
+      }
+      if (path === "/groups/2") throw new CtApiError("Server Error", 500, null);
+      return { name: path };
+    });
+    const originalExitCode = process.exitCode;
+
+    try {
+      await runDestroy(["--target", "area,kids", "--state", statePath, "--force"]);
+
+      // The 500 on kids' backup fetch must abort the whole run before any DELETE:
+      // deleting an unbacked-up target is exactly what the pre-destroy backup guards against.
+      expect(requestMock).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+      const after = await loadState(statePath, HOST);
+      expect(Object.keys(after.resources).sort()).toEqual(["area", "kids"]);
+    } finally {
+      process.exitCode = originalExitCode;
+      getMock.mockImplementation(async (path: string) => {
+        if (path === "/groups/hierarchies") {
+          return [
+            { groupId: 1, parents: [] },
+            { groupId: 2, parents: [1] },
+          ];
+        }
+        return { name: path };
+      });
+    }
+  });
 });
