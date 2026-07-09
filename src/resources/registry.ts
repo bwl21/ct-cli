@@ -18,6 +18,12 @@ export interface AdoptableResource {
   deriveKey: (resource: Record<string, unknown>) => string;
   /** The subset of fields we manage — the desired-state baseline. */
   managedFields: (resource: Record<string, unknown>) => Record<string, unknown>;
+  /**
+   * DSL function name `configSnippet` emits for this type. Defaults to the camelCase of
+   * the type name. Set it when the natural camelCase collides with another DSL surface
+   * (e.g. `group-role` → `roleDefinition`, because `groupRole` is the permission function).
+   */
+  dslName?: string;
 }
 
 /** Build a full spec, deriving `itemPath` from the collection path so each entry names its path once. */
@@ -104,6 +110,9 @@ export const RESOURCES: Record<string, AdoptableResource> = {
     updateMethod: "PUT",
     deriveKey: (r) => slug(str(r, "name")),
     managedFields: (r) => ({ name: r.name, nameTranslated: r.nameTranslated, groupTypeId: r.groupTypeId }),
+    // `groupRole` is taken by the permissions DSL (`ct.groupRole` = definePermission("group_role")),
+    // so the master-data role resource declares under a distinct name.
+    dslName: "roleDefinition",
   }),
 };
 
@@ -116,9 +125,18 @@ export function resourceType(type: string): AdoptableResource {
   return entry;
 }
 
-/** Render a config entry as a TS-as-code call, e.g. `campus({ key: "mainz", name: "Mainz" })`. */
+/** Camel-case a hyphenated type name: `group-type` → `groupType`. */
+function camelCase(type: string): string {
+  return type.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
+/**
+ * Render a config entry as a TS-as-code call, e.g. `campus({ key: "mainz", name: "Mainz" })`.
+ * The function name comes from the registry entry's `dslName` (default: camelCase of the type),
+ * so the emitted snippet always names an actual `ConfigContext` function — never a colliding one.
+ */
 export function configSnippet(type: string, key: string, fields: Record<string, unknown>): string {
-  const fn = type.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+  const fn = RESOURCES[type]?.dslName ?? camelCase(type);
   return `${fn}(${tsObject({ key, ...fields })});`;
 }
 

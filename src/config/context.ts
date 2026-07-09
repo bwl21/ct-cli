@@ -50,6 +50,9 @@ export interface ConfigContext {
   ageGroup(input: ResourceInput): void;
   targetGroup(input: ResourceInput): void;
   relationshipType(input: ResourceInput): void;
+  /** Master-data group role (`/group/roles`). Named `roleDefinition` to avoid colliding
+   *  with the `groupRole` permission function below. */
+  roleDefinition(input: ResourceInput): void;
   groupRole(input: PermissionInput): void;
   groupTypeRole(input: PermissionInput): void;
 }
@@ -185,6 +188,7 @@ export function createContext(): {
     ageGroup: define("age-group"),
     targetGroup: define("target-group"),
     relationshipType: define("relationship-type"),
+    roleDefinition: define("group-role"),
     groupRole: definePermission("group_role"),
     groupTypeRole: definePermission("group_type_role"),
   };

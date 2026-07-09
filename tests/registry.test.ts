@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { slug, resourceType, configSnippet, RESOURCES } from "../src/resources/registry.js";
+import { loadConfig } from "../src/config/load.js";
 
 describe("slug", () => {
   it("normalises names to underscore keys", () => {
@@ -61,6 +65,29 @@ describe("configSnippet", () => {
     expect(configSnippet("group", "team", { name: "Team", groupTypeId: undefined })).toBe(
       'group({ key: "team", name: "Team" });',
     );
+  });
+
+  it("emits the master-data role under roleDefinition, not the colliding permission name groupRole", () => {
+    expect(configSnippet("group-role", "leiter", { name: "Leiter", groupTypeId: 2 })).toBe(
+      'roleDefinition({ key: "leiter", name: "Leiter", groupTypeId: 2 });',
+    );
+  });
+});
+
+// Round-trip guarantee: whatever `adopt` prints for any adoptable type must be declarable.
+// Wrapping every registry type's snippet in a config and loading it through the real loader
+// pins the adopt→config contract so a DSL-name collision (issue #31) can't regress silently.
+describe("configSnippet round-trips through the config loader for every adoptable type", () => {
+  it.each(Object.keys(RESOURCES))("%s", async (type) => {
+    const key = `adopted_${type.replace(/-/g, "_")}`;
+    const snippet = configSnippet(type, key, { name: "Round Trip" });
+    const dir = mkdtempSync(join(tmpdir(), "ct-adopt-"));
+    writeFileSync(join(dir, "ct.config.ts"), `export default (ct) => { ct.${snippet} };`);
+
+    const { resources } = await loadConfig(join(dir, "ct.config.ts"));
+    const loaded = resources.find((r) => r.key === key);
+    expect(loaded, `snippet for "${type}" did not load: ${snippet}`).toBeDefined();
+    expect(loaded?.type).toBe(type);
   });
 });
 
