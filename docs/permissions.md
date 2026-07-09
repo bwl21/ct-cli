@@ -82,18 +82,30 @@ The two DSL functions manage two different ChurchTools "domain types," and
 
 A scoped grant's `scope: [...]` is a list of **logical keys of groups managed
 by this tool** (declared via `ct.group` or adopted into state) — not raw
-ChurchTools ids. At plan time each key is resolved to that group's `dataId`
-via the state file; a key that isn't a managed group throws:
+ChurchTools ids. Each key is resolved against **desired ∪ state**
+(`src/permissions/scope.ts`):
 
-```
-Scope key "kids_area" does not resolve to a managed group. Declare/adopt it,
-or use a group already under management.
-```
+- A key already in state resolves to that group's `dataId`.
+- A key **declared in this config but not yet created** resolves to a *pending*
+  target: the plan renders it as `scope=[<key> (created this apply)]`, and its
+  real `dataId` is filled in at apply time — so a config can declare a group AND
+  a grant scoped to it and still plan/apply in one run (no bootstrap deadlock).
+- A key that is neither in state nor declared throws:
 
-This is a deliberate constraint (see `src/permissions/scope.ts`): scope
-targets must be tool-visible so `ct plan` can show what a grant actually
-resolves to, and so renaming/re-keying a group doesn't silently orphan a
-grant's scope.
+  ```
+  Scope key "kids_area" does not resolve to a managed group. Declare/adopt it,
+  or use a group already under management.
+  ```
+
+The requirement that scope targets be tool-visible is deliberate: so `ct plan`
+can show what a grant resolves to, and so renaming/re-keying a group doesn't
+silently orphan a grant's scope.
+
+**Re-resolution at apply time.** Every scoped tuple retains its symbolic scope
+key. Immediately before grants are written (after the resource tier has run),
+each key is re-resolved against the post-execute state. This means a group
+*created* or *recreated* in the same apply always gets its grant written with
+its fresh `dataId`, never a pending placeholder or a stale, dangling id.
 
 ## Domain rules (validated, throw on violation)
 

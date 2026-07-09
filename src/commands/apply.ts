@@ -97,7 +97,7 @@ export function applyCommand(): Command {
 
       const { client } = await authedSession();
       const { plan, actual, fetchErrors } = await buildPlan(client, state, desired, { configDir });
-      const { items: permItems, fetchErrors: permFetchErrors } = await buildPermissionPlan(client, state, permissions);
+      const { items: permItems, fetchErrors: permFetchErrors } = await buildPermissionPlan(client, state, permissions, desired);
 
       const allFetchErrors = [...fetchErrors, ...permFetchErrors];
       if (allFetchErrors.length > 0) {
@@ -156,7 +156,9 @@ export function applyCommand(): Command {
         return;
       }
 
-      const permResult = await applyPermissionPlan(permItems, client);
+      // Re-resolve scope dataIds against the POST-execute state (executePlan has upserted every
+      // created/recreated group's real id) so grants are never written with a stale/pending id.
+      const permResult = await applyPermissionPlan(permItems, client, state);
       if (permResult.granted > 0 || permResult.deleted > 0) {
         success(`Permissions applied: ${permResult.granted} granted, ${permResult.deleted} deleted.`);
       }

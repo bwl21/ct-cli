@@ -7,6 +7,7 @@
 import type { CtClient } from "../api/ctClient.js";
 import { CtApiError } from "../api/ctClient.js";
 import type { State } from "../state/state.js";
+import type { DesiredResource } from "../engine/types.js";
 import { resolveAuthId } from "./catalog.js";
 import { resolveScope } from "./scope.js";
 import { normalizeActual, diffGrants, type GrantTuple, type GrantDiff, type DomainType, type RawPermission } from "./grants.js";
@@ -21,8 +22,12 @@ export interface PermissionPlanItem { key: string; domainType: DomainType; domai
  * scalar read shape, a scoped grant `{right, scope:[a,b]}` becomes TWO single-dataId tuples,
  * not one two-element tuple.
  */
-export function desiredTuples(p: DesiredPermission, state: State): GrantTuple[] {
-  return p.grants.flatMap((g) => {
+export function desiredTuples(
+  p: DesiredPermission,
+  state: State,
+  declaredGroupKeys: ReadonlySet<string> = new Set(),
+): GrantTuple[] {
+  return p.grants.flatMap((g): GrantTuple[] => {
     const name = typeof g === "string" ? g : g.right;
     const entry = resolveAuthId(name);
     if (p.domainType === "group_type_role" && entry.authId >= 10000) {
@@ -41,15 +46,24 @@ export function desiredTuples(p: DesiredPermission, state: State): GrantTuple[] 
     if (entry.scopeField == null) {
       throw new Error(`${p.domainType} "${p.key}": "${name}" is not a scoped right (no scopeField) — remove "scope" or use a scoped right.`);
     }
-    return resolveScope(g.scope, state).map((id) => ({ authId: entry.authId, dataId: [id], type: "grant" as const }));
+    // Retain the symbolic scopeKey on every scoped tuple so its dataId is re-resolved against
+    // post-execute state at apply time. `id === null` means the group is declared but not yet
+    // created (pending); it renders in the plan and always diffs into toPut (#29, #33.3).
+    return resolveScope(g.scope, state, declaredGroupKeys).map(({ key, id }) =>
+      id === null
+        ? { authId: entry.authId, dataId: [], type: "grant" as const, scopeKey: key, pending: true }
+        : { authId: entry.authId, dataId: [id], type: "grant" as const, scopeKey: key },
+    );
   });
 }
 
 export async function buildPermissionPlan(
-  client: Pick<CtClient, "get">, state: State, permissions: DesiredPermission[],
+  client: Pick<CtClient, "get">, state: State, permissions: DesiredPermission[], desired: DesiredResource[] = [],
 ): Promise<{ items: PermissionPlanItem[]; fetchErrors: string[] }> {
   const items: PermissionPlanItem[] = [];
   const fetchErrors: string[] = [];
+  // Keys declared as groups in the config — valid scope targets even before they are created.
+  const declaredGroupKeys = new Set(desired.filter((r) => r.type === "group").map((r) => r.key));
   // one bulk fetch per distinct domainType
   const byType = new Map<DomainType, RawPermission[] | null>();
   for (const dt of new Set(permissions.map((p) => p.domainType))) {
@@ -65,7 +79,7 @@ export async function buildPermissionPlan(
     const all = byType.get(p.domainType);
     if (all == null) continue; // fetch failed for this domainType — recorded above
     const actual = normalizeActual(all.filter((r) => r.domainId === p.domainId));
-    items.push({ key: p.key, domainType: p.domainType, domainId: p.domainId, diff: diffGrants(desiredTuples(p, state), actual) });
+    items.push({ key: p.key, domainType: p.domainType, domainId: p.domainId, diff: diffGrants(desiredTuples(p, state, declaredGroupKeys), actual) });
   }
   return { items, fetchErrors };
 }

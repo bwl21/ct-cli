@@ -32,7 +32,7 @@ export function planCommand(): Command {
 
       const { client } = await authedSession();
       const { plan, fetchErrors } = await buildPlan(client, state, desired, { configDir });
-      const { items: permItems, fetchErrors: permFetchErrors } = await buildPermissionPlan(client, state, permissions);
+      const { items: permItems, fetchErrors: permFetchErrors } = await buildPermissionPlan(client, state, permissions, desired);
       if (opts.json) {
         out({ plan, permissions: permItems });
       } else {

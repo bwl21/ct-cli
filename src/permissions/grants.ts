@@ -5,14 +5,39 @@
  */
 export type DomainType = "group_role" | "group_type_role";
 
-export interface GrantTuple { authId: number; dataId: number[]; type: "grant" | "revoke" }
+export interface GrantTuple {
+  authId: number;
+  dataId: number[];
+  type: "grant" | "revoke";
+  /**
+   * For a scoped grant: the symbolic scope key this tuple was resolved from. Retained so the
+   * dataId can be RE-RESOLVED against post-execute state at apply time — which fixes both a grant
+   * scoped to a group created in the same apply (its dataId is `pending` at plan time) and a stale
+   * dataId after a scope-target group is recreated (#29, #33.3). Absent on unscoped grants and on
+   * actual tuples read back from ChurchTools.
+   */
+  scopeKey?: string;
+  /**
+   * True when `scopeKey` names a group DECLARED in this config but not yet created (absent from
+   * state at plan time). Its real dataId is unknown until `executePlan` runs, so the plan renders
+   * it as pending and it always diffs into `toPut`. Cleared once re-resolved at apply time.
+   */
+  pending?: boolean;
+}
 export interface RawPermission {
   authId: number; dataId: number | null; type: "grant" | "revoke"; domainId: number;
   isInherited?: boolean; meta?: { modifiedPid?: number };
 }
 
-export function tupleKey(t: { authId: number; dataId: number[]; type: string }): string {
-  return `${t.type}:${t.authId}:${[...t.dataId].sort((a, b) => a - b).join(",")}`;
+/**
+ * Identity key for set reconciliation. A pending tuple has no resolved dataId yet, so key it by
+ * its symbolic scope key instead — that keeps it distinct from an unscoped grant (`dataId: []`)
+ * and guarantees it can never collide with an actual row (actuals never carry a scopeKey), so it
+ * always lands in `toPut`.
+ */
+export function tupleKey(t: { authId: number; dataId: number[]; type: string; scopeKey?: string; pending?: boolean }): string {
+  const scope = t.pending && t.scopeKey != null ? `pending:${t.scopeKey}` : [...t.dataId].sort((a, b) => a - b).join(",");
+  return `${t.type}:${t.authId}:${scope}`;
 }
 
 export function normalizeActual(rows: RawPermission[]): GrantTuple[] {

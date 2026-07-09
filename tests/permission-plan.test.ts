@@ -16,7 +16,7 @@ describe("desiredTuples", () => {
       ]}, state);
     expect(tuples).toEqual([
       { authId: 1113, dataId: [], type: "grant" },
-      { authId: 1104, dataId: [42], type: "grant" },
+      { authId: 1104, dataId: [42], type: "grant", scopeKey: "kids_area" }, // scoped tuples retain their symbolic key for re-resolution
     ]);
   });
 
@@ -39,8 +39,8 @@ describe("desiredTuples", () => {
       ]}, state);
     // resolveScope sorts resolved dataIds ascending (7 < 42), independent of scope-key order.
     expect(tuples).toEqual([
-      { authId: 1104, dataId: [7], type: "grant" },
-      { authId: 1104, dataId: [42], type: "grant" },
+      { authId: 1104, dataId: [7], type: "grant", scopeKey: "other" },
+      { authId: 1104, dataId: [42], type: "grant", scopeKey: "kids_area" },
     ]);
     expect(tuples.every((t) => t.dataId.length <= 1)).toBe(true);
   });

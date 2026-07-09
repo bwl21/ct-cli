@@ -7,7 +7,12 @@ import type { PermissionPlanItem } from "./plan.js";
 import type { GrantTuple } from "./grants.js";
 
 function fmtTuple(t: GrantTuple): string {
-  const scope = t.dataId.length ? ` scope=[${t.dataId.join(",")}]` : "";
+  let scope = "";
+  if (t.pending && t.scopeKey != null) {
+    scope = ` scope=[${t.scopeKey} (created this apply)]`;
+  } else if (t.dataId.length) {
+    scope = ` scope=[${t.dataId.join(",")}]`;
+  }
   return `authId=${t.authId}${scope} (${t.type})`;
 }
 
