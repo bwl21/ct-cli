@@ -63,3 +63,21 @@ No collection POST; state is set/removed through PUT/DELETE on the item path. Mo
 ### Version gate
 
 The installation reports **CT `3.123.0`** via `/info`, so every write endpoint above is available and the v3.96+ hierarchy/metadata requirement is satisfied. Recommend the CLI call `GET /info` on startup and hard-fail below `3.96.0`.
+
+## Addendum — field definitions & security levels (#47, #48)
+
+Not part of the Phase 0 structural matrix above; audited separately for the
+field-definition schema surface. **Caveat:** unlike the Phase 0 matrix (audited
+against a live `openapi.json`), these were verified against ChurchTools' public
+API-client libraries (5pm-HDH `churchtools-api` @ CT 3.104, bensteUEM
+`ChurchToolsAPI` @ CT 3.101) and CT Academy docs, because this repo's generated
+`src/api/schema.d.ts` is git-ignored and was not available offline. Re-verify per
+the runbook's re-audit procedure once the schema is regenerated.
+
+| Resource                          | Matched path(s)                | GET               | POST/PUT/PATCH/DELETE | Verdict                                                                                                                                                        |
+| --------------------------------- | ------------------------------ | ----------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Person master-data model          | `/person/masterdata`           | ✅ (single object) | ❌                    | **Read-only.** Versionable master-data model incl. the `securityLevels` enumeration. No write endpoint (edited in the CT master-data admin UI).                |
+| Data-field definitions (Datenfelder) | `/dbfields`, `/dbfields/{id}` | list ✅ / by-id ✅ | ❌                    | **Read-only.** Unified person + group field definitions, discriminated by `fieldCategory`. Mutation only via legacy churchdb AJAX (`db_insert/update/deletefields`), not REST. |
+
+See [`docs/field-definitions.md`](field-definitions.md) for the full writability
+decision, evidence, and the schema/values boundary.

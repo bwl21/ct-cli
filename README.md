@@ -41,6 +41,13 @@ Early scaffold. See the [epic (#1)](https://github.com/eqrm/ct-cli/issues/1) and
   [`docs/runbook-manual-surface.md`](docs/runbook-manual-surface.md), so instance
   bootstrap ([#23](https://github.com/eqrm/ct-cli/issues/23)) can scope
   "selective adoption" deliberately.
+- 📖 **Field definitions & security levels** ([#47](https://github.com/eqrm/ct-cli/issues/47),
+  [#48](https://github.com/eqrm/ct-cli/issues/48)): the person master-data model,
+  security levels, and person/group custom-field DEFINITIONS ("Datenfelder") are
+  readable (`ct get person-masterdata`, `ct get data-fields`) — schema in scope,
+  per-record field **values** never. Definitions are read-only (no REST write
+  endpoint); the boundary + writability evidence is in
+  [`docs/field-definitions.md`](docs/field-definitions.md).
 
 ## Requirements
 
@@ -102,6 +109,8 @@ ct auth status                                  # who am I?
 ct get campuses            # JSON to stdout — pipe into jq
 ct get groups
 ct get group-types
+ct get person-masterdata   # person master-data model incl. security levels (schema, read-only)
+ct get data-fields         # field DEFINITIONS: person + group custom fields (schema, read-only)
 ct get raw /groups/42      # arbitrary GET
 
 ct adopt campus 0          # bring an existing resource under management (→ state file)

@@ -61,6 +61,41 @@ describe("ct get (#50)", () => {
     writeSpy.mockRestore();
   });
 
+  it("reads person master-data (incl. the security-level model) as a single object via plain get (#47)", async () => {
+    // `/person/masterdata` is the versionable person master-data model (sexes, statuses,
+    // campuses, and the security-level enumeration the churchdb permission scopes reference).
+    // It is a single object, not a paged list — so it must use the unpaginated path.
+    getMock.mockResolvedValue({ securityLevels: [{ id: 1, name: "Öffentlich" }], sexes: [] });
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    await runGet(["person-masterdata"]);
+
+    expect(getMock).toHaveBeenCalledWith("/person/masterdata");
+    expect(getAllMock).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+  });
+
+  it("reads the unified data-field definitions (person + group Datenfelder) via getAll (#47/#48)", async () => {
+    // `/dbfields` is the unified field-DEFINITION catalog: person master-data fields AND group
+    // custom fields, discriminated by each field's `fieldCategory` (e.g. table `cdb_gruppe` for
+    // group fields). List-shaped, so it auto-paginates. Field VALUES on records are never read.
+    getAllMock.mockResolvedValue({
+      data: [
+        { id: 5, name: "first_contact", securityLevel: 1, fieldCategory: { internCode: "f_person" } },
+        { id: 9, name: "bezeichnung", securityLevel: 2, fieldCategory: { internCode: "f_group", table: "cdb_gruppe" } },
+      ],
+      meta: { pagination: { total: 2, current: 1, lastPage: 1, limit: 100 } },
+    });
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    await runGet(["data-fields"]);
+
+    expect(getAllMock.mock.calls[0]?.[0]).toBe("/dbfields");
+    const printed = JSON.parse(writeSpy.mock.calls[0]?.[0] as string) as unknown[];
+    expect(printed).toHaveLength(2);
+    writeSpy.mockRestore();
+  });
+
   it("propagates a raw call's CtApiError (status + body) instead of swallowing it", async () => {
     getMock.mockRejectedValue(
       new CtApiError("GET /groups?limit=500 failed", 400, { errors: ["limit exceeds max of 100"] }),
