@@ -111,7 +111,7 @@ jobs:
 
   smoke-darwin-x64:
     needs: build
-    runs-on: macos-13 # Intel
+    runs-on: macos-15 # Apple Silicon; executes the x64 binary via Rosetta 2 (macos-13 Intel runners are retired and queue forever)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
