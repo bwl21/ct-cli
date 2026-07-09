@@ -6,6 +6,7 @@ import { resourceType, configSnippet } from "../resources/registry.js";
 import { loadState, saveState, upsert } from "../state/state.js";
 import { success, info, warn, out } from "../ui.js";
 import { adoptGrantsCommand } from "./adopt-grants.js";
+import { adoptGroupCommand } from "./adopt-group.js";
 
 interface AdoptOptions {
   key?: string;
@@ -69,5 +70,9 @@ export function adoptCommand(): Command {
   // prints a config block only and never writes state. Commander matches the "grants" subcommand
   // name before falling through to the `<type> <id>` action above.
   cmd.addCommand(adoptGrantsCommand());
+  // `ct adopt group ...` — bulk/filtered adoption (--type, --children-of, multiple ids) and
+  // --with-dynamic ruleset capture (#51). Named subcommand, so it also handles the plain single-id
+  // `ct adopt group <id>` case (Commander matches it before the generic `<type> <id>` action above).
+  cmd.addCommand(adoptGroupCommand());
   return cmd;
 }

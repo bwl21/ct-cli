@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createContext, evaluateConfig, type ConfigContext } from "../src/config/context.js";
 import { isKnownType } from "../src/engine/graph.js";
 import { RESOURCES } from "../src/resources/registry.js";
@@ -156,9 +156,10 @@ describe("config context", () => {
     const camel = (t: string): string => t.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
     for (const [type, spec] of Object.entries(RESOURCES)) {
       const fn = spec.dslName ?? camel(type);
-      expect(typeof (ct as unknown as Record<string, unknown>)[fn], `registry type "${type}" expects ct.${fn}()`).toBe(
-        "function",
-      );
+      expect(
+        typeof (ct as unknown as Record<string, unknown>)[fn],
+        `registry type "${type}" expects ct.${fn}()`,
+      ).toBe("function");
     }
   });
 
@@ -167,7 +168,11 @@ describe("config context", () => {
     ct.roleDefinition({ key: "leiter", name: "Leiter", groupTypeId: 2 });
     expect(permissions).toEqual([]); // roleDefinition is a resource, never a permission grant
     expect(resources).toEqual([
-      expect.objectContaining({ type: "group-role", key: "leiter", fields: { name: "Leiter", groupTypeId: 2 } }),
+      expect.objectContaining({
+        type: "group-role",
+        key: "leiter",
+        fields: { name: "Leiter", groupTypeId: 2 },
+      }),
     ]);
     expect(isKnownType(resources[0]!.type)).toBe(true); // has an apply tier → plannable
   });
@@ -193,15 +198,18 @@ describe("dynamic block", () => {
       dynamic: { status: "manual", ruleset: { description: "x", method: "ChurchQuery", params: {} } },
     });
     const g = resources.find((r) => r.key === "all_mainz")!;
-    expect(g.dynamic).toEqual({ status: "manual", ruleset: { description: "x", method: "ChurchQuery", params: {} } });
+    expect(g.dynamic).toEqual({
+      status: "manual",
+      ruleset: { description: "x", method: "ChurchQuery", params: {} },
+    });
     expect(g.fields).not.toHaveProperty("dynamic"); // never a plain diffed field
   });
 
   it("rejects an invalid status", async () => {
     const { ct } = createContext();
-    expect(() => ct.group({ key: "g", name: "G", dynamic: { status: "bogus", ruleset: {} } as never })).toThrow(
-      /dynamic.*status/i,
-    );
+    expect(() =>
+      ct.group({ key: "g", name: "G", dynamic: { status: "bogus", ruleset: {} } as never }),
+    ).toThrow(/dynamic.*status/i);
   });
 
   it("rejects dynamic on a non-group", async () => {
@@ -213,8 +221,49 @@ describe("dynamic block", () => {
 
   it("rejects a null dynamic block with a clean error", async () => {
     const { ct } = createContext();
-    expect(() => ct.group({ key: "g", name: "G", dynamic: null } as never))
-      .toThrow(/dynamic/i);
+    expect(() => ct.group({ key: "g", name: "G", dynamic: null } as never)).toThrow(/dynamic/i);
+  });
+});
+
+describe("unknown-field warning (#51)", () => {
+  it("warns naming the resource key and the unknown field, but still keeps it in fields", () => {
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const { ct, resources } = createContext();
+      ct.campus({ key: "mainz", name: "Mainz", shortName: "MZ" }); // the seeded-config bug: shorty is the real field
+      expect(resources[0]?.fields).toEqual({ name: "Mainz", shortName: "MZ" });
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0]![0])).toContain('campus "mainz": unknown field "shortName" (ignored)');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("does not warn for any recognised field, including sugared id fields and fields read via fromInformation", () => {
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const { ct } = createContext();
+      ct.campus({ key: "mainz", name: "Mainz", shorty: "MZ" });
+      ct.group({ key: "g", name: "G", groupTypeId: 2, groupStatusId: 1, campusId: 4 });
+      ct.group({ key: "g2", name: "G2", campus: "mainz", groupType: "x", status: "active" });
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("warns once per unknown field, naming each one", () => {
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const { ct } = createContext();
+      ct.group({ key: "g", name: "G", bogus1: 1, bogus2: 2 } as never);
+      expect(spy).toHaveBeenCalledTimes(2);
+      const messages = spy.mock.calls.map((c) => String(c[0]));
+      expect(messages.some((m) => m.includes('unknown field "bogus1" (ignored)'))).toBe(true);
+      expect(messages.some((m) => m.includes('unknown field "bogus2" (ignored)'))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
@@ -239,10 +288,11 @@ describe("preventDestroy lifecycle flag", () => {
 describe("permission declarations", () => {
   it("collects groupRole / groupTypeRole with validated grants", async () => {
     const mod = (ct: ConfigContext) => {
-      ct.groupTypeRole({ key: "leiter_tpl", id: 8, grants: [
-        "churchgroup:view group",
-        { right: "churchdb:view group", scope: ["kids_area"] },
-      ]});
+      ct.groupTypeRole({
+        key: "leiter_tpl",
+        id: 8,
+        grants: ["churchgroup:view group", { right: "churchdb:view group", scope: ["kids_area"] }],
+      });
       ct.groupRole({ key: "kids_lead", id: 2882, grants: ["churchgroup:edit group members"] });
     };
     const { permissions } = await evaluateConfig(mod); // evaluateConfig now returns {resources, permissions}
@@ -267,10 +317,14 @@ describe("permission declarations", () => {
 
   it("accepts a raw numeric scope entry alongside logical group keys (#49 escape hatch)", async () => {
     const { permissions } = await evaluateConfig((ct: ConfigContext) => {
-      ct.groupTypeRole({ key: "leiter_tpl", id: 8, grants: [
-        { right: "churchdb:view comments", scope: [1, 2, 3] },
-        { right: "churchdb:view group", scope: ["kids_area", 5] },
-      ]});
+      ct.groupTypeRole({
+        key: "leiter_tpl",
+        id: 8,
+        grants: [
+          { right: "churchdb:view comments", scope: [1, 2, 3] },
+          { right: "churchdb:view group", scope: ["kids_area", 5] },
+        ],
+      });
     });
     expect(permissions[0]!.grants).toEqual([
       { right: "churchdb:view comments", scope: [1, 2, 3] },
@@ -281,7 +335,11 @@ describe("permission declarations", () => {
   it("rejects a scope array with a non-string/non-number entry", async () => {
     await expect(
       evaluateConfig((ct: ConfigContext) =>
-        ct.groupTypeRole({ key: "x", id: 8, grants: [{ right: "churchdb:view comments", scope: [null] }] } as never),
+        ct.groupTypeRole({
+          key: "x",
+          id: 8,
+          grants: [{ right: "churchdb:view comments", scope: [null] }],
+        } as never),
       ),
     ).rejects.toThrow(/scope/i);
   });
@@ -314,7 +372,12 @@ describe("permission declarations", () => {
     const { permissions } = await evaluateConfig((ct: ConfigContext) =>
       ct.groupRole({ key: "p", group: "kids", role: "Leiter", grants: ["churchgroup:view group"] }),
     );
-    expect(permissions[0]?.domainId).toEqual({ __ctRef: true, kind: "group-role", group: "kids", role: "Leiter" });
+    expect(permissions[0]?.domainId).toEqual({
+      __ctRef: true,
+      kind: "group-role",
+      group: "kids",
+      role: "Leiter",
+    });
   });
 
   it("rejects declaring both a numeric id and a logical domain form", async () => {

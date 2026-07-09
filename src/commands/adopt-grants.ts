@@ -29,12 +29,22 @@ function normalizeDomainType(raw: string): DomainType {
  */
 export function adoptGrantsCommand(): Command {
   return new Command("grants")
-    .description("Print a paste-ready grants config block from a live domain's permission rows (does not write state)")
+    .description(
+      "Print a paste-ready grants config block from a live domain's permission rows (does not write state)",
+    )
     .argument("<domainType>", "group_role | group_type_role")
     .argument("<domainId>", "the domainId of the permission domain object")
-    .option("-s, --state <path>", "state file path (or set CT_STATE) — used to resolve scope group ids to keys")
+    .option(
+      "-s, --state <path>",
+      "state file path (or set CT_STATE) — used to resolve scope group ids to keys",
+    )
     .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
-    .action(async (rawType: string, rawId: string, opts: AdoptGrantsOptions) => {
+    .action(async (rawType: string, rawId: string, _localOpts: AdoptGrantsOptions, command: Command) => {
+      // `adopt` (the parent) also declares `-s/--state` and `-e/--env` for its own `<type> <id>`
+      // action. Commander does not merge a same-named parent+subcommand option into either level's
+      // plain `.opts()` (both come up empty for it); only `optsWithGlobals()` walks the whole
+      // command chain and merges correctly — read from there, not the local `opts` parameter (#51).
+      const opts = command.optsWithGlobals() as AdoptGrantsOptions;
       const domainType = normalizeDomainType(rawType);
       if (!/^\d+$/.test(rawId.trim())) {
         throw new Error(`Invalid domainId "${rawId}" — expected a non-negative integer.`);
