@@ -92,7 +92,7 @@ export function computePlan(
   for (const d of desired) {
     if (!isKnownType(d.type)) {
       throw new Error(
-        `Unknown resource type "${d.type}" for "${d.key}" — no apply tier defined. Add it to TYPE_TIER.`,
+        `Unknown resource type "${d.type}" for "${d.key}" — no apply tier defined. Add a registry entry in src/resources/registry.ts.`,
       );
     }
   }

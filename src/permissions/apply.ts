@@ -64,6 +64,9 @@ export async function applyPermissionPlan(
   state?: State,
 ): Promise<PermissionApplyResult> {
   const ops: WriteOp[] = [];
+  // Concurrent writes are race-free only because evaluateConfig rejects two declarations targeting
+  // the same (domainType, domainId) — so all ops for a path come from ONE item's disjoint diff.
+  // Programmatic callers bypassing evaluateConfig must uphold that invariant themselves.
   for (const item of items) {
     const path = `/permissions/${item.domainType}/${item.domainId}`;
     assertNotPeople(path);
