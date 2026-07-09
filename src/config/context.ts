@@ -77,10 +77,20 @@ function relocate(err: unknown, location: string | undefined): unknown {
   return err;
 }
 
+/**
+ * A group's `dynamic` (auto-group) declaration (#52 item B). Three interchangeable forms:
+ *  - `true` — dynamic with `status: "active"` and the conventional `./rulesets/<key>.json` ruleset ref.
+ *  - `"<path>.json"` — dynamic with `status: "active"` and an explicit ruleset-file ref.
+ *  - `{ status, ruleset }` — the explicit form (a RuleSet object, a `{ ref }`, or a typed-query build).
+ */
+export type DynamicInput = boolean | string | { status: DynamicStatus; ruleset: unknown };
+
 export interface ResourceInput {
   key: string;
   /** Ordering hint: apply this resource after `parent`. A dependency edge only — NOT managed hierarchy. */
   parent?: string;
+  /** Auto-group config (opt-in; omit for a plain group). Only valid on `ct.group(...)`. See {@link DynamicInput}. */
+  dynamic?: DynamicInput;
   /**
    * Managed parent groups (group→group hierarchy). Opt-in: omit to leave a group's hierarchy
    * unmanaged; `[]` means "managed with no parents". Each key must reference a group declared
@@ -179,6 +189,50 @@ export interface ConfigContext {
 
 export type ConfigModule = (ct: ConfigContext) => void | Promise<void>;
 
+/**
+ * Convention for the sugared ruleset path when `dynamic: true` — the same `rulesets/<key>.json`
+ * layout `ct adopt group --with-dynamic` writes to, so an adopted dynamic group round-trips to the
+ * shortest form. Kept in sync with the emitter in registry.ts.
+ */
+export function conventionalRulesetRef(key: string): string {
+  return `./rulesets/${key}.json`;
+}
+
+/**
+ * Eval-time desugaring of a group's `dynamic` field (#52 item B) — the engine is untouched; every
+ * form collapses to the same {@link DynamicSpec}. Three authoring forms:
+ *  - `dynamic: true`            → `{ status: "active", ruleset: { ref: "./rulesets/<key>.json" } }`
+ *  - `dynamic: "<path>.json"`   → `{ status: "active", ruleset: { ref: "<path>" } }`
+ *  - `dynamic: { status, ruleset }` (explicit) — validated as before.
+ * Returns `undefined` for `undefined` (opt-in: not a dynamic group). Anything else throws.
+ */
+function desugarDynamic(type: string, key: string, dynamic: unknown): DynamicSpec | undefined {
+  if (dynamic === undefined) return undefined;
+  if (type !== "group") throw new Error(`${type} "${key}": "dynamic" is only valid on a group.`);
+  if (dynamic === true) {
+    return { status: "active", ruleset: { ref: conventionalRulesetRef(key) } };
+  }
+  if (typeof dynamic === "string") {
+    if (!dynamic.endsWith(".json"))
+      throw new Error(
+        `group "${key}": "dynamic" as a string must be a path to a .json ruleset file ` +
+          `(e.g. "./rulesets/${key}.json"), got ${JSON.stringify(dynamic)}.`,
+      );
+    return { status: "active", ruleset: { ref: dynamic } };
+  }
+  if (dynamic === null || typeof dynamic !== "object") {
+    throw new Error(
+      `group "${key}": "dynamic" must be true, a "<path>.json" string, or an object with { status, ruleset }.`,
+    );
+  }
+  const d = dynamic as Record<string, unknown>;
+  if (!DYNAMIC_STATUSES.includes(d.status as DynamicStatus))
+    throw new Error(`group "${key}": "dynamic.status" must be one of ${DYNAMIC_STATUSES.join(", ")}.`);
+  if (d.ruleset == null || typeof d.ruleset !== "object")
+    throw new Error(`group "${key}": "dynamic.ruleset" must be a RuleSet object or a { ref } reference.`);
+  return { status: d.status as DynamicStatus, ruleset: d.ruleset };
+}
+
 function toDesired(type: string, input: ResourceInput, location?: string): DesiredResource {
   const { key, parent, parents, dependsOn = [], preventDestroy, dynamic, ...fields } = input;
   if (!key || typeof key !== "string") {
@@ -237,19 +291,7 @@ function toDesired(type: string, input: ResourceInput, location?: string): Desir
   }
   // `dynamic` is a synthetic field for auto-groups, handled separately from the plain diffed
   // field bag. Opt-in: `undefined` means "not a dynamic group" (mirrors `parents`).
-  let dynamicSpec: DynamicSpec | undefined;
-  if (dynamic !== undefined) {
-    if (type !== "group") throw new Error(`${type} "${key}": "dynamic" is only valid on a group.`);
-    if (dynamic == null || typeof dynamic !== "object") {
-      throw new Error(`group "${key}": "dynamic" must be an object with { status, ruleset }.`);
-    }
-    const d = dynamic as Record<string, unknown>;
-    if (!DYNAMIC_STATUSES.includes(d.status as DynamicStatus))
-      throw new Error(`group "${key}": "dynamic.status" must be one of ${DYNAMIC_STATUSES.join(", ")}.`);
-    if (d.ruleset == null || typeof d.ruleset !== "object")
-      throw new Error(`group "${key}": "dynamic.ruleset" must be a RuleSet object or a { ref } reference.`);
-    dynamicSpec = { status: d.status as DynamicStatus, ruleset: d.ruleset };
-  }
+  const dynamicSpec = desugarDynamic(type, key, dynamic);
   // `parent` is an ordering hint only — a dependency edge, never a diffed/managed field
   // (its pre-hierarchy meaning; a `parent` may point at a campus). Group hierarchy is
   // managed opt-in via `parents`: `undefined` → unmanaged, `[]` → managed with no parents.
