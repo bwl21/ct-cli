@@ -35,7 +35,7 @@ describe("computePlan", () => {
     const plan = computePlan([desired("mainz", { name: "Mainz" })], stateOf(), new Map());
     expect(plan.items).toHaveLength(1);
     expect(plan.items[0]).toMatchObject({ action: "create", key: "mainz", id: null });
-    expect(plan.items[0]?.changes).toEqual([{ field: "name", from: undefined, to: "Mainz" }]);
+    expect(plan.items[0]?.changes).toEqual([{ field: "name", from: undefined, to: "Mainz", source: "config" }]);
   });
 
   it("is a no-op when desired matches actual (id 0 handled)", () => {
@@ -94,7 +94,7 @@ describe("computePlan", () => {
       actualOf({ mainz: { name: "Mainz", shortName: "MZ" } }),
     );
     expect(plan.items[0]).toMatchObject({ action: "update", id: 5 });
-    expect(plan.items[0]?.changes).toEqual([{ field: "name", from: "Mainz", to: "Mainz HQ" }]);
+    expect(plan.items[0]?.changes).toEqual([{ field: "name", from: "Mainz", to: "Mainz HQ", source: "config" }]);
   });
 
   it("does not flag a mere object-key-order difference as a change", () => {
@@ -177,6 +177,79 @@ describe("computePlan", () => {
   });
 });
 
+// Per-field attribution (#24): a JSON consumer needs to tell "this diff exists because the
+// config changed" apart from "this diff exists because someone edited ChurchTools manually"
+// apart from "both happened, independently". Computed from the SAME three values already
+// available (last-known state snapshot, desired config, fetched actual) — no new fetch.
+describe("changes[].source attribution (#24)", () => {
+  it("tags a plain config change as \"config\" (ChurchTools still matches the last-known snapshot)", () => {
+    const plan = computePlan(
+      [desired("mainz", { name: "Mainz HQ" })],
+      stateOf(managed("mainz", 5, { name: "Mainz" })),
+      actualOf({ mainz: { name: "Mainz" } }), // actual == last-known → no drift on this field
+    );
+    expect(plan.items[0]?.changes).toEqual([
+      { field: "name", from: "Mainz", to: "Mainz HQ", source: "config" },
+    ]);
+  });
+
+  it("tags a pure manual edit as \"drift\" (config unchanged, ChurchTools moved)", () => {
+    const plan = computePlan(
+      [desired("mainz", { name: "Mainz" })], // config still says the last-known value
+      stateOf(managed("mainz", 5, { name: "Mainz" })),
+      actualOf({ mainz: { name: "Changed In CT" } }), // manually edited since adoption
+    );
+    expect(plan.items[0]?.changes).toEqual([
+      { field: "name", from: "Changed In CT", to: "Mainz", source: "drift" },
+    ]);
+    expect(plan.items[0]?.drift).toEqual([{ field: "name", from: "Mainz", to: "Changed In CT" }]);
+  });
+
+  it("tags \"config+drift\" when both the config AND ChurchTools moved independently", () => {
+    const plan = computePlan(
+      [desired("mainz", { name: "New Config Name" })],
+      stateOf(managed("mainz", 5, { name: "Old Name" })),
+      actualOf({ mainz: { name: "Manually Changed Name" } }),
+    );
+    expect(plan.items[0]?.changes).toEqual([
+      { field: "name", from: "Manually Changed Name", to: "New Config Name", source: "config+drift" },
+    ]);
+  });
+
+  it("always tags a create's changes as \"config\" (nothing to drift from yet)", () => {
+    const plan = computePlan([desired("mainz", { name: "Mainz" })], stateOf(), new Map());
+    expect(plan.items[0]?.changes).toEqual([
+      { field: "name", from: undefined, to: "Mainz", source: "config" },
+    ]);
+  });
+
+  it("always tags a recreate's changes as \"config\"", () => {
+    const plan = computePlan(
+      [desired("mainz", { name: "Mainz" })],
+      stateOf(managed("mainz", 5, { name: "Mainz" })),
+      new Map(), // vanished from ChurchTools → recreate
+    );
+    expect(plan.items[0]).toMatchObject({ action: "create", note: "recreate" });
+    expect(plan.items[0]?.changes).toEqual([
+      { field: "name", from: undefined, to: "Mainz", source: "config" },
+    ]);
+  });
+
+  it("does not phantom-attribute a newly-managed field absent from the state snapshot as drift", () => {
+    // Pre-existing precedent (see the "group campus assignment" describe block below): a field the
+    // state snapshot never tracked must not read as "drift" just because it differs from actual.
+    const plan = computePlan(
+      [desired("team", { name: "Team", campusId: 7 }, { type: "group" })],
+      stateOf(managedT("group", "team", 9, { name: "Team" })), // no campusId in the snapshot
+      actualOf({ team: { name: "Team", campusId: 4 } }),
+    );
+    expect(plan.items[0]?.changes).toEqual([
+      { field: "campusId", from: 4, to: 7, source: "config" },
+    ]);
+    expect(plan.items[0]?.drift).toBeUndefined();
+  });
+});
+
 // A group's campus (`information.campusId`, managed as top-level `campusId`) is a plain diffed
 // field — assign, change, and clear are all ordinary updates. The actual side is normalised to a
 // concrete `null` when unset (see registry), so each transition diffs against a real value.
@@ -193,7 +266,7 @@ describe("group campus assignment (#21)", () => {
       actualOf({ team: { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: null } }),
     );
     expect(plan.items[0]).toMatchObject({ action: "update", key: "team" });
-    expect(plan.items[0]?.changes).toEqual([{ field: "campusId", from: null, to: 4 }]);
+    expect(plan.items[0]?.changes).toEqual([{ field: "campusId", from: null, to: 4, source: "config" }]);
   });
 
   it("plans a campus move as a normal field update", () => {
@@ -202,7 +275,7 @@ describe("group campus assignment (#21)", () => {
       gState({ campusId: 4 }),
       actualOf({ team: { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 } }),
     );
-    expect(plan.items[0]?.changes).toEqual([{ field: "campusId", from: 4, to: 7 }]);
+    expect(plan.items[0]?.changes).toEqual([{ field: "campusId", from: 4, to: 7, source: "config" }]);
   });
 
   it("clears a campus assignment (campusId: null)", () => {
@@ -211,7 +284,7 @@ describe("group campus assignment (#21)", () => {
       gState({ campusId: 4 }),
       actualOf({ team: { name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 } }),
     );
-    expect(plan.items[0]?.changes).toEqual([{ field: "campusId", from: 4, to: null }]);
+    expect(plan.items[0]?.changes).toEqual([{ field: "campusId", from: 4, to: null, source: "config" }]);
   });
 
   it("is a no-op when desired campus matches actual", () => {

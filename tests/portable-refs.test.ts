@@ -41,7 +41,7 @@ describe("buildPlan reference resolution", () => {
     const { plan } = await buildPlan(client, emptyState("h"), resources);
     const item = plan.items.find((i) => i.key === "kids")!;
     expect(item.action).toBe("create");
-    expect(item.changes).toContainEqual({ field: "groupTypeId", from: undefined, to: 2 });
+    expect(item.changes).toContainEqual({ field: "groupTypeId", from: undefined, to: 2, source: "config" });
   });
 
   it("renders a same-run campus reference as a pending marker", async () => {
@@ -249,8 +249,8 @@ describe("acceptance: one config, two hosts", () => {
     const b = await planFor(77, emptyState("https://b.church.tools"));
 
     const groupOf = (p: typeof a.plan) => p.items.find((i) => i.key === "kids")!;
-    expect(groupOf(a.plan).changes).toContainEqual({ field: "groupTypeId", from: undefined, to: 2 });
-    expect(groupOf(b.plan).changes).toContainEqual({ field: "groupTypeId", from: undefined, to: 77 });
+    expect(groupOf(a.plan).changes).toContainEqual({ field: "groupTypeId", from: undefined, to: 2, source: "config" });
+    expect(groupOf(b.plan).changes).toContainEqual({ field: "groupTypeId", from: undefined, to: 77, source: "config" });
 
     // Permission domainId is resolved per host from the same logical ref.
     expect(a.items[0]?.domainId).toBe(2);

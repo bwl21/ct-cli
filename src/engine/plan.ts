@@ -68,6 +68,35 @@ export function driftFields(
   return changes;
 }
 
+/**
+ * Tag every entry in `changes` (a `diffFields(desired, actual)` result) with its
+ * {@link FieldChangeSource} (#24) — a JSON consumer's per-field attribution of WHY the field
+ * differs from ChurchTools. `driftedFields` must be the field-name set of an already-computed
+ * `driftFields(lastKnown, actual)` result, so a field the state snapshot never tracked (and thus
+ * can never appear in `drift`) is never phantom-attributed to drift here either — same precedent
+ * as the existing `drift` field (see "does not drift on a pre-#21 state snapshot" in plan.test.ts).
+ */
+function attributeChanges(
+  changes: FieldChange[],
+  lastKnown: Record<string, unknown>,
+  driftedFields: ReadonlySet<string>,
+): FieldChange[] {
+  return changes.map((c) => {
+    if (!driftedFields.has(c.field)) {
+      return { ...c, source: "config" };
+    }
+    // Pure drift: the desired value still matches the last-known snapshot, so the only reason this
+    // field differs from `actual` is the manual edit — applying reverts it. Otherwise both the
+    // config AND ChurchTools moved independently since the last apply.
+    return { ...c, source: deepEqual(c.to, lastKnown[c.field]) ? "drift" : "config+drift" };
+  });
+}
+
+/** A create (or recreate) has no last-known snapshot to compare against — every field is "config". */
+function attributeCreate(changes: FieldChange[]): FieldChange[] {
+  return changes.map((c) => ({ ...c, source: "config" }));
+}
+
 export interface ComputePlanOptions {
   /** Logical keys whose managed type has no registry entry — cannot be fetched, so left untouched (not recreated/deleted). */
   unresolved?: ReadonlySet<string>;
@@ -122,7 +151,7 @@ export function computePlan(
         key: d.key,
         id: null,
         action: "create",
-        changes: diffFields(d.fields, {}),
+        changes: attributeCreate(diffFields(d.fields, {})),
         preventDestroy: d.preventDestroy,
       });
       continue;
@@ -167,7 +196,7 @@ export function computePlan(
         key: d.key,
         id: null,
         action: "create",
-        changes: diffFields(d.fields, {}),
+        changes: attributeCreate(diffFields(d.fields, {})),
         note: "recreate",
         preventDestroy: d.preventDestroy,
       });
@@ -175,12 +204,13 @@ export function computePlan(
     }
     const changes = diffFields(d.fields, a);
     const drift = driftFields(managed.fields, a);
+    const driftedFields = new Set(drift.map((c) => c.field));
     updates.push({
       type: d.type,
       key: d.key,
       id: managed.id,
       action: changes.length > 0 ? "update" : "no-op",
-      changes,
+      changes: attributeChanges(changes, managed.fields, driftedFields),
       // The fetched actual — the write body is built from this, not the stale state snapshot (#27).
       actual: a,
       drift: drift.length > 0 ? drift : undefined,

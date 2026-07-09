@@ -36,7 +36,7 @@ describe("buildPlan", () => {
     expect(actual.get("mainz")).toEqual({ name: "Mainz", shorty: "MZ" });
     const item = plan.items.find((i) => i.key === "mainz")!;
     expect(item.action).toBe("update");
-    expect(item.changes).toEqual([{ field: "name", from: "Mainz", to: "Mainz City" }]);
+    expect(item.changes).toEqual([{ field: "name", from: "Mainz", to: "Mainz City", source: "config" }]);
     // The fetched actual is threaded onto the update item so execute builds the body from it (#27).
     expect(item.actual).toEqual({ name: "Mainz", shorty: "MZ" });
   });

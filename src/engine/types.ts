@@ -40,10 +40,27 @@ export type PlanAction = "create" | "update" | "delete" | "no-op";
  */
 export type PlanNote = "recreate" | "stale" | "unresolved-type" | "fetch-failed";
 
+/**
+ * Best-effort attribution of why a field differs from ChurchTools (#24). Set on `PlanItem.changes`
+ * entries; derived from the SAME three values the engine already has — last-known state snapshot,
+ * desired config, fetched actual — no extra fetch required.
+ *  - "config"       — ChurchTools still matches the last-known snapshot (or there IS no snapshot
+ *                      yet, i.e. a create/recreate, or the field was never tracked by the
+ *                      snapshot): the diff exists purely because the desired config differs from
+ *                      what was last applied.
+ *  - "drift"         — the config is unchanged since the last apply, but ChurchTools was edited
+ *                      manually; applying this item would revert that manual edit.
+ *  - "config+drift"  — BOTH moved independently since the last apply (config changed AND
+ *                      ChurchTools drifted), to values that don't coincide.
+ */
+export type FieldChangeSource = "config" | "drift" | "config+drift";
+
 export interface FieldChange {
   field: string;
   from: unknown;
   to: unknown;
+  /** See {@link FieldChangeSource}. Undefined only where attribution wasn't computed (never on plan items produced by `computePlan`). */
+  source?: FieldChangeSource;
 }
 
 export interface PlanItem {

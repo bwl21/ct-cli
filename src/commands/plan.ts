@@ -7,6 +7,7 @@ import { loadConfig, resolveConfigPath } from "../config/load.js";
 import { buildPlan } from "../engine/build.js";
 import { Resolver } from "../resolve/resolver.js";
 import { renderPlan } from "../engine/render.js";
+import { summarize } from "../engine/types.js";
 import { buildPermissionPlan } from "../permissions/plan.js";
 import { renderPermissionPlan } from "../permissions/render.js";
 import { info, warn, out } from "../ui.js";
@@ -16,6 +17,7 @@ interface PlanOptions {
   state?: string;
   env?: string;
   json?: boolean;
+  detailedExitcode?: boolean;
 }
 
 export function planCommand(): Command {
@@ -25,6 +27,10 @@ export function planCommand(): Command {
     .option("-s, --state <path>", "state file (or set CT_STATE)")
     .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
     .option("--json", "emit the raw plan as JSON instead of the rendered diff")
+    .option(
+      "--detailed-exitcode",
+      "Terraform-style exit code: 0 = no changes, 1 = error, 2 = changes pending (resource or permission)",
+    )
     .action(async (opts: PlanOptions) => {
       // Resolve the env FIRST — it wires the target host/token into the process env before resolveConfig.
       const cmdEnv = await prepareEnv(opts);
@@ -44,8 +50,34 @@ export function planCommand(): Command {
           buildPlan(client, state, desired, { configDir, resolver }),
           buildPermissionPlan(client, state, permissions, desired, resolver, client.version ?? undefined),
         ]);
+      // "Changes present" for --detailed-exitcode / the JSON summary: anything `ct apply` would
+      // actually act on — a resource item whose action isn't a no-op, OR a permission item with a
+      // grant/revoke to write. Drift by itself does NOT count: an item can carry `drift` while
+      // staying a no-op (the field drifted but isn't managed by config, or coincidentally matches
+      // desired again), and apply would write nothing for it — see docs/README "CI usage".
+      const hasResourceChanges = plan.items.some((i) => i.action !== "no-op");
+      const hasPermissionChanges = permItems.some(
+        (i) => i.diff.toPut.length > 0 || i.diff.toDelete.length > 0,
+      );
+      const hasChanges = hasResourceChanges || hasPermissionChanges;
+
       if (opts.json) {
-        out({ plan, permissions: permItems });
+        // Additive on top of the raw plan/permissions (#24) — existing consumers of `plan`/`permissions`
+        // are unaffected. See README "CI usage" for exactly what each summary field means.
+        out({
+          plan,
+          permissions: permItems,
+          summary: {
+            resources: summarize(plan),
+            drifted: plan.items.filter((i) => i.drift && i.drift.length > 0).length,
+            permissions: {
+              toPut: permItems.reduce((n, i) => n + i.diff.toPut.length, 0),
+              toDelete: permItems.reduce((n, i) => n + i.diff.toDelete.length, 0),
+              preserved: permItems.reduce((n, i) => n + i.diff.preserved.length, 0),
+            },
+            hasChanges,
+          },
+        });
       } else {
         // Under --env, surface the target env name + its CT version (per-env version gate, #22) so a
         // dev/prod version skew is visible before applying. No --env keeps the original header byte-identical.
@@ -72,7 +104,12 @@ export function planCommand(): Command {
         warn(
           `Plan is INCOMPLETE — ${allFetchErrors.length} resource(s) could not be fetched; their diff is missing. Re-run to retry.`,
         );
+        // An INCOMPLETE plan is always an error (1) — even under --detailed-exitcode, and even if
+        // the (partial) plan has changes. Never demoted to 2: an incomplete diff cannot be trusted
+        // enough to report "changes present" instead of "this run failed".
         process.exitCode = 1;
+      } else if (opts.detailedExitcode && hasChanges) {
+        process.exitCode = 2;
       }
     });
 }
