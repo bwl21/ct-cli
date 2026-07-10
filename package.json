@@ -1,9 +1,15 @@
 {
-  "name": "ct-cli",
+  "name": "@eqrm/ct-cli",
   "version": "0.1.0",
-  "private": true,
   "description": "ChurchTools structure-as-code CLI — declarative plan/apply for the overarching, rights-bearing structure (campuses, groups, hierarchies, permissions, auto-groups). Never manages people.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eqrm/ct-cli.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "bin": {
     "ct": "./dist/index.js"
   },
