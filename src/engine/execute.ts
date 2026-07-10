@@ -60,7 +60,7 @@ function withDuplicateGroupGuidance(message: string, item: PlanItem): string {
     `be managed by this tool, adopt it instead of creating a new one: ` +
     `\`ct adopt group <id> --env <env> --key ${item.key}\` (find its id with \`ct get groups\`). ` +
     `If two groups sharing this name is intentional, set \`allowDuplicateName: true\` on this ` +
-    `group's declaration and re-apply.`
+    `group's declaration and re-apply`
   );
 }
 
