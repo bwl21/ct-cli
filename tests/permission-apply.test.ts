@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { applyPermissionPlan } from "../src/permissions/apply.js";
+import { CtApiError } from "../src/api/ctClient.js";
 
 describe("applyPermissionPlan", () => {
   it("PUTs each grant and DELETEs each removed tuple with the array dataId body", async () => {
@@ -43,5 +44,22 @@ describe("applyPermissionPlan", () => {
     ]);
     // Every op was still attempted despite the failure.
     expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it("renders a CtApiError's HTTP status + body in a failed write's message, via the shared formatter (#71)", async () => {
+    const request = vi.fn(async () => {
+      throw new CtApiError("PUT /permissions/group_type_role/8 failed", 403, { message: "no permission" });
+    });
+    const res = await applyPermissionPlan([{
+      key: "t", domainType: "group_type_role", domainId: 8,
+      diff: {
+        toPut: [{ authId: 1104, dataId: [42], type: "grant" }],
+        toDelete: [],
+        preserved: [],
+      },
+    }], { request } as never);
+    expect(res.failed).toHaveLength(1);
+    expect(res.failed[0]?.message).toContain("HTTP 403");
+    expect(res.failed[0]?.message).toContain("no permission");
   });
 });

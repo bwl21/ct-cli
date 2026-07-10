@@ -13,6 +13,7 @@ import type { GrantTuple } from "./grants.js";
 import { reresolveTuple } from "./scope.js";
 import { pendingRef, refLabel } from "../resolve/refs.js";
 import { reresolvePendingValue } from "../resolve/resolver.js";
+import { formatError } from "../ui.js";
 
 /** How many permission tuples to write at once. Tuples are independent rows, so a modest fan-out is safe. */
 const WRITE_CONCURRENCY = 6;
@@ -98,7 +99,9 @@ export async function applyPermissionPlan(
       await client.request(op.method, op.path, b);
       return { ok: true as const, op };
     } catch (err) {
-      return { ok: false as const, op, message: err instanceof Error ? err.message : String(err) };
+      // Same formatter the top-level handler uses (#50) so a failed grant's HTTP status + response
+      // body reach the resumable summary (#71) instead of just the bare "... failed" text.
+      return { ok: false as const, op, message: formatError(err) };
     }
   });
 

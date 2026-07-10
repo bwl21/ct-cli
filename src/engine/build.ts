@@ -15,7 +15,7 @@ import { foldSynthetic } from "./synthetic.js";
 import { Resolver } from "../resolve/resolver.js";
 import { collectPendingRefKeys } from "../resolve/refs.js";
 import { mapConcurrent } from "../util/concurrency.js";
-import { warn } from "../ui.js";
+import { warn, formatError } from "../ui.js";
 
 /** How many managed resources to fetch from ChurchTools at once. */
 const FETCH_CONCURRENCY = 8;
@@ -73,7 +73,7 @@ export async function fetchActual(
       }
       // A read-only plan should not abort on one bad fetch: record it, keep going, flag the plan as partial.
       // Track the key separately from a real 404 so computePlan renders it as a fetch failure, not a recreate.
-      const message = err instanceof Error ? err.message : String(err);
+      const message = formatError(err);
       const status = err instanceof CtApiError ? String(err.status) : "error";
       fetchFailed.set(managed.key, status);
       fetchErrors.push(`${managed.type}.${managed.key} (#${managed.id}): ${message}`);

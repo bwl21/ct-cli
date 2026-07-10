@@ -13,7 +13,7 @@ import { applyHierarchy, parentIdsByGroupId, type HierarchyEntry } from "./hiera
 import { assertNotPeople } from "./guard.js";
 import { deepEqual } from "./plan.js";
 import { mapConcurrent } from "../util/concurrency.js";
-import { info, warn } from "../ui.js";
+import { info, warn, formatError } from "../ui.js";
 import { normalizeDynamic, normalizeRuleset, resolveRulesetRef } from "./dynamic.js";
 import type { DynamicStatus } from "./types.js";
 
@@ -84,7 +84,7 @@ const parentsField: SyntheticField = {
       const parentIds = parentIdsByGroupId(Array.isArray(raw) ? raw : []);
       return { desired: applyHierarchy(desired, state, actual, parentIds), errors: [] };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = formatError(err);
       warn(`Failed to fetch group hierarchies: ${message}`);
       // Leave `parents` undiffed rather than fabricate "add all parents" from an empty map.
       return { desired, errors: [`group hierarchies: ${message}`] };
@@ -142,8 +142,7 @@ const dynamicField: SyntheticField = {
           a.dynamic = { status: "none", ruleset: {} };
           return [];
         }
-        const message = err instanceof Error ? err.message : String(err);
-        return [`dynamic ${managed.key} (#${managed.id}): ${message}`];
+        return [`dynamic ${managed.key} (#${managed.id}): ${formatError(err)}`];
       }
       try {
         const statusRes = await client.get<{ dynamicGroupStatus?: string }>(`/dynamicgroups/${managed.id}/status`);
@@ -153,8 +152,7 @@ const dynamicField: SyntheticField = {
         };
         return [];
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return [`dynamic ${managed.key} status (#${managed.id}): ${message}`];
+        return [`dynamic ${managed.key} status (#${managed.id}): ${formatError(err)}`];
       }
     });
     const errors = perGroupErrors.flat();
@@ -212,8 +210,7 @@ const dynamicField: SyntheticField = {
       const r = res?.[0];
       if (r) info(`refreshed ${item.key}: +${r.created} ~${r.updated} -${r.deleted}`);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      warn(`Failed to refresh ${item.key} (#${id}): ${message}`);
+      warn(`Failed to refresh ${item.key} (#${id}): ${formatError(err)}`);
     }
   },
 };
