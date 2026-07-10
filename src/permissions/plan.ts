@@ -14,9 +14,19 @@ import { resolveScope } from "./scope.js";
 import { normalizeActual, diffGrants, isInheritedOnlyRight, INHERITED_RIGHT_MIN_AUTH_ID, type GrantTuple, type GrantDiff, type DomainType, type RawPermission } from "./grants.js";
 import type { DesiredPermission } from "./types.js";
 import { Resolver } from "../resolve/resolver.js";
-import { isPendingRef } from "../resolve/refs.js";
+import { isPendingRef, refKey, refLabel, type Ref } from "../resolve/refs.js";
 
-export interface PermissionPlanItem { key: string; domainType: DomainType; domainId: number; diff: GrantDiff }
+/**
+ * One resolved permission domain in the plan.
+ *
+ * `domainId` is the concrete numeric domain, EXCEPT when `pendingDomain` is set: the domain is a
+ * logical Ref to a group type created in THIS SAME run (#69), whose id is unknown until the resource
+ * tier applies. Then `domainId` is `null` and `pendingDomain` carries the Ref, re-resolved against
+ * post-execute state at apply time (see `applyPermissionPlan`) — mirroring resource pending refs
+ * (#20/#46) and the scope pending path (#29). A pending domain has no live grants yet, so its diff
+ * is `desired → toPut` against an empty actual set.
+ */
+export interface PermissionPlanItem { key: string; domainType: DomainType; domainId: number | null; pendingDomain?: Ref; diff: GrantDiff }
 
 /**
  * Fan out each grant to (authId, dataId) tuples. ChurchTools reads a scoped grant back as
@@ -64,19 +74,28 @@ export function desiredTuples(
   });
 }
 
-/** A permission whose domainId has been resolved from a logical Ref to a concrete numeric id. */
-type ResolvedPermission = DesiredPermission & { domainId: number };
+/**
+ * A permission whose domainId has been resolved. Either a concrete numeric domain, or — when the
+ * domain is a group type created in this same run (#69) — a `pendingDomain` Ref with `domainId: null`,
+ * re-resolved at apply time.
+ */
+type ResolvedPermission =
+  | (DesiredPermission & { domainId: number; pendingDomain?: undefined })
+  | (Omit<DesiredPermission, "domainId"> & { domainId: null; pendingDomain: Ref });
 
 /**
- * Resolve every permission's domainId to a number (#20). A numeric domainId passes straight through;
- * a Ref (e.g. `groupType: "…"`) resolves against the live catalog. A domainId that resolves to a
- * same-run-created resource (PendingRef) is rejected — the permission plan needs a concrete id to
- * fetch actuals and build the write path, and the permission subsystem does not defer that. A
- * group_role ref resolves to its concrete (group, role) pairing id in the resolver (#25).
+ * Resolve every permission's domainId (#20). A numeric domainId passes straight through; a Ref
+ * (e.g. `groupType: "…"`) resolves against managed state ∪ the live catalog. A domainId that
+ * resolves to a same-run-created group type (PendingRef) is NOT rejected (#69): it is carried as a
+ * `pendingDomain` and re-resolved against post-execute state at apply time — this is what lets a
+ * fresh-instance plan render the create-set + pending grants instead of aborting. A group_role ref
+ * resolves to its concrete (group, role) pairing id in the resolver and never goes pending — the
+ * pairing id needs a live `/groups/{id}/roles` fetch, so a same-run group is a hard error there (#25).
+ * The hard error remains ONLY for genuinely unresolvable references (key not in config/state at all).
  *
- * After resolution, the authoritative duplicate-target guard runs on the CONCRETE ids: two different
- * refs (or a ref and a number) that collide on one (domainType, domainId) would otherwise each diff
- * against the other's grants and churn forever. Mirrors the eval-time guard in config/context.ts.
+ * After resolution, the authoritative duplicate-target guard runs on the resolved identities (concrete
+ * id, or the pending Ref's key): two different refs (or a ref and a number) that collide on one domain
+ * would otherwise each diff against the other's grants and churn forever. Mirrors config/context.ts.
  */
 async function resolveDomainIds(
   permissions: DesiredPermission[], resolver: Resolver,
@@ -84,25 +103,27 @@ async function resolveDomainIds(
   const resolved: ResolvedPermission[] = [];
   for (const p of permissions) {
     if (typeof p.domainId === "number") {
-      resolved.push(p as ResolvedPermission);
+      resolved.push({ ...p, domainId: p.domainId });
       continue;
     }
     const site = `${p.domainType} "${p.key}".domainId`;
     const res = await resolver.resolve(p.domainId, site);
     if (isPendingRef(res)) {
-      throw new Error(
-        `${site}: references a resource created in the same run — apply it first, or use a numeric id.`,
-      );
+      resolved.push({ key: p.key, domainType: p.domainType, grants: p.grants, domainId: null, pendingDomain: res.__pendingRef });
+      continue;
     }
     resolved.push({ ...p, domainId: res });
   }
   const seen = new Map<string, string>();
   for (const p of resolved) {
-    const key = `${p.domainType}:${p.domainId}`;
+    const key = p.pendingDomain
+      ? `${p.domainType}:pending:${refKey(p.pendingDomain)}`
+      : `${p.domainType}:${p.domainId}`;
+    const label = p.pendingDomain ? `<${refLabel(p.pendingDomain)}>` : `#${p.domainId}`;
     const prev = seen.get(key);
     if (prev) {
       throw new Error(
-        `Duplicate permission target after resolution: ${p.domainType} #${p.domainId} is declared by ` +
+        `Duplicate permission target after resolution: ${p.domainType} ${label} is declared by ` +
           `both "${prev}" and "${p.key}". Merge their grants into one declaration.`,
       );
     }
@@ -133,9 +154,11 @@ export async function buildPermissionPlan(
   const resolved = await resolveDomainIds(permissions, resolver ?? new Resolver({ client, state, desired }));
   // Keys declared as groups in the config — valid scope targets even before they are created.
   const declaredGroupKeys = new Set(desired.filter((r) => r.type === "group").map((r) => r.key));
-  // one bulk fetch per distinct domainType
+  // one bulk fetch per distinct domainType — but only for CONCRETE domains. A pending domain (#69)
+  // is a group type created this run: it has no live grants, so nothing to fetch (and on a fresh
+  // instance the fetch would be a pure waste, or a spurious fetchError).
   const byType = new Map<DomainType, RawPermission[] | null>();
-  for (const dt of new Set(resolved.map((p) => p.domainType))) {
+  for (const dt of new Set(resolved.filter((p) => p.pendingDomain === undefined).map((p) => p.domainType))) {
     try {
       byType.set(dt, await client.get<RawPermission[]>(`/permissions/${dt}`));
     } catch (err) {
@@ -145,6 +168,23 @@ export async function buildPermissionPlan(
     }
   }
   for (const p of resolved) {
+    if (p.pendingDomain !== undefined) {
+      // The domain (a group type) is created THIS run (#69), so it has no live grants yet: the
+      // actual set is empty and every desired grant lands in toPut as a pending grant block. Its
+      // numeric domainId is unknown until the resource tier applies — the pending marker is
+      // re-resolved against post-execute state at apply time (applyPermissionPlan). Rendered with a
+      // `<groupType:x (created this apply)>` marker consistent with resource pending refs.
+      items.push({
+        key: p.key,
+        domainType: p.domainType,
+        domainId: null,
+        pendingDomain: p.pendingDomain,
+        // domainId is irrelevant to desiredTuples (it only reads key/domainType/grants); pass the
+        // pending Ref through so the shape stays a valid DesiredPermission.
+        diff: diffGrants(desiredTuples({ ...p, domainId: p.pendingDomain }, state, declaredGroupKeys), []),
+      });
+      continue;
+    }
     const all = byType.get(p.domainType);
     if (all == null) continue; // fetch failed for this domainType — recorded above
     const normalizedAll = normalizeActual(all.filter((r) => r.domainId === p.domainId));

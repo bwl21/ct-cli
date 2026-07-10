@@ -5,6 +5,18 @@
 import pc from "picocolors";
 import type { PermissionPlanItem } from "./plan.js";
 import type { GrantTuple } from "./grants.js";
+import { refLabel } from "../resolve/refs.js";
+
+/**
+ * The domain identifier for a plan line: a concrete `#id`, or — when the domain is a group type
+ * created in this same run (#69) — a `<group-type:x (created this apply)>` marker consistent with the
+ * resource pending-ref rendering (src/engine/render.ts). Its real id is filled in at apply time.
+ */
+function fmtDomain(item: PermissionPlanItem): string {
+  return item.pendingDomain
+    ? `<${refLabel(item.pendingDomain)} (created this apply)>`
+    : `#${item.domainId}`;
+}
 
 function fmtTuple(t: GrantTuple): string {
   let scope = "";
@@ -37,7 +49,7 @@ export function renderPermissionPlan(items: PermissionPlanItem[]): string {
     totalGrant += grantCount;
     totalRevoke += revokeCount;
     lines.push(
-      `  ${item.domainType} #${item.domainId} (${item.key}): ${pc.green(`+${grantCount} grant(s)`)}, ${pc.red(`-${revokeCount} remove(s)`)}`,
+      `  ${item.domainType} ${fmtDomain(item)} (${item.key}): ${pc.green(`+${grantCount} grant(s)`)}, ${pc.red(`-${revokeCount} remove(s)`)}`,
     );
     for (const t of item.diff.toPut) {
       lines.push(`      ${pc.green("+")} ${fmtTuple(t)}`);

@@ -142,6 +142,33 @@ resolution, two declarations that resolve to the **same** `(domainType,
 domainId)` are rejected (they would otherwise diff against each other's grants
 forever) — even if one used a name and the other a raw id.
 
+### Domains created in the same run (fresh-instance rehearsal, #69)
+
+When a `groupType` reference names a group type that is **created in this same
+run** (empty/partial state — the type is part of the create-set), the domain is
+handled as a **pending domain** rather than aborting the plan:
+
+- `ct plan` renders the grant block with a
+  `<group-type:<key> (created this apply)>` marker (consistent with resource
+  pending refs, #20/#46) and counts its grants in `--json`
+  (`domainId: null` + a `pendingDomain` reference) and toward exit code `2`.
+- `ct apply` runs permission reconciliation **after** the resources are
+  created, re-resolving the domain id from the fresh group type and granting in
+  the same run — so a single `ct apply` converges fully. This reuses the same
+  re-resolution machinery as resource pending refs.
+- The hard error (`references a resource created in the same run` → now only a
+  genuine unresolvable) is reserved for references that resolve to **nothing**:
+  a key absent from the config, state, and the live catalog (a typo).
+
+**`group_role` is deliberately NOT symmetric here.** A `group_role` domain id is
+the (group, role) **pairing** id, which only exists on
+`GET /groups/{groupId}/roles` — re-resolving it needs a *live fetch* after the
+group exists, not just a post-execute state lookup. So a `group_role` domain
+referencing a same-run-created **group** still fails fast with its own
+actionable message ("apply the group first, or pass a numeric id"). Its harder
+deferral is out of scope for #69 (which targets the #23 `group_type_role`
+scenario).
+
 ## Scope resolution
 
 A scoped grant's `scope: [...]` is a list where each entry is either a
