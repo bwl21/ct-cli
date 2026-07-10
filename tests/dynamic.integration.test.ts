@@ -85,12 +85,19 @@ describe.runIf(live && liveWrite)("dynamic ruleset round-trip pin (#36, live wri
           method: "ChurchQuery",
           params: {
             groupBy: ["person.id"],
-            filter: { "==": [{ var: "person.isArchived" }, false] },
+            filter: { "==": [{ var: "person.isArchived" }, 0] },
             primaryEntityAlias: "person",
             responseFields: ["person.id"],
           },
         },
-        process: {},
+        // CT's PUT schema validates the ruleset content: `process` REQUIRES the groupOnly /
+        // queryResultOnly / groupAndQueryResult shape (live-verified on 3.134.1 — an empty {}
+        // is rejected with "Required property missing: groupOnly ... properties:process").
+        process: {
+          groupOnly: { active: { handleMembership: { groupMemberStatus: "none" } } },
+          queryResultOnly: { none: { handleMembership: { groupMemberStatus: "active" } } },
+          groupAndQueryResult: {},
+        },
       };
 
       await client.request("PUT", `/dynamicgroups/${GID}/ruleset`, putRulesetBody(authored));
