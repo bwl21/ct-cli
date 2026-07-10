@@ -64,6 +64,126 @@ describe("executePlan", () => {
     });
   });
 
+  it("group-type create POST carries the required-but-unmanaged defaults, but state stays managed-only (#73)", async () => {
+    const state = emptyState("h");
+    const { client, calls } = recorder({ "POST /group/grouptypes": { id: 12 } });
+    const plan: Plan = {
+      items: [
+        {
+          type: "group-type",
+          key: "dienst",
+          id: null,
+          action: "create",
+          changes: [
+            { field: "name", from: undefined, to: "Dienst" },
+            { field: "nameTranslated", from: undefined, to: "Dienst" },
+          ],
+        },
+      ],
+    };
+    const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    expect(result.failed).toBeUndefined();
+    // POST body = declared fields ∪ deterministic create-defaults (declared values win).
+    expect(calls[0]).toEqual({
+      method: "POST",
+      path: "/group/grouptypes",
+      body: {
+        name: "Dienst",
+        nameTranslated: "Dienst",
+        namePlural: "Dienst",
+        shorty: "Dienst",
+        color: "default",
+        permissionDepth: 1,
+        isLeaderNecessary: false,
+        availableForNewPerson: false,
+        sortKey: 0,
+        postsEnabled: false,
+      },
+    });
+    // State records ONLY the managed fields — the create-defaults stay unmanaged (no future diff).
+    expect(state.resources.dienst?.fields).toEqual({ name: "Dienst", nameTranslated: "Dienst" });
+  });
+
+  it("a declared value overrides the matching create-default (declared wins over the derived default)", async () => {
+    const state = emptyState("h");
+    const { client, calls } = recorder({ "POST /group/grouptypes": { id: 3 } });
+    const plan: Plan = {
+      items: [
+        {
+          type: "group-type",
+          key: "dienst",
+          id: null,
+          action: "create",
+          // `shorty` is unmanaged, but if a caller passes it through it must not be clobbered by the default.
+          changes: [
+            { field: "name", from: undefined, to: "Dienst" },
+            { field: "shorty", from: undefined, to: "DNST" },
+          ],
+        },
+      ],
+    };
+    await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    expect((calls[0]?.body as Record<string, unknown>).shorty).toBe("DNST");
+  });
+
+  it("update of a group-type does NOT inject create-defaults — the PUT body is byte-identical to pre-#73", async () => {
+    const state = emptyState("h");
+    state.resources.dienst = {
+      type: "group-type",
+      id: 12,
+      key: "dienst",
+      fields: { name: "Dienst", nameTranslated: "Dienst" },
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
+    const { client, calls } = recorder({});
+    const plan: Plan = {
+      items: [
+        {
+          type: "group-type",
+          key: "dienst",
+          id: 12,
+          action: "update",
+          actual: { name: "Dienst", nameTranslated: "Dienst" },
+          changes: [{ field: "name", from: "Dienst", to: "Dienstteam" }],
+        },
+      ],
+    };
+    await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    // PUT replaces the whole object with actual ∪ changes — and carries NONE of the create-defaults.
+    expect(calls[0]).toEqual({
+      method: "PUT",
+      path: "/group/grouptypes/12",
+      body: { name: "Dienstteam", nameTranslated: "Dienst" },
+    });
+  });
+
+  it("group-role create POST carries the required `shorty` default (#73 audit)", async () => {
+    const state = emptyState("h");
+    const { client, calls } = recorder({ "POST /group/roles": { id: 4 } });
+    const plan: Plan = {
+      items: [
+        {
+          type: "group-role",
+          key: "leiter",
+          id: null,
+          action: "create",
+          changes: [
+            { field: "name", from: undefined, to: "Verantwortlicher" },
+            { field: "groupTypeId", from: undefined, to: 2 },
+          ],
+        },
+      ],
+    };
+    await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    expect(calls[0]).toEqual({
+      method: "POST",
+      path: "/group/roles",
+      body: { name: "Verantwortlicher", groupTypeId: 2, shorty: "Verantwort" },
+    });
+    expect(state.resources.leiter?.fields).toEqual({ name: "Verantwortlicher", groupTypeId: 2 });
+  });
+
   it("recreates a vanished resource: the new id takes over the key instead of colliding on the stale entry", async () => {
     // Resource deleted out-of-band in CT but still in state → computePlan emits a create item
     // while the stale entry (old id 5) is still under this key. The create must replace it.

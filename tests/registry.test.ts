@@ -203,6 +203,49 @@ describe("write specs", () => {
   });
 });
 
+describe("createDefaults — required-but-unmanaged create fields (#73)", () => {
+  it("group-type fills every field CT requires at POST, derived from the declared name", () => {
+    expect(RESOURCES["group-type"]?.createDefaults?.({ name: "Dienst", nameTranslated: "Dienst" })).toEqual({
+      namePlural: "Dienst",
+      shorty: "Dienst",
+      color: "default",
+      permissionDepth: 1,
+      isLeaderNecessary: false,
+      availableForNewPerson: false,
+      sortKey: 0,
+      postsEnabled: false,
+    });
+  });
+
+  it("group-type truncates namePlural to 30 and shorty to 10 chars", () => {
+    const name = "Superlange Kleingruppen Bezeichnung"; // 35 chars
+    const defaults = RESOURCES["group-type"]?.createDefaults?.({ name });
+    expect(defaults?.namePlural).toBe(name.slice(0, 30));
+    expect((defaults?.namePlural as string).length).toBe(30);
+    expect(defaults?.shorty).toBe("Superlange");
+    expect((defaults?.shorty as string).length).toBe(10);
+  });
+
+  it("group-type keeps a short name intact (no padding, no truncation)", () => {
+    const defaults = RESOURCES["group-type"]?.createDefaults?.({ name: "Team" });
+    expect(defaults?.namePlural).toBe("Team");
+    expect(defaults?.shorty).toBe("Team");
+  });
+
+  it("group-role fills the required `shorty` from the declared name (truncated to 10)", () => {
+    expect(
+      RESOURCES["group-role"]?.createDefaults?.({ name: "Verantwortlicher", groupTypeId: 2 }),
+    ).toEqual({ shorty: "Verantwort" });
+  });
+
+  it("does not attach create-defaults to types whose managed fields already satisfy the create contract", () => {
+    // campus (name+shorty) is verified working live; group/age-group/target-group need only `name`.
+    for (const type of ["campus", "group", "age-group", "target-group", "relationship-type"]) {
+      expect(RESOURCES[type]?.createDefaults).toBeUndefined();
+    }
+  });
+});
+
 describe("knownFields (#51)", () => {
   it("derives the campus allowlist from managedFields — 'shorty', not the vestigial 'shortName'", () => {
     expect(knownFields("campus")).toEqual(new Set(["name", "shorty"]));

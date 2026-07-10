@@ -25,6 +25,16 @@ export interface AdoptableResource {
   /** The subset of fields we manage — the desired-state baseline. */
   managedFields: (resource: Record<string, unknown>) => Record<string, unknown>;
   /**
+   * Deterministic values for fields CT *requires* at CREATE but the tool does not manage for
+   * diffing (#73). Called with the already-built create body (the declared managed fields, which
+   * carry `name`) and returns extra fields merged UNDER it (a declared value always wins) into the
+   * POST body ONLY — never into the state snapshot. So these fields stay unmanaged: a later plan
+   * neither diffs nor reverts them, and declared-fields semantics are unchanged (no state migration).
+   * A field still missing after this surfaces as CT's own HTTP 400 (#71), never a silent omission.
+   * Omit the hook entirely for types whose managed fields already satisfy the create contract.
+   */
+  createDefaults?: (body: Record<string, unknown>) => Record<string, unknown>;
+  /**
    * DSL function name `configSnippet` emits for this type. Defaults to the camelCase of
    * the type name. Set it when the natural camelCase collides with another DSL surface
    * (e.g. `group-role` → `roleDefinition`, because `groupRole` is the permission function).
@@ -54,6 +64,11 @@ export function slug(value: string): string {
 function str(resource: Record<string, unknown>, key: string): string {
   const value = resource[key];
   return typeof value === "string" ? value : "";
+}
+
+/** First `max` characters of `value` — CT's create validators cap several name/shorty fields. */
+function truncate(value: string, max: number): string {
+  return value.slice(0, max);
 }
 
 /** Read a field, preferring a nested `information` object but falling back to the top level. */
@@ -96,6 +111,25 @@ export const RESOURCES: Record<string, AdoptableResource> = {
     tier: 0,
     deriveKey: (r) => slug(str(r, "name")),
     managedFields: (r) => ({ name: r.name, nameTranslated: r.nameTranslated }),
+    // POST /group/grouptypes rejects a body carrying only name/nameTranslated: CT requires the fields
+    // below (validated live on CT 3.134.1, #73, and against the OpenAPI POST schema). They are unmanaged
+    // (create-only) and derived deterministically from the declared `name`. If a user declares one of
+    // them the existing unknown-field warning fires (it is not in `managedFields`) — we keep them
+    // create-default-only rather than growing `managedFields`, which would broaden every group-type's
+    // actual-reads and adopt output and grow state on the next apply (a de-facto migration #73 forbids).
+    createDefaults: (r) => {
+      const name = str(r, "name");
+      return {
+        namePlural: truncate(name, 30), // required, 2–30 chars: no plural known at create → mirror name, capped
+        shorty: truncate(name, 10), // required, 1–10 chars: first ≤10 chars of the (required, non-empty) name
+        color: "default", // required enum: the theme-neutral member of CT's color palette
+        permissionDepth: 1, // required int: permissions reach the group's own members only (least-privilege; the value a plain live type carries)
+        isLeaderNecessary: false, // don't force a leader onto a freshly created type
+        availableForNewPerson: false, // keep the type out of self-service / new-person flows by default
+        sortKey: 0, // append-neutral ordering (matches a live "Dienst" row's sortKey 0)
+        postsEnabled: false, // don't enable the group wall / posts feature by default
+      };
+    },
   }),
   "age-group": define({
     collectionPath: "/group/agegroups",
@@ -130,6 +164,10 @@ export const RESOURCES: Record<string, AdoptableResource> = {
     tier: 3,
     deriveKey: (r) => slug(str(r, "name")),
     managedFields: (r) => ({ name: r.name, nameTranslated: r.nameTranslated, groupTypeId: r.groupTypeId }),
+    // POST /group/roles requires `shorty` (1–10 chars, non-nullable in CT's OpenAPI POST schema) which
+    // the tool does not manage (#73 audit). Sent at CREATE only, derived from the declared `name`; not
+    // diffed afterward. (`type`/`isLeader`/`sortKey` are all optional/nullable — no default needed.)
+    createDefaults: (r) => ({ shorty: truncate(str(r, "name"), 10) }),
     // `groupRole` is taken by the permissions DSL (`ct.groupRole` = definePermission("group_role")),
     // so the master-data role resource declares under a distinct name.
     dslName: "roleDefinition",
