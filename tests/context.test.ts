@@ -362,6 +362,53 @@ describe("preventDestroy lifecycle flag", () => {
   });
 });
 
+describe("allowDuplicateName create-time opt-in (#75)", () => {
+  it("is carried on the resource but kept out of managed fields (not diffed/adopted)", () => {
+    const { ct, resources } = createContext();
+    ct.group({ key: "kids_2026_b", name: "Kids Elternabend 2026", groupTypeId: 2, allowDuplicateName: true });
+    expect(resources[0]?.allowDuplicateName).toBe(true);
+    expect(resources[0]?.fields).toEqual({ name: "Kids Elternabend 2026", groupTypeId: 2 });
+  });
+
+  it("defaults to undefined when not declared", () => {
+    const { ct, resources } = createContext();
+    ct.group({ key: "kids", name: "Kids" });
+    expect(resources[0]?.allowDuplicateName).toBeUndefined();
+  });
+
+  it("does not trip the unknown-field warning", () => {
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const { ct } = createContext();
+      ct.group({ key: "kids_2026_b", name: "Kids Elternabend 2026", allowDuplicateName: true });
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("rejects the flag on a non-group type", () => {
+    const { ct } = createContext();
+    expect(() => ct.campus({ key: "c", name: "C", allowDuplicateName: true } as never)).toThrow(
+      /allowDuplicateName.*only valid on a group/i,
+    );
+  });
+
+  it("rejects a non-boolean value", () => {
+    const { ct } = createContext();
+    expect(() => ct.group({ key: "g", name: "G", allowDuplicateName: "yes" as never })).toThrow(
+      /allowDuplicateName.*must be a boolean/i,
+    );
+  });
+
+  it("`allowDuplicateName: false` is accepted and still kept out of fields", () => {
+    const { ct, resources } = createContext();
+    ct.group({ key: "g", name: "G", allowDuplicateName: false });
+    expect(resources[0]?.allowDuplicateName).toBe(false);
+    expect(resources[0]?.fields).toEqual({ name: "G" });
+  });
+});
+
 describe("permission declarations", () => {
   it("collects groupRole / groupTypeRole with validated grants", async () => {
     const mod = (ct: ConfigContext) => {

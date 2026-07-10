@@ -26,6 +26,13 @@ export interface DesiredResource {
   dependsOn: string[];
   /** Lifecycle flag: block `ct destroy` for this resource. Never diffed or sent to the API. */
   preventDestroy?: boolean;
+  /**
+   * Group-only create-time opt-in (#75) into CT's same-name guard: `POST /groups` 400s with
+   * `forbidden.duplicate.group` when a group with that name already exists, unless the body
+   * carries `force: true`. Sent on CREATE only — never diffed, never in `fields`/state, never
+   * touches the update path. `undefined` = not opted in (CT's default guard stays on).
+   */
+  allowDuplicateName?: boolean;
 }
 
 export type PlanAction = "create" | "update" | "delete" | "no-op";
@@ -89,6 +96,12 @@ export interface PlanItem {
    * on desired-side items; undefined on delete-side items.
    */
   preventDestroy?: boolean;
+  /**
+   * CT's `force` create flag opt-in, carried from `DesiredResource.allowDuplicateName` (#75).
+   * Only meaningful on `action === "create"`; the executor sends `force: true` in the POST body
+   * when set, and never touches update/delete. Undefined elsewhere.
+   */
+  allowDuplicateName?: boolean;
 }
 
 export interface Plan {

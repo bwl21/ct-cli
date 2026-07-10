@@ -173,6 +173,24 @@ as a normal field update, and `ct adopt group <id>` captures it. Which group
 fields are managed vs. deliberately left to the CT UI is recorded in
 [`docs/group-field-decisions.md`](docs/group-field-decisions.md).
 
+**Same-named groups (#75):** ChurchTools guards group creation by NAME, not by
+this tool's logical key — `POST /groups` 400s (`forbidden.duplicate.group`) if a
+group with that name already exists, even when the two are legitimately
+distinct (e.g. an archived and an active "Kids Elternabend 2026" event signup).
+Opt in per-declaration to create it anyway:
+
+```ts
+ct.group({ key: "kids_2026_b", name: "Kids Elternabend 2026", groupTypeId: 2, allowDuplicateName: true });
+```
+
+`allowDuplicateName` sends CT's `force: true` on the CREATE request only — it is
+never a managed field (not diffed, not in state, not touched on update, and
+never adopted). **Never set it as a default**; it exists for the rare
+intentional-duplicate case. If a create 400s on this guard without the flag
+set, `ct apply`'s stop message explains the likely cause (an unmanaged existing
+group that should be adopted with `ct adopt group <id> --key <key>`) and the
+opt-in as the alternative.
+
 Machine-readable output goes to **stdout** (pipe/`jq` it); human status lines go
 to **stderr**.
 
