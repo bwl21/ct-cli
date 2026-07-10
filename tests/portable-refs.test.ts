@@ -4,6 +4,9 @@
  * acceptance test — one config yielding valid plans against two different hosts (states + catalogs).
  */
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { evaluateConfig, q, churchQuery, ref } from "../src/config/context.js";
 import { buildPlan } from "../src/engine/build.js";
 import { executePlan } from "../src/engine/execute.js";
@@ -104,7 +107,12 @@ describe("apply-time pending re-resolution (same-run campus + group)", () => {
     });
     const state = emptyState("h");
     state.resources.all_mainz = {
-      type: "group", id: 100, key: "all_mainz", fields: { name: "All", groupTypeId: 1 }, adoptedAt: "t", updatedAt: "t",
+      type: "group",
+      id: 100,
+      key: "all_mainz",
+      fields: { name: "All", groupTypeId: 1 },
+      adoptedAt: "t",
+      updatedAt: "t",
     };
     // /groups/100 fetches clean; its ruleset 404s (not yet a dynamic group) → the manual ruleset is a change.
     const host = fakeHost({ "/groups/100": { name: "All", groupTypeId: 1 } }, { "POST /campuses": 42 });
@@ -113,7 +121,9 @@ describe("apply-time pending re-resolution (same-run campus + group)", () => {
 
     const rulesetPut = host.calls.find((c) => c.path === "/dynamicgroups/100/ruleset" && c.method === "PUT")!;
     // PUT envelope: { dynamicGroupRuleSet: [ruleset] } (live-decoded, #77).
-    const body = rulesetPut.body as { dynamicGroupRuleSet: [{ query: { params: { filter: { "==": unknown[] } } } }] };
+    const body = rulesetPut.body as {
+      dynamicGroupRuleSet: [{ query: { params: { filter: { "==": unknown[] } } } }];
+    };
     // The campus ref, pending at plan time, is the freshly-created id (42) in the PUT — not a sentinel.
     expect(body.dynamicGroupRuleSet[0].query.params.filter["=="][1]).toBe(42);
   });
@@ -136,7 +146,12 @@ describe("apply-time pending re-resolution (same-run campus + group)", () => {
     });
     const state = emptyState("h");
     state.resources.all_kids = {
-      type: "group", id: 100, key: "all_kids", fields: { name: "All Kids", groupTypeId: 1 }, adoptedAt: "t", updatedAt: "t",
+      type: "group",
+      id: 100,
+      key: "all_kids",
+      fields: { name: "All Kids", groupTypeId: 1 },
+      adoptedAt: "t",
+      updatedAt: "t",
     };
     const host = fakeHost({ "/groups/100": { name: "All Kids", groupTypeId: 1 } }, { "POST /groups": 55 });
     const { plan } = await buildPlan(host, state, resources);
@@ -146,7 +161,9 @@ describe("apply-time pending re-resolution (same-run campus + group)", () => {
     const putIdx = host.calls.findIndex((c) => c.method === "PUT" && c.path === "/dynamicgroups/100/ruleset");
     expect(createIdx).toBeGreaterThanOrEqual(0);
     expect(putIdx).toBeGreaterThan(createIdx); // target created before the referencing ruleset writes
-    const body = host.calls[putIdx]!.body as { dynamicGroupRuleSet: [{ query: { params: { filter: { "==": unknown[] } } } }] };
+    const body = host.calls[putIdx]!.body as {
+      dynamicGroupRuleSet: [{ query: { params: { filter: { "==": unknown[] } } } }];
+    };
     expect(body.dynamicGroupRuleSet[0].query.params.filter["=="][1]).toBe(55); // the fresh id, not a sentinel
   });
 });
@@ -189,9 +206,12 @@ describe("permission domainId resolution", () => {
     const { permissions } = await evaluateConfig((ct) => {
       ct.groupRole({ key: "p", group: "kids", role: "Leiter", grants: ["churchgroup:administer groups"] });
     });
-    const state: State = { ...emptyState("h"), resources: {
-      kids: { type: "group", id: 42, key: "kids", fields: {}, adoptedAt: "t", updatedAt: "t" },
-    } };
+    const state: State = {
+      ...emptyState("h"),
+      resources: {
+        kids: { type: "group", id: 42, key: "kids", fields: {}, adoptedAt: "t", updatedAt: "t" },
+      },
+    };
     const client = {
       get: async <T>(path: string): Promise<T> => {
         if (path === "/groups/42/roles") return [{ id: 7001, name: "Leiter" }] as T;
@@ -250,8 +270,18 @@ describe("acceptance: one config, two hosts", () => {
     const b = await planFor(77, emptyState("https://b.church.tools"));
 
     const groupOf = (p: typeof a.plan) => p.items.find((i) => i.key === "kids")!;
-    expect(groupOf(a.plan).changes).toContainEqual({ field: "groupTypeId", from: undefined, to: 2, source: "config" });
-    expect(groupOf(b.plan).changes).toContainEqual({ field: "groupTypeId", from: undefined, to: 77, source: "config" });
+    expect(groupOf(a.plan).changes).toContainEqual({
+      field: "groupTypeId",
+      from: undefined,
+      to: 2,
+      source: "config",
+    });
+    expect(groupOf(b.plan).changes).toContainEqual({
+      field: "groupTypeId",
+      from: undefined,
+      to: 77,
+      source: "config",
+    });
 
     // Permission domainId is resolved per host from the same logical ref.
     expect(a.items[0]?.domainId).toBe(2);
@@ -260,5 +290,117 @@ describe("acceptance: one config, two hosts", () => {
     // Both plans create the campus + group (2 creates each) — the config is valid against both hosts.
     expect(a.plan.items.filter((i) => i.action === "create")).toHaveLength(2);
     expect(b.plan.items.filter((i) => i.action === "create")).toHaveLength(2);
+  });
+});
+
+describe("portable ruleset snapshot files (#76)", () => {
+  // The existing coverage above proves a logical ref resolves per-host when the ruleset is authored
+  // INLINE (a `churchQuery(...)` build in the config module). #76 is about the OTHER supply form: a
+  // captured `{ ref: "./rulesets/<key>.json" }` snapshot FILE. Adopted snapshots come out of CT as
+  // byte-faithful JSON with that instance's raw numeric ids baked into the query — not portable.
+  //
+  // The portable form replaces an entity id in a query `var` position with a logical `{__ctRef}`
+  // marker (exactly what `ref.campus("mainz")` serialises to as JSON). These tests pin two properties
+  // the eventual #76 tooling depends on, so a future refactor of the resolution/normalization pass
+  // can't silently regress them:
+  //   1. a marker embedded in a ruleset FILE resolves to each host's id at plan time, and
+  //   2. once resolved, the ruleset diffs BYTE-FAITHFULLY against CT — a matching instance is a no-op.
+  const dir = mkdtempSync(join(tmpdir(), "ct-portable-rs-"));
+  const rulesetFile = "portable.json";
+  // A campus id expressed as a logical marker instead of a raw instance-specific number. JSON.stringify
+  // of `ref.campus("mainz")` is `{"__ctRef":true,"kind":"campus","key":"mainz"}` — a plain, hand-editable
+  // JSON leaf that `isRef` recognises when the file is parsed back in.
+  const authoredRuleset = {
+    description: "Auto members in Mainz",
+    importance: 0,
+    personIdFieldName: "person.id",
+    query: churchQuery(q.eq("ctgroup.campusId", ref.campus("mainz"))),
+    process: {},
+  };
+  writeFileSync(join(dir, rulesetFile), JSON.stringify(authoredRuleset));
+
+  /** State with only the (already-managed) dynamic group — the campus resolves from the live `/campuses` catalog. */
+  function stateWithGroup(host: string): State {
+    const s = emptyState(host);
+    s.resources.all_mainz = {
+      type: "group",
+      id: 100,
+      key: "all_mainz",
+      fields: { name: "All", groupTypeId: 1 },
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
+    return s;
+  }
+
+  async function config() {
+    return (
+      await evaluateConfig((ct) => {
+        ct.group({
+          key: "all_mainz",
+          name: "All",
+          groupTypeId: 1,
+          dynamic: { status: "manual", ruleset: { ref: `./${rulesetFile}` } },
+        });
+      })
+    ).resources;
+  }
+
+  it("resolves the file's marker to each host's campus id in the ruleset PUT (dev vs prod)", async () => {
+    // Same config + same snapshot file, two instances whose "Mainz" campus has a different id.
+    for (const [host, campusId] of [
+      ["https://dev.church.tools", 42],
+      ["https://prod.church.tools", 7],
+    ] as const) {
+      const resources = await config();
+      const state = stateWithGroup(host);
+      // `/campuses` catalog gives this host's Mainz id; the group's ruleset 404s (not yet a dynamic
+      // group) so the manual ruleset is a create → a PUT on apply, whose body we can inspect.
+      const client = fakeHost({
+        "/groups/100": { name: "All", groupTypeId: 1 },
+        "/campuses": [{ id: campusId, name: "Mainz" }],
+      });
+      const { plan } = await buildPlan(client, state, resources, { configDir: dir });
+      await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: () => "t" });
+
+      const put = client.calls.find((c) => c.method === "PUT" && c.path === "/dynamicgroups/100/ruleset")!;
+      const body = put.body as {
+        dynamicGroupRuleSet: [{ query: { params: { filter: { "==": unknown[] } } } }];
+      };
+      // The marker became THIS host's campus id — not a leaked `{__ctRef}` sentinel, not the other host's id.
+      expect(body.dynamicGroupRuleSet[0].query.params.filter["=="][1]).toBe(campusId);
+    }
+  });
+
+  it("is a byte-faithful no-op when CT already holds the ruleset with the resolved id", async () => {
+    const campusId = 42;
+    const resources = await config();
+    const state = stateWithGroup("https://dev.church.tools");
+    // CT's live ruleset already filters on the resolved campus id (42) — what a prior apply wrote.
+    // GET returns the single-element `[RuleSet]` array with read-only timestamps CT adds.
+    const liveRuleset = {
+      description: "Auto members in Mainz",
+      importance: 0,
+      personIdFieldName: "person.id",
+      query: churchQuery(q.eq("ctgroup.campusId", campusId)),
+      process: {},
+      dynamicGroupUpdateStarted: "2026-07-10T00:00:00Z",
+      dynamicGroupUpdateFinished: "2026-07-10T00:01:00Z",
+    };
+    const client = fakeHost({
+      "/groups/100": { name: "All", groupTypeId: 1 },
+      "/campuses": [{ id: campusId, name: "Mainz" }],
+      "/dynamicgroups/100/ruleset": [liveRuleset],
+      "/dynamicgroups/100/status": { dynamicGroupStatus: "manual" },
+    });
+    const { plan, fetchErrors } = await buildPlan(client, state, resources, { configDir: dir });
+
+    expect(fetchErrors).toEqual([]);
+    const item = plan.items.find((i) => i.key === "all_mainz")!;
+    // The desired ruleset (marker → 42, normalized) equals CT's stored ruleset (timestamps stripped),
+    // so there is no `dynamic` change and the whole group item is a no-op — the resolved logical form
+    // diffs byte-faithfully, exactly what a portable snapshot needs to not re-PUT on every apply.
+    expect(item.action).toBe("no-op");
+    expect(item.changes.some((c) => c.field === "dynamic")).toBe(false);
   });
 });
