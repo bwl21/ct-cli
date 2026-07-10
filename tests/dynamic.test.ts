@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { normalizeRuleset, stripCosmeticLabels, coerceScalars, normalizeDynamic } from "../src/engine/dynamic.js";
+import { normalizeRuleset, stripCosmeticLabels, coerceScalars, normalizeDynamic, putRulesetBody } from "../src/engine/dynamic.js";
 
 describe("stripCosmeticLabels", () => {
   it("unwraps a dterm with a string label to its expr, recursively", () => {
@@ -79,6 +79,20 @@ describe("normalizeRuleset", () => {
       expect(normalizeRuleset(once)).toEqual(once);                 // idempotent
       expect(JSON.stringify(once)).not.toContain("dterm");          // cosmetic labels stripped
     }
+  });
+});
+
+describe("putRulesetBody (#77)", () => {
+  it("wraps the ruleset in a single-element array, matching GET's [RuleSet] shape exactly", () => {
+    const ruleset = { description: "x", query: {}, process: {} };
+    expect(putRulesetBody(ruleset)).toEqual([ruleset]);
+  });
+
+  it("is NOT the { dynamicGroupRuleSet } object envelope — CT 3.134.1 500s on that shape", () => {
+    const ruleset = { description: "x", query: {}, process: {} };
+    const body = putRulesetBody(ruleset);
+    expect(Array.isArray(body)).toBe(true);
+    expect(body).not.toHaveProperty("dynamicGroupRuleSet");
   });
 });
 

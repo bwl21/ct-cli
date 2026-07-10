@@ -14,7 +14,7 @@ import { assertNotPeople } from "./guard.js";
 import { deepEqual } from "./plan.js";
 import { mapConcurrent } from "../util/concurrency.js";
 import { info, warn, formatError } from "../ui.js";
-import { normalizeDynamic, normalizeRuleset, resolveRulesetRef } from "./dynamic.js";
+import { normalizeDynamic, normalizeRuleset, putRulesetBody, resolveRulesetRef } from "./dynamic.js";
 import type { DynamicStatus } from "./types.js";
 
 /** How many dynamic groups to fetch (ruleset + status) from ChurchTools at once. Mirrors build.ts. */
@@ -192,7 +192,7 @@ const dynamicField: SyntheticField = {
     const rulesetChanged = from?.ruleset === undefined || !deepEqual(from.ruleset, to.ruleset);
     if (rulesetChanged) {
       assertNotPeople(`/dynamicgroups/${id}/ruleset`);
-      await client.request("PUT", `/dynamicgroups/${id}/ruleset`, { dynamicGroupRuleSet: to.ruleset });
+      await client.request("PUT", `/dynamicgroups/${id}/ruleset`, putRulesetBody(to.ruleset));
     }
     assertNotPeople(`/dynamicgroups/${id}/status`);
     await client.request("PUT", `/dynamicgroups/${id}/status`, { dynamicGroupStatus: to.status });

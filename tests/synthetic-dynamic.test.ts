@@ -136,14 +136,16 @@ describe("dynamic synthetic field — fold", () => {
 });
 
 describe("dynamic synthetic field — apply", () => {
-  it("PUTs the wrapped ruleset then the status", async () => {
+  it("PUTs the ruleset wrapped in the [RuleSet] array envelope (#77), then the status", async () => {
     const request = vi.fn(async () => ({}));
     const state: State = { version: 1, host: "h", resources: {} };
     await dynamicField().apply({ client: { request } as unknown as Pick<CtClient, "request">, state, id: 5,
       change: { field: "dynamic", from: undefined,
         to: { status: "active", ruleset: { description: "x", query: {}, process: {} } } } });
+    // CT 3.134.1 500s on a bare object — the PUT body must match GET's [RuleSet] array shape exactly,
+    // NOT a `{ dynamicGroupRuleSet }` wrapper.
     expect(request).toHaveBeenNthCalledWith(1, "PUT", "/dynamicgroups/5/ruleset",
-      { dynamicGroupRuleSet: { description: "x", query: {}, process: {} } });
+      [{ description: "x", query: {}, process: {} }]);
     expect(request).toHaveBeenNthCalledWith(2, "PUT", "/dynamicgroups/5/status", { dynamicGroupStatus: "active" });
   });
 
@@ -168,7 +170,7 @@ describe("dynamic synthetic field — apply", () => {
         from: { status: "active", ruleset: { description: "old", query: {}, process: {} } },
         to: { status: "active", ruleset: { description: "new", query: {}, process: {} } } } });
     expect(request).toHaveBeenNthCalledWith(1, "PUT", "/dynamicgroups/5/ruleset",
-      { dynamicGroupRuleSet: { description: "new", query: {}, process: {} } });
+      [{ description: "new", query: {}, process: {} }]);
     expect(request).toHaveBeenNthCalledWith(2, "PUT", "/dynamicgroups/5/status", { dynamicGroupStatus: "active" });
   });
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
-import { normalizeRuleset } from "../src/engine/dynamic.js";
+import { normalizeRuleset, putRulesetBody } from "../src/engine/dynamic.js";
 import { diffFields } from "../src/engine/plan.js";
 import { syntheticField } from "../src/engine/synthetic.js";
 import { authedSession } from "../src/api/session.js";
@@ -18,7 +18,7 @@ describe.runIf(live)("dynamic round-trip (live)", () => {
     const { client } = await authedSession();
     const before = await client.get<Record<string, unknown>>(`/dynamicgroups/${GID}/ruleset`);
     const normalized = normalizeRuleset(before);
-    await client.request("PUT", `/dynamicgroups/${GID}/ruleset`, { dynamicGroupRuleSet: normalized });
+    await client.request("PUT", `/dynamicgroups/${GID}/ruleset`, putRulesetBody(normalized));
     const after = await client.get<Record<string, unknown>>(`/dynamicgroups/${GID}/ruleset`);
     expect(normalizeRuleset(after)).toEqual(normalized); // writing back the normalized form does not drift
   });
@@ -93,7 +93,7 @@ describe.runIf(live && liveWrite)("dynamic ruleset round-trip pin (#36, live wri
         process: {},
       };
 
-      await client.request("PUT", `/dynamicgroups/${GID}/ruleset`, { dynamicGroupRuleSet: authored });
+      await client.request("PUT", `/dynamicgroups/${GID}/ruleset`, putRulesetBody(authored));
       const after = await client.get<Record<string, unknown>>(`/dynamicgroups/${GID}/ruleset`);
 
       const wantNorm = normalizeRuleset(authored);
@@ -146,7 +146,7 @@ describe.runIf(live && liveWrite)("dynamic ruleset round-trip pin (#36, live wri
       expect(dynamicChange, `plan is not a no-op after the PUT: ${JSON.stringify(dynamicChange)}`).toBeUndefined();
     } finally {
       // Restore the prior ruleset so the dev instance isn't left mutated by this test.
-      await client.request("PUT", `/dynamicgroups/${GID}/ruleset`, { dynamicGroupRuleSet: normalizeRuleset(before) });
+      await client.request("PUT", `/dynamicgroups/${GID}/ruleset`, putRulesetBody(normalizeRuleset(before)));
     }
   });
 });

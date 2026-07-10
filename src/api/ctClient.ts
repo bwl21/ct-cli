@@ -35,7 +35,10 @@ export class CtApiError extends Error {
   }
 }
 
-type Json = Record<string, unknown>;
+// Most write bodies are objects, but a few (dynamic-group ruleset PUT, #77) are a single-element
+// array — CT's array-envelope endpoints expect the request body itself to be an array, not an
+// object wrapper.
+type Json = Record<string, unknown> | unknown[];
 
 /**
  * ChurchTools' list-endpoint pagination envelope, carried as `meta.pagination`
