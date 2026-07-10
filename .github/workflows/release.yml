@@ -18,7 +18,8 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write
+  contents: write # semantic-release: create the tag + GitHub Release
+  packages: write # @semantic-release/npm: publish @eqrm/ct-cli to GitHub Packages (npm.pkg.github.com)
 
 jobs:
   # CI gate + build the release assets every job below needs. Binaries are cross-
@@ -145,6 +146,12 @@ jobs:
         with:
           node-version: 22
 
+      # @semantic-release/npm publishes the package from THIS working tree, so `dist/`
+      # must exist and devDependencies (tsup, via the `prepare` script) must be present
+      # here — the `release-assets` artifact only carries the binaries, not `dist/`.
+      - run: npm ci
+      - run: npm run build
+
       - uses: actions/download-artifact@v4
         with:
           name: release-assets
@@ -154,13 +161,21 @@ jobs:
 
       # Pinned via npx rather than added as devDependencies (see #9) — this repo
       # doesn't otherwise need semantic-release, so keep it out of package.json.
+      # @semantic-release/npm bumps the in-workspace version and publishes
+      # @eqrm/ct-cli to GitHub Packages (registry from package.json publishConfig);
+      # NPM_TOKEN=GITHUB_TOKEN authenticates against npm.pkg.github.com (needs the
+      # packages:write permission above). It only publishes when commit-analyzer
+      # finds a releasable change, and never to public npm (publishConfig pins the
+      # registry). Consumers in the org install it with just GITHUB_TOKEN — no PAT.
       - name: Run semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           npx --yes \
             -p semantic-release@24 \
             -p @semantic-release/commit-analyzer@13 \
             -p @semantic-release/release-notes-generator@14 \
+            -p @semantic-release/npm@12 \
             -p @semantic-release/github@11 \
             semantic-release
