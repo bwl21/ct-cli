@@ -30,6 +30,14 @@ Methods marked only if they actually exist on the matched path. "Update" = PUT o
 | 11  | `ct_meeting_point`     | — none —                                                                                                                                                                                       | ❌                                     | ❌                                          | ❌                      | ❌                  | **Not in API → fully manual.** Zero matches for `treffpunkt`/`meetingpoint`/`meeting point` anywhere in the spec. Closest neighbours are _meeting templates_ (`/group/meetingtemplates`, full CRUD) and _group meetings_ (`/groups/{groupId}/meetings`, CRUD) — different concepts; confirm with product whether "meeting point" was meant to be one of those. |
 | 12  | `ct_relationship_type` | `/person/relationshiptypes`, `/person/relationshiptypes/{id}`                                                                                                                                  | list ✅ / by-id ✅                     | ✅                                          | ✅ PUT                  | ✅                  | **Full CRUD**                                                                                                                                                                                                                                                                                                                                                  |
 
+> **Create-time required fields (#73).** The "POST ✅" marks above were spec-derived, not live-exercised for
+> create. CT's POST validators require fields the tool does not manage for diffing: `group-type` needs
+> `namePlural`/`shorty`/`color`/`permissionDepth`/`isLeaderNecessary`/`availableForNewPerson` (+ `sortKey`/`postsEnabled`),
+> and `group-role` needs `shorty`. These are supplied as deterministic create-only defaults
+> (`AdoptableResource.createDefaults`, derived from the declared `name`) — merged into the POST body only, never
+> recorded in state, so they stay unmanaged. `campus` (name+shorty, live-verified), `group`, `age-group`, and
+> `target-group` need only `name` from their managed set and require no defaults.
+
 ## MVP recommendation
 
 ### Fully writable now (ship CRUD in the MVP) — 7 resources

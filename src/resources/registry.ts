@@ -25,6 +25,16 @@ export interface AdoptableResource {
   /** The subset of fields we manage — the desired-state baseline. */
   managedFields: (resource: Record<string, unknown>) => Record<string, unknown>;
   /**
+   * Deterministic values for fields CT *requires* at CREATE but the tool does not manage for
+   * diffing (#73). Called with the already-built create body (the declared managed fields, which
+   * carry `name`) and returns extra fields merged UNDER it (a declared value always wins) into the
+   * POST body ONLY — never into the state snapshot. So these fields stay unmanaged: a later plan
+   * neither diffs nor reverts them, and declared-fields semantics are unchanged (no state migration).
+   * A field still missing after this surfaces as CT's own HTTP 400 (#71), never a silent omission.
+   * Omit the hook entirely for types whose managed fields already satisfy the create contract.
+   */
+  createDefaults?: (body: Record<string, unknown>) => Record<string, unknown>;
+  /**
    * DSL function name `configSnippet` emits for this type. Defaults to the camelCase of
    * the type name. Set it when the natural camelCase collides with another DSL surface
    * (e.g. `group-role` → `roleDefinition`, because `groupRole` is the permission function).
@@ -54,6 +64,34 @@ export function slug(value: string): string {
 function str(resource: Record<string, unknown>, key: string): string {
   const value = resource[key];
   return typeof value === "string" ? value : "";
+}
+
+/**
+ * First `max` *code points* (not UTF-16 code units) of `value` — CT's create validators cap several
+ * name/shorty fields. Plain `String#slice` operates on UTF-16 code units, which can split an astral
+ * character's surrogate pair at the cutoff (e.g. `("ABCDEFGHI" + "😀").slice(0, 10)` ends in a lone
+ * unpaired `\uD83D`); `Array.from` iterates strings by code point, so the cut always lands on a whole
+ * character and the result can never contain a dangling surrogate.
+ */
+function truncate(value: string, max: number): string {
+  return Array.from(value).slice(0, max).join("");
+}
+
+/**
+ * `truncate(value, max)`, then padded up to `min` characters by repeating `value` (or `"x"` if
+ * `value` is empty) — CT's create validators give several name/shorty-style fields *both* a maximum
+ * and a minimum length, and a name shorter than `min` (e.g. a 1-char group-type name against
+ * namePlural's 2-char floor) would otherwise merely truncate to itself and stay under the minimum.
+ * The padding is deliberately dumb (repeat, don't pluralize) — a name this short is pathological;
+ * the goal is a valid create body, not linguistics.
+ */
+function truncatePadded(value: string, max: number, min: number): string {
+  let padded = value;
+  while (Array.from(padded).length < min) {
+    // (code-point count, matching truncate() — a single-astral-char name must still pad)
+    padded += value.length > 0 ? value : "x";
+  }
+  return truncate(padded, max);
 }
 
 /** Read a field, preferring a nested `information` object but falling back to the top level. */
@@ -96,6 +134,30 @@ export const RESOURCES: Record<string, AdoptableResource> = {
     tier: 0,
     deriveKey: (r) => slug(str(r, "name")),
     managedFields: (r) => ({ name: r.name, nameTranslated: r.nameTranslated }),
+    // POST /group/grouptypes rejects a body carrying only name/nameTranslated: CT requires the fields
+    // below (validated live on CT 3.134.1, #73, and against the OpenAPI POST schema). They are unmanaged
+    // (create-only) and derived deterministically from the declared `name`. If a user declares one of
+    // them the existing unknown-field warning fires (it is not in `managedFields`) — we keep them
+    // create-default-only rather than growing `managedFields`, which would broaden every group-type's
+    // actual-reads and adopt output and grow state on the next apply (a de-facto migration #73 forbids).
+    createDefaults: (r) => {
+      const name = str(r, "name");
+      return {
+        // required, 2–30 chars: no plural known at create → mirror name, capped, and padded up to
+        // the 2-char floor (a 1-char name would otherwise truncate to itself and stay under it).
+        namePlural: truncatePadded(name, 30, 2),
+        // required, 1–10 chars: first ≤10 chars of the name, padded up to the 1-char floor — the
+        // floor only bites if `name` itself is empty (`str` defaults a missing/non-string name to
+        // "", which `truncatePadded` falls back to `"x"` for rather than emitting an empty shorty).
+        shorty: truncatePadded(name, 10, 1),
+        color: "default", // required enum: the theme-neutral member of CT's color palette
+        permissionDepth: 1, // required int: permissions reach the group's own members only (least-privilege; the value a plain live type carries)
+        isLeaderNecessary: false, // don't force a leader onto a freshly created type
+        availableForNewPerson: false, // keep the type out of self-service / new-person flows by default
+        sortKey: 0, // append-neutral ordering (matches a live "Dienst" row's sortKey 0)
+        postsEnabled: false, // don't enable the group wall / posts feature by default
+      };
+    },
   }),
   "age-group": define({
     collectionPath: "/group/agegroups",
@@ -130,6 +192,11 @@ export const RESOURCES: Record<string, AdoptableResource> = {
     tier: 3,
     deriveKey: (r) => slug(str(r, "name")),
     managedFields: (r) => ({ name: r.name, nameTranslated: r.nameTranslated, groupTypeId: r.groupTypeId }),
+    // POST /group/roles requires `shorty` (1–10 chars, non-nullable in CT's OpenAPI POST schema) which
+    // the tool does not manage (#73 audit). Sent at CREATE only, derived from the declared `name`; not
+    // diffed afterward. (`type`/`isLeader`/`sortKey` are all optional/nullable — no default needed.)
+    // Padded up to the 1-char floor for the same empty-name edge case as group-type's shorty above.
+    createDefaults: (r) => ({ shorty: truncatePadded(str(r, "name"), 10, 1) }),
     // `groupRole` is taken by the permissions DSL (`ct.groupRole` = definePermission("group_role")),
     // so the master-data role resource declares under a distinct name.
     dslName: "roleDefinition",

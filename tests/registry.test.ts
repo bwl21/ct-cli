@@ -203,6 +203,92 @@ describe("write specs", () => {
   });
 });
 
+describe("createDefaults — required-but-unmanaged create fields (#73)", () => {
+  it("group-type fills every field CT requires at POST, derived from the declared name", () => {
+    expect(RESOURCES["group-type"]?.createDefaults?.({ name: "Dienst", nameTranslated: "Dienst" })).toEqual({
+      namePlural: "Dienst",
+      shorty: "Dienst",
+      color: "default",
+      permissionDepth: 1,
+      isLeaderNecessary: false,
+      availableForNewPerson: false,
+      sortKey: 0,
+      postsEnabled: false,
+    });
+  });
+
+  it("group-type truncates namePlural to 30 and shorty to 10 chars", () => {
+    const name = "Superlange Kleingruppen Bezeichnung"; // 35 chars
+    const defaults = RESOURCES["group-type"]?.createDefaults?.({ name });
+    expect(defaults?.namePlural).toBe(name.slice(0, 30));
+    expect((defaults?.namePlural as string).length).toBe(30);
+    expect(defaults?.shorty).toBe("Superlange");
+    expect((defaults?.shorty as string).length).toBe(10);
+  });
+
+  it("group-type keeps a short name intact (no padding, no truncation)", () => {
+    const defaults = RESOURCES["group-type"]?.createDefaults?.({ name: "Team" });
+    expect(defaults?.namePlural).toBe("Team");
+    expect(defaults?.shorty).toBe("Team");
+  });
+
+  it("group-role fills the required `shorty` from the declared name (truncated to 10)", () => {
+    expect(
+      RESOURCES["group-role"]?.createDefaults?.({ name: "Verantwortlicher", groupTypeId: 2 }),
+    ).toEqual({ shorty: "Verantwort" });
+  });
+
+  it("pads a 1-char group-type name's namePlural up to CT's 2-char minimum", () => {
+    // truncate(name, 30) alone has no lower bound, so a 1-char name would otherwise produce a
+    // 1-char namePlural — invalid against CT's 2–30 char requirement (reviewer finding, #73).
+    const defaults = RESOURCES["group-type"]?.createDefaults?.({ name: "A" });
+    expect((defaults?.namePlural as string).length).toBeGreaterThanOrEqual(2);
+    expect(defaults?.namePlural).toBe("AA"); // dumb-simple deterministic padding: repeat the name
+    expect(defaults?.shorty).toBe("A"); // shorty's 1-char floor is already met by any non-empty name
+  });
+
+  it("guards an empty group-type name so namePlural/shorty stay non-empty and valid", () => {
+    // `name` is expected non-empty by the time createDefaults runs, but guard anyway: an empty
+    // string would otherwise pad-loop forever (appending "" never grows the string).
+    const defaults = RESOURCES["group-type"]?.createDefaults?.({ name: "" });
+    expect((defaults?.namePlural as string).length).toBeGreaterThanOrEqual(2);
+    expect((defaults?.shorty as string).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("truncates shorty (max 10) by code point, never splitting an emoji's surrogate pair", () => {
+    // Exact repro of the reviewer's finding: plain UTF-16 `.slice(0, 10)` on "ABCDEFGHI😀X" lands on
+    // the emoji's high surrogate and drops its low surrogate, leaving a lone \uD83D at the cutoff.
+    const defaults = RESOURCES["group-type"]?.createDefaults?.({ name: "ABCDEFGHI😀X" });
+    const shorty = defaults?.shorty as string;
+    expect(shorty).toBe("ABCDEFGHI😀");
+    expect(shorty).not.toMatch(/[\uD800-\uDBFF]$/); // no dangling high surrogate at the cutoff
+    expect(shorty).not.toMatch(/^[\uDC00-\uDFFF]/); // (and no orphaned low surrogate leading in)
+
+    // group-role's shorty goes through the same helper — cover that call site too.
+    const roleDefaults = RESOURCES["group-role"]?.createDefaults?.({ name: "ABCDEFGHI😀X" });
+    const roleShorty = roleDefaults?.shorty as string;
+    expect(roleShorty).not.toMatch(/[\uD800-\uDBFF]$/);
+    expect(roleShorty).not.toMatch(/^[\uDC00-\uDFFF]/);
+  });
+
+  it("truncates namePlural (max 30) by code point, never splitting an emoji's surrogate pair", () => {
+    // Same split, at the 30-char boundary instead of 10: 29 ASCII chars put the emoji's surrogate
+    // pair exactly on the cutoff.
+    const defaults = RESOURCES["group-type"]?.createDefaults?.({ name: "A".repeat(29) + "😀" + "XYZ" });
+    const namePlural = defaults?.namePlural as string;
+    expect(namePlural).toBe("A".repeat(29) + "😀");
+    expect(namePlural).not.toMatch(/[\uD800-\uDBFF]$/);
+    expect(namePlural).not.toMatch(/^[\uDC00-\uDFFF]/);
+  });
+
+  it("does not attach create-defaults to types whose managed fields already satisfy the create contract", () => {
+    // campus (name+shorty) is verified working live; group/age-group/target-group need only `name`.
+    for (const type of ["campus", "group", "age-group", "target-group", "relationship-type"]) {
+      expect(RESOURCES[type]?.createDefaults).toBeUndefined();
+    }
+  });
+});
+
 describe("knownFields (#51)", () => {
   it("derives the campus allowlist from managedFields — 'shorty', not the vestigial 'shortName'", () => {
     expect(knownFields("campus")).toEqual(new Set(["name", "shorty"]));

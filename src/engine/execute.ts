@@ -104,8 +104,14 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
       const changes = reresolveChanges(item.changes);
       if (item.action === "create") {
         const body = snapshotFromChanges({}, changes);
+        // CT requires fields at CREATE that the tool does not manage for diffing (#73). Merge the
+        // registry's deterministic create-defaults UNDER the declared body (declared values always
+        // win) for the POST ONLY. State still records `body` (the managed fields), so the defaults
+        // stay unmanaged — a later plan neither diffs nor reverts them. A field still missing after
+        // this surfaces as CT's HTTP 400 (#71), not a silent omission.
+        const createBody = spec.createDefaults ? { ...spec.createDefaults(body), ...body } : body;
         assertNotPeople(spec.collectionPath);
-        const res = await client.request<{ id: number }>("POST", spec.collectionPath, body);
+        const res = await client.request<{ id: number }>("POST", spec.collectionPath, createBody);
         if (typeof res.id !== "number") {
           throw new Error(`create returned no numeric id (got ${JSON.stringify(res.id)})`);
         }
