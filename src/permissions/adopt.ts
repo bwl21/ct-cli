@@ -17,7 +17,7 @@
 import type { State } from "../state/state.js";
 import { findByTypeId } from "../state/state.js";
 import { CATALOG } from "./catalog.js";
-import { normalizeActual, type DomainType, type GrantTuple, type RawPermission } from "./grants.js";
+import { normalizeActual, isInheritedOnlyRight, type DomainType, type GrantTuple, type RawPermission } from "./grants.js";
 
 /** DSL function name for each domain type — the call the emitted block should be pasted as. */
 const DSL_FN: Record<DomainType, string> = {
@@ -184,7 +184,8 @@ function grantLines(
   // Mirror the planner's writability guard: `desiredTuples` throws for group_type_role grants
   // with authId >= 10000 (the `churchdb:+…` family) — they are readable here via inheritance but
   // not writable on this domain type, so emitting them would break the paste-and-plan round trip.
-  if (domainType === "group_type_role" && g.authId >= 10000) {
+  // The reconciler excludes these SAME rows from the actual set via the shared predicate (#65).
+  if (isInheritedOnlyRight(domainType, g.authId)) {
     return {
       omitted: true,
       lines: [

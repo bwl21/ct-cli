@@ -5,6 +5,32 @@
  */
 export type DomainType = "group_role" | "group_type_role";
 
+/**
+ * Smallest authId of the inheritance-only rights family (the `churchdb:+…` rights). These reach
+ * roles via inheritance and are NOT writable on a group_type_role domain — CT exposes them as
+ * readable rows there, but any write is rejected.
+ */
+export const INHERITED_RIGHT_MIN_AUTH_ID = 10000;
+
+/**
+ * Whether a right is readable-but-not-writable on this domain type: it reaches roles via
+ * inheritance only, so it can neither be declared (`desiredTuples` throws for it) nor adopted
+ * (adopt emits it as a NOTE comment, never an active grant).
+ *
+ * SINGLE SOURCE OF TRUTH — this predicate MUST be shared by three sites that would otherwise drift
+ * and reopen issue #65:
+ *  1. `desiredTuples` (plan.ts) rejects declaring such a right,
+ *  2. `emitAdoptedGrants` (adopt.ts) excludes it from the emitted block, and
+ *  3. `buildPermissionPlan` (plan.ts) excludes matching LIVE rows from the ACTUAL diff set.
+ * If (1)/(2) exclude a right but (3) keeps it, the plan demands a revoke the DSL can never satisfy
+ * — pasted adopt output can never converge to a no-op (the #65 bug).
+ *
+ * Today only group_type_role carries such rights (authId >= 10000).
+ */
+export function isInheritedOnlyRight(domainType: DomainType, authId: number): boolean {
+  return domainType === "group_type_role" && authId >= INHERITED_RIGHT_MIN_AUTH_ID;
+}
+
 export interface GrantTuple {
   authId: number;
   dataId: number[];

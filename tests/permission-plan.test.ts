@@ -143,6 +143,60 @@ describe("buildPermissionPlan", () => {
     expect(warnings.some((w) => w.includes("987654") && w.includes("group_type_role #8"))).toBe(true);
   });
 
+  it("excludes inherited rights (authId >= 10000) from the ACTUAL diff set on group_type_role (#65)", async () => {
+    // eqrm prod, group_type_role 9: 5 writable user grants are declared, but the domain also reads
+    // back inherited churchdb:+… rows (authId >= 10000) that CANNOT be declared (desiredTuples
+    // rejects them) nor adopted (emitted as NOTE comments). If those live rows entered the ACTUAL
+    // set they would have no desired counterpart and land in toDelete — the #65 bug ("0 to grant,
+    // 24 to remove", a no-op that can never converge). They must be excluded from the diff.
+    const client = { get: vi.fn(async () => [
+      // the one writable, user-authored grant that IS declared
+      { domainType: "group_type_role", domainId: 9, authId: 1113, dataId: null, type: "grant", meta: { modifiedPid: 5 } },
+      // inherited-only rows (authId >= 10000): unscoped, scoped [1], scoped [2]
+      { domainType: "group_type_role", domainId: 9, authId: 10101, dataId: null, type: "grant", meta: { modifiedPid: 5 } },
+      { domainType: "group_type_role", domainId: 9, authId: 10102, dataId: 1, type: "grant", meta: { modifiedPid: 5 } },
+      { domainType: "group_type_role", domainId: 9, authId: 10133, dataId: 2, type: "grant", meta: { modifiedPid: 5 } },
+    ]) };
+    const { items, warnings, fetchErrors } = await buildPermissionPlan(client as never, state,
+      [{ key: "struktur", domainType: "group_type_role", domainId: 9, grants: ["churchgroup:administer groups"] }]);
+    expect(fetchErrors).toEqual([]);
+    expect(items[0]?.diff.toPut).toEqual([]);    // the declared writable grant already matches
+    expect(items[0]?.diff.toDelete).toEqual([]); // NONE of the inherited rows are proposed for revocation
+    // a single informational summary line, not one warning per inherited row
+    const inheritedWarnings = warnings.filter((w) => w.includes("inherited right"));
+    expect(inheritedWarnings).toHaveLength(1);
+    expect(inheritedWarnings[0]).toMatch(/group_type_role #9.*3 inherited right/);
+  });
+
+  it("group_role does NOT exclude authId >= 10000 — only group_type_role inherits (#65)", async () => {
+    // The predicate is domain-scoped: on group_role the churchdb:+… rights ARE writable/declarable,
+    // so a live one that is undeclared must still be revoked (no accidental blanket exclusion).
+    const client = { get: vi.fn(async (path: string) => {
+      if (path === "/groups/42/roles") return [{ id: 2882, name: "Leiter" }];
+      if (path === "/permissions/group_role") return [
+        { domainType: "group_role", domainId: 2882, authId: 10122, dataId: null, type: "grant", meta: { modifiedPid: 5 } },
+      ];
+      throw new Error(`unexpected path ${path}`);
+    }) };
+    const { items } = await buildPermissionPlan(client as never, state, [
+      { key: "kids_lead", domainType: "group_role", domainId: ref.groupRole("kids_area", "Leiter"), grants: [] },
+    ]);
+    expect(items[0]?.diff.toDelete).toEqual([{ authId: 10122, dataId: [], type: "grant" }]);
+  });
+
+  it("still revokes a REAL user-authored grant (authId < 10000) that is undeclared (#65 guard)", async () => {
+    // Regression guard: the inherited-rights exclusion must NOT swallow ordinary undeclared grants —
+    // those are exactly the drift a plan is meant to surface as a revoke.
+    const client = { get: vi.fn(async () => [
+      { domainType: "group_type_role", domainId: 9, authId: 1113, dataId: null, type: "grant", meta: { modifiedPid: 5 } }, // declared
+      { domainType: "group_type_role", domainId: 9, authId: 1104, dataId: 42, type: "grant", meta: { modifiedPid: 5 } },   // undeclared user grant
+      { domainType: "group_type_role", domainId: 9, authId: 10101, dataId: null, type: "grant", meta: { modifiedPid: 5 } }, // inherited → excluded
+    ]) };
+    const { items } = await buildPermissionPlan(client as never, state,
+      [{ key: "struktur", domainType: "group_type_role", domainId: 9, grants: ["churchgroup:administer groups"] }]);
+    expect(items[0]?.diff.toDelete).toEqual([{ authId: 1104, dataId: [42], type: "grant" }]);
+  });
+
   it("warns when the instance CT version differs from the catalog's recorded version (#25)", async () => {
     const client = { get: vi.fn(async () => []) };
     const { warnings } = await buildPermissionPlan(client as never, state,
