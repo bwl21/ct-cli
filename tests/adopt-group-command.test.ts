@@ -41,6 +41,10 @@ function makeClient() {
     { id: 9, name: "Other Type" },
   ];
   // Master-data catalogs the reverse resolver reads to sugar numeric ids back to logical keys (#52).
+  // groupStatusId has NO such catalog (#67) — /group/memberstatus is deliberately NOT wired here for
+  // that purpose; it is still mocked below only because `--children-of`/etc. share the same `get`
+  // dispatcher with other tests exercising member statuses, and to prove it's never fetched for a
+  // plain group adopt (see the assertion in the --with-dynamic capture test below).
   const campuses = [{ id: 0, name: "Mainz" }];
   const memberStatuses = [{ id: 1, name: "Aktiv" }];
   const rulesets: Record<number, Record<string, unknown>> = {
@@ -266,9 +270,15 @@ describe("ct adopt group --with-dynamic", () => {
     // #52 item A+B: an active dynamic group whose ruleset matches the ./rulesets/<key>.json convention
     // is emitted with the shortest `dynamic: true` sugar (round-trips to the same spec on load).
     expect(block).toContain("dynamic: true,");
-    // And the numeric ids are reverse-sugared to their logical keys against the mocked catalogs.
+    // groupType is reverse-sugared to its logical key against the mocked catalog...
     expect(block).toContain('groupType: "team",');
-    expect(block).toContain('status: "aktiv",');
+    // ...but groupStatusId is NOT (#67: no group-status catalog exists) — it stays numeric, with no
+    // TODO comment (a TODO only fires when a catalog exists but the id doesn't match anything in it).
+    expect(block).toContain("groupStatusId: 1,");
+    expect(block).not.toContain("status:");
+    expect(block).not.toContain("TODO");
+    // And the group-status "catalog" is never fetched at all — there is no such catalog to fetch.
+    expect(client.get).not.toHaveBeenCalledWith("/group/memberstatus");
 
     // The plain group fields (state snapshot) never carry "dynamic" — it's synthetic, not a managed field.
     const state = await loadState(statePath, HOST);
@@ -338,13 +348,15 @@ describe("ct adopt group — idiomatic snippet round-trips to a no-op (#52 item 
     }
 
     // The printed block is a `// group` header + one idiomatic multi-line `group({ ... });` snippet
-    // with campusId/groupTypeId/groupStatusId reverse-sugared to campus/groupType/status keys.
+    // with campusId/groupTypeId reverse-sugared to campus/groupType keys; groupStatusId has no
+    // catalog to reverse-sugar against (#67), so it stays numeric — not a TODO, just plain data.
     const block = writes.join("");
     const snippet = block.replace(/^\/\/ group\n/, "").trim();
     expect(snippet.startsWith("group({")).toBe(true);
     expect(snippet).toContain('campus: "mainz"'); // id 0 reverse-resolved
     expect(snippet).toContain('groupType: "team"');
-    expect(snippet).toContain('status: "aktiv"');
+    expect(snippet).toContain("groupStatusId: 1");
+    expect(snippet).not.toContain("status:"); // never the group-status sugar (#67)
     expect(snippet).not.toContain("TODO"); // everything resolved — a clean, hand-edit-free paste
 
     // Paste it VERBATIM into a config (only wrapping boilerplate + the `ct.` receiver added).

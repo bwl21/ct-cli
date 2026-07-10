@@ -47,10 +47,16 @@ describe("Resolver.resolve", () => {
     expect(await r.resolve(ref.groupType("ministry_team"), "site")).toBe(2);
   });
 
-  it("resolves a group status from /group/memberstatus", async () => {
+  it("has no group-status catalog — a group-status ref is a hard error, never resolved against /group/memberstatus (#67)", async () => {
+    // /group/memberstatus IS mocked here (as a member-statuses catalog would be on a live host), to
+    // prove the resolver never even looks at it for a group-status ref — group statuses have no
+    // REST catalog to resolve against (a different, unrelated dimension from member statuses).
     const client = fakeClient({ "/group/memberstatus": [{ id: 1, name: "Active" }, { id: 2, name: "Candidate" }] });
-    const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED });
-    expect(await r.resolve(ref.status("candidate"), "site")).toBe(2);
+    const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED, host: "hostA" });
+    await expect(r.resolve(ref.status("candidate"), "site")).rejects.toThrow(
+      /Cannot resolve group-status:candidate referenced at site on hostA/,
+    );
+    expect(client.calls).toEqual({}); // /group/memberstatus never fetched for a group-status ref
   });
 
   it("returns a pending marker for a same-run-declared managed target (not yet in state)", async () => {

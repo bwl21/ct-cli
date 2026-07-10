@@ -155,7 +155,7 @@ export default (ct) => {
 };
 ```
 
-**Portable references (#20):** logical fields (`campus`/`groupType`/`status` on a
+**Portable references (#20):** logical fields (`campus`/`groupType` on a
 group, `groupType` on a permission) and the inline `ref.*` helper compile to id-free
 sentinels a per-host resolver maps to real ChurchTools ids at plan time — sourced from
 resources this tool manages, then live master-data catalogs matched by name. So one
@@ -163,6 +163,10 @@ config file plans and applies unchanged against different instances (ids differ 
 host). An unresolvable name fails the plan with a clear error naming the reference and
 where it was used. Raw numeric ids remain a valid escape hatch everywhere; see
 [`examples/portable.config.ts`](examples/portable.config.ts) for a zero-numeric-id config.
+**Exception: `groupStatusId` (a group's lifecycle status) is numeric-only, always** —
+ChurchTools exposes no REST catalog to resolve a status by name (`/group/memberstatus`
+is a different dimension, member statuses; #67), so a `status:` declaration fails fast
+at eval time rather than resolving against the wrong dimension.
 
 `campusId` is a managed group field: `ct plan` shows a campus assign/move/clear
 as a normal field update, and `ct adopt group <id>` captures it. Which group
