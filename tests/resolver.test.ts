@@ -59,6 +59,21 @@ describe("Resolver.resolve", () => {
     expect(client.calls).toEqual({}); // /group/memberstatus never fetched for a group-status ref
   });
 
+  it("gives the same actionable no-catalog message as the eval-time guard, not the generic 'declare/adopt it' advice (#67 reviewer follow-up)", async () => {
+    // A `groupStatusId: ref.status(...)` value bypasses the eval-time guard in context.ts (the
+    // id-field escape hatch accepts any Ref) and reaches the resolver directly. The generic
+    // notFound() advice ("Declare/adopt it, fix the key/name, or use a numeric id") is wrong here —
+    // there is no group-status resource type and no catalog to adopt against — so this must be the
+    // SAME message context.ts's eval-time guard uses, not the generic one.
+    const client = fakeClient({});
+    const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED, host: "hostA" });
+    await expect(r.resolve(ref.status("candidate"), "group \"g\".groupStatusId")).rejects.toThrow(
+      'Cannot resolve group-status:candidate referenced at group "g".groupStatusId on hostA: group statuses ' +
+        "have no REST catalog (GET /group/memberstatus is a different dimension: member statuses, string ids " +
+        '— verified 2026-07-10). Declare a numeric "groupStatusId" instead (e.g. "groupStatusId: 1").',
+    );
+  });
+
   it("returns a pending marker for a same-run-declared managed target (not yet in state)", async () => {
     const desired: DesiredResource[] = [{ type: "campus", key: "mainz", fields: {}, dependsOn: [] }];
     const client = fakeClient({ "/campuses": [{ id: 99, name: "Mainz" }] });

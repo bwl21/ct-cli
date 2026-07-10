@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import type { DesiredResource, DynamicSpec, DynamicStatus } from "../engine/types.js";
 import type { DomainType } from "../permissions/grants.js";
 import type { DesiredPermission, Grant } from "../permissions/types.js";
-import { isRef, ref, refKey, type Ref } from "../resolve/refs.js";
+import { GROUP_STATUS_NO_CATALOG, isRef, ref, refKey, type Ref } from "../resolve/refs.js";
 import { conventionalRulesetRef, knownFields } from "../resources/registry.js";
 import { warn } from "../ui.js";
 // Re-exported so a config file can pull the query DSL from the same module as
@@ -247,11 +247,7 @@ function toDesired(type: string, input: ResourceInput, location?: string): Desir
   // mismatch). Checked before the sugar loop so the message is specific, not the generic unknown-id
   // fallback below.
   if (fields.status !== undefined) {
-    throw new Error(
-      `${type} "${key}": "status" cannot be resolved by name — group statuses have no REST catalog ` +
-        `(GET /group/memberstatus is a different dimension: member statuses, string ids — verified ` +
-        `2026-07-10). Declare a numeric "groupStatusId" instead (e.g. "groupStatusId: 1").`,
-    );
+    throw new Error(`${type} "${key}": "status" cannot be resolved by name — ${GROUP_STATUS_NO_CATALOG}`);
   }
   // Logical id-field sugar (#20): a named string field (`campus`/`groupType`) sugars into
   // a Ref-valued numeric id field (`campusId`/`groupTypeId`). The per-host resolver

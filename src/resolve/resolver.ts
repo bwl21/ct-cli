@@ -14,8 +14,11 @@
  *     concurrently (both await the same in-flight promise). group-status ("group-status" /
  *     `ref.status`) has NO catalog here — ChurchTools exposes no REST list endpoint for group
  *     statuses at all (live-verified 2026-07-10 on eqrm prod; see the note by `CATALOG_PATH`
- *     below and #67). A `status:` declaration fails fast at eval time (src/config/context.ts)
- *     before it ever reaches this resolver.
+ *     below and #67). A declared `status:` field fails fast at eval time (src/config/context.ts)
+ *     before it ever reaches this resolver — but a `groupStatusId: ref.status(...)` value skips
+ *     that guard (the id-field escape hatch accepts any Ref) and lands on step 3 below, where
+ *     `notFound` special-cases "group-status" to give the same actionable message instead of
+ *     the generic "declare/adopt it" advice, which would be wrong (no such resource, no catalog).
  *  3. Hard error naming the kind, key, referencing site, and host.
  *
  * Unknown / ambiguous references THROW (a config error — distinct from the
@@ -29,6 +32,7 @@ import { slug } from "../resources/registry.js";
 import {
   collectRefs,
   deepMapRefs,
+  GROUP_STATUS_NO_CATALOG,
   isPendingRef,
   isRef,
   pendingRef,
@@ -254,6 +258,17 @@ export class Resolver {
   }
 
   private notFound(r: SimpleRef, site: string): Error {
+    // group-status (#67, reviewer follow-up): a `groupStatusId: ref.status(...)` value bypasses the
+    // eval-time guard in src/config/context.ts (the id-field escape hatch accepts any Ref) and lands
+    // here. The generic "declare/adopt it, fix the key" advice below is actively wrong for
+    // group-status — there is no such managed resource type and no catalog to adopt against — so
+    // give the same actionable message the eval-time guard uses instead (shared constant so the two
+    // sites can't drift).
+    if (r.kind === "group-status") {
+      return new Error(
+        `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: ${GROUP_STATUS_NO_CATALOG}`,
+      );
+    }
     const catalog = CATALOG_PATH[r.kind];
     const where = catalog
       ? `no managed resource and no live ${r.kind} at ${catalog} matches key "${r.key}"`
