@@ -1,8 +1,11 @@
 /**
  * Normalizer for dynamic-group rulesets. CT returns rulesets with cosmetic
- * labels, inconsistent int/string leaf types, read-only timestamps, and (on
- * write) a `dynamicGroupRuleSet` envelope. Normalizing both the desired and
- * actual sides to one canonical form is what keeps drift real, not spurious.
+ * labels, inconsistent int/string leaf types, and read-only timestamps,
+ * wrapped in a single-element `[RuleSet]` array. `PUT` expects the SAME
+ * `[RuleSet]` array envelope back (see `putRulesetBody` below) — CT 3.134.1
+ * 500s (`TypeException: Array expected`) on a bare object (#77). Normalizing
+ * both the desired and actual sides to one canonical form is what keeps
+ * drift real, not spurious.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -61,7 +64,10 @@ export function normalizeRuleset(rule: unknown): Record<string, unknown> {
   if (Array.isArray(r)) r = r[0] ?? {};                       // GET returns a single-element [RuleSet]
   let obj = (r ?? {}) as Record<string, unknown>;
   if (obj.dynamicGroupRuleSet && typeof obj.dynamicGroupRuleSet === "object") {
-    obj = obj.dynamicGroupRuleSet as Record<string, unknown>; // unwrap the PUT envelope
+    // Defensive: tolerate a legacy/foreign `{ dynamicGroupRuleSet }` object envelope if one is ever
+    // fed through here. CT's actual envelope (both GET and PUT) is the `[RuleSet]` array handled
+    // above, not this wrapper — see `putRulesetBody`.
+    obj = obj.dynamicGroupRuleSet as Record<string, unknown>;
   }
   const base = dropReadOnly(obj);
   // Cosmetic dterm labels and int/string id inconsistencies live inside `query`. Normalize only
@@ -71,6 +77,17 @@ export function normalizeRuleset(rule: unknown): Record<string, unknown> {
     base.query = coerceScalars(stripCosmeticLabels(base.query));
   }
   return base;
+}
+
+/**
+ * The body `PUT /dynamicgroups/{id}/ruleset` expects: a single-element array, matching the shape
+ * `GET` returns exactly ([RuleSet], not `{ dynamicGroupRuleSet: RuleSet }`). CT 3.134.1 500s
+ * (`TypeException: Array expected ... at #->properties:dynamicGroupRuleSet`) on a bare object (#77).
+ * The single source of truth for the PUT envelope — every writer (apply path, live-gated tests)
+ * must go through this so the envelope can't drift out of sync again.
+ */
+export function putRulesetBody(ruleset: Record<string, unknown>): [Record<string, unknown>] {
+  return [ruleset];
 }
 
 export interface NormalizedDynamic { status: DynamicStatus; ruleset: Record<string, unknown> }

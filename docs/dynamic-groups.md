@@ -159,9 +159,9 @@ up as permanent phantom diffs on every `ct plan`:
   and `"1"` across (and even within) a single ruleset. Numeric-looking
   strings inside the `query` subtree are coerced to numbers.
 - **read-only fields** (`dynamicGroupUpdateStarted`,
-  `dynamicGroupUpdateFinished`) and the transport envelopes — `GET` returns
-  a single-element `[RuleSet]` array, `PUT` expects a `{ dynamicGroupRuleSet
-  }` wrapper — are unwrapped/dropped before comparison.
+  `dynamicGroupUpdateFinished`) and the transport envelope — both `GET` and
+  `PUT` use the SAME single-element `[RuleSet]` array (see `putRulesetBody`
+  in `src/engine/dynamic.ts`) — are unwrapped/dropped before comparison.
 
 Both the desired side (your config) and the actual side (fetched from
 ChurchTools) are run through the same `normalizeRuleset`
