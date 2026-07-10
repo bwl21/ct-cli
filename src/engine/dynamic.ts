@@ -64,10 +64,12 @@ export function normalizeRuleset(rule: unknown): Record<string, unknown> {
   if (Array.isArray(r)) r = r[0] ?? {};                       // GET returns a single-element [RuleSet]
   let obj = (r ?? {}) as Record<string, unknown>;
   if (obj.dynamicGroupRuleSet && typeof obj.dynamicGroupRuleSet === "object") {
-    // Defensive: tolerate a legacy/foreign `{ dynamicGroupRuleSet }` object envelope if one is ever
-    // fed through here. CT's actual envelope (both GET and PUT) is the `[RuleSet]` array handled
-    // above, not this wrapper — see `putRulesetBody`.
-    obj = obj.dynamicGroupRuleSet as Record<string, unknown>;
+    // Defensive: tolerate the `{ dynamicGroupRuleSet: ... }` wrapper if one is ever fed through
+    // here — including the real PUT envelope, whose property is a single-element ARRAY
+    // (see `putRulesetBody`); unwrap that inner array too, or `dropReadOnly` would mangle it.
+    let inner: unknown = obj.dynamicGroupRuleSet;
+    if (Array.isArray(inner)) inner = inner[0] ?? {};
+    obj = (inner ?? {}) as Record<string, unknown>;
   }
   const base = dropReadOnly(obj);
   // Cosmetic dterm labels and int/string id inconsistencies live inside `query`. Normalize only
