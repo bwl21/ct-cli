@@ -417,7 +417,7 @@ Shape:
       }
     ]
   },
-  "permissions": [ /* PermissionPlanItem[]: { key, domainType, domainId, diff: { toPut, toDelete, preserved } } */ ],
+  "permissions": [ /* PermissionPlanItem[]: { key, domainType, domainId, pendingDomain?, diff: { toPut, toDelete, preserved } } */ ],
   "summary": {
     "resources": { "create": 0, "update": 1, "delete": 0, "no-op": 3 },
     "drifted": 1,
@@ -453,6 +453,19 @@ Shape:
   `diff.toPut`/`diff.toDelete` is honestly just desired-vs-actual — this is
   the one place the tool cannot make the distinction, so it doesn't
   pretend to.
+- **A permission domain declared by reference to a same-run-created group
+  type** (e.g. `ct.groupTypeRole({ groupType: "struktur", ... })` against a
+  fresh instance where `struktur` is itself in the create-set) plans as a
+  **pending domain** instead of aborting. Its `domainId` is `null` and it
+  carries a `pendingDomain` object (the logical reference, e.g.
+  `{ kind: "group-type", key: "struktur", __ctRef: true }`); the human render
+  shows `<group-type:struktur (created this apply)>`. Its grants land in
+  `diff.toPut` and count toward `summary.permissions.toPut`, `hasChanges`,
+  and exit code `2` — so a fresh-instance `ct plan` reports the create-set +
+  pending grants rather than failing. `ct apply` re-resolves the real domain
+  id after the group type is created and reconciles the grants in the same
+  run. The hard error is reserved for references that resolve to nothing at
+  all (a key absent from the config, state, and the live catalog — a typo).
 
 ### Posting a plan as a PR comment
 

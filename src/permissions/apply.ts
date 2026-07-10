@@ -11,6 +11,8 @@ import { mapConcurrent } from "../util/concurrency.js";
 import type { PermissionPlanItem } from "./plan.js";
 import type { GrantTuple } from "./grants.js";
 import { reresolveTuple } from "./scope.js";
+import { pendingRef, refLabel } from "../resolve/refs.js";
+import { reresolvePendingValue } from "../resolve/resolver.js";
 
 /** How many permission tuples to write at once. Tuples are independent rows, so a modest fan-out is safe. */
 const WRITE_CONCURRENCY = 6;
@@ -68,7 +70,21 @@ export async function applyPermissionPlan(
   // the same (domainType, domainId) — so all ops for a path come from ONE item's disjoint diff.
   // Programmatic callers bypassing evaluateConfig must uphold that invariant themselves.
   for (const item of items) {
-    const path = `/permissions/${item.domainType}/${item.domainId}`;
+    // A pending domain (#69) is a group type created THIS run: its numeric id is only known after
+    // executePlan, so re-resolve it against the POST-execute state now — reusing the SAME machinery
+    // that re-resolves resource pending refs (reresolvePendingValue). Requires `state`: a pending
+    // domain can never be applied statelessly.
+    let domainId = item.domainId;
+    if (item.pendingDomain) {
+      if (!state) {
+        throw new Error(
+          `Pending permission domain ${refLabel(item.pendingDomain)} ("${item.key}") cannot be applied ` +
+            `without post-execute state — it names a resource created in the same run.`,
+        );
+      }
+      domainId = reresolvePendingValue(pendingRef(item.pendingDomain), state) as number;
+    }
+    const path = `/permissions/${item.domainType}/${domainId}`;
     assertNotPeople(path);
     for (const t of item.diff.toPut) ops.push({ method: "PUT", path, tuple: t });
     for (const t of item.diff.toDelete) ops.push({ method: "DELETE", path, tuple: t });
