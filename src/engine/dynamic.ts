@@ -64,10 +64,12 @@ export function normalizeRuleset(rule: unknown): Record<string, unknown> {
   if (Array.isArray(r)) r = r[0] ?? {};                       // GET returns a single-element [RuleSet]
   let obj = (r ?? {}) as Record<string, unknown>;
   if (obj.dynamicGroupRuleSet && typeof obj.dynamicGroupRuleSet === "object") {
-    // Defensive: tolerate a legacy/foreign `{ dynamicGroupRuleSet }` object envelope if one is ever
-    // fed through here. CT's actual envelope (both GET and PUT) is the `[RuleSet]` array handled
-    // above, not this wrapper — see `putRulesetBody`.
-    obj = obj.dynamicGroupRuleSet as Record<string, unknown>;
+    // Defensive: tolerate the `{ dynamicGroupRuleSet: ... }` wrapper if one is ever fed through
+    // here — including the real PUT envelope, whose property is a single-element ARRAY
+    // (see `putRulesetBody`); unwrap that inner array too, or `dropReadOnly` would mangle it.
+    let inner: unknown = obj.dynamicGroupRuleSet;
+    if (Array.isArray(inner)) inner = inner[0] ?? {};
+    obj = (inner ?? {}) as Record<string, unknown>;
   }
   const base = dropReadOnly(obj);
   // Cosmetic dterm labels and int/string id inconsistencies live inside `query`. Normalize only
@@ -80,14 +82,19 @@ export function normalizeRuleset(rule: unknown): Record<string, unknown> {
 }
 
 /**
- * The body `PUT /dynamicgroups/{id}/ruleset` expects: a single-element array, matching the shape
- * `GET` returns exactly ([RuleSet], not `{ dynamicGroupRuleSet: RuleSet }`). CT 3.134.1 500s
- * (`TypeException: Array expected ... at #->properties:dynamicGroupRuleSet`) on a bare object (#77).
+ * The body `PUT /dynamicgroups/{id}/ruleset` expects: an OBJECT wrapper whose
+ * `dynamicGroupRuleSet` property is a single-element array. Decoded from CT 3.134.1's own
+ * validator, live (#77): `{ dynamicGroupRuleSet: RuleSet }` → "Array expected ... at
+ * #->properties:dynamicGroupRuleSet"; a bare `[RuleSet]` → "Object expected, [...] received"
+ * at the root. Together: root = object, property = array → `{ dynamicGroupRuleSet: [RuleSet] }`.
+ * (GET, by contrast, returns the bare `[RuleSet]` array.)
  * The single source of truth for the PUT envelope — every writer (apply path, live-gated tests)
  * must go through this so the envelope can't drift out of sync again.
  */
-export function putRulesetBody(ruleset: Record<string, unknown>): [Record<string, unknown>] {
-  return [ruleset];
+export function putRulesetBody(
+  ruleset: Record<string, unknown>,
+): { dynamicGroupRuleSet: [Record<string, unknown>] } {
+  return { dynamicGroupRuleSet: [ruleset] };
 }
 
 export interface NormalizedDynamic { status: DynamicStatus; ruleset: Record<string, unknown> }

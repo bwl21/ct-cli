@@ -35,9 +35,8 @@ export class CtApiError extends Error {
   }
 }
 
-// Most write bodies are objects, but a few (dynamic-group ruleset PUT, #77) are a single-element
-// array — CT's array-envelope endpoints expect the request body itself to be an array, not an
-// object wrapper.
+// Write bodies are objects today; the union keeps array bodies representable for any future
+// CT endpoint that wants one (the body is only ever JSON.stringify'd, never property-accessed).
 type Json = Record<string, unknown> | unknown[];
 
 /**

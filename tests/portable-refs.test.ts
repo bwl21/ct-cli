@@ -112,10 +112,10 @@ describe("apply-time pending re-resolution (same-run campus + group)", () => {
     await executePlan(plan, { client: host, state, statePath: "s.json", save: noSave, now: () => "t" });
 
     const rulesetPut = host.calls.find((c) => c.path === "/dynamicgroups/100/ruleset" && c.method === "PUT")!;
-    // PUT body is the [RuleSet] array envelope (#77), matching GET's shape — not a bare/wrapped object.
-    const body = rulesetPut.body as [{ query: { params: { filter: { "==": unknown[] } } } }];
+    // PUT envelope: { dynamicGroupRuleSet: [ruleset] } (live-decoded, #77).
+    const body = rulesetPut.body as { dynamicGroupRuleSet: [{ query: { params: { filter: { "==": unknown[] } } } }] };
     // The campus ref, pending at plan time, is the freshly-created id (42) in the PUT — not a sentinel.
-    expect(body[0].query.params.filter["=="][1]).toBe(42);
+    expect(body.dynamicGroupRuleSet[0].query.params.filter["=="][1]).toBe(42);
   });
 
   it("orders a same-tier pending ref target before its referencer (group → ref.group)", async () => {
@@ -146,8 +146,8 @@ describe("apply-time pending re-resolution (same-run campus + group)", () => {
     const putIdx = host.calls.findIndex((c) => c.method === "PUT" && c.path === "/dynamicgroups/100/ruleset");
     expect(createIdx).toBeGreaterThanOrEqual(0);
     expect(putIdx).toBeGreaterThan(createIdx); // target created before the referencing ruleset writes
-    const body = host.calls[putIdx]!.body as [{ query: { params: { filter: { "==": unknown[] } } } }];
-    expect(body[0].query.params.filter["=="][1]).toBe(55); // the fresh id, not a sentinel
+    const body = host.calls[putIdx]!.body as { dynamicGroupRuleSet: [{ query: { params: { filter: { "==": unknown[] } } } }] };
+    expect(body.dynamicGroupRuleSet[0].query.params.filter["=="][1]).toBe(55); // the fresh id, not a sentinel
   });
 });
 
