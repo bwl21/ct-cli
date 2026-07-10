@@ -66,9 +66,31 @@ function str(resource: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-/** First `max` characters of `value` — CT's create validators cap several name/shorty fields. */
+/**
+ * First `max` *code points* (not UTF-16 code units) of `value` — CT's create validators cap several
+ * name/shorty fields. Plain `String#slice` operates on UTF-16 code units, which can split an astral
+ * character's surrogate pair at the cutoff (e.g. `("ABCDEFGHI" + "😀").slice(0, 10)` ends in a lone
+ * unpaired `\uD83D`); `Array.from` iterates strings by code point, so the cut always lands on a whole
+ * character and the result can never contain a dangling surrogate.
+ */
 function truncate(value: string, max: number): string {
-  return value.slice(0, max);
+  return Array.from(value).slice(0, max).join("");
+}
+
+/**
+ * `truncate(value, max)`, then padded up to `min` characters by repeating `value` (or `"x"` if
+ * `value` is empty) — CT's create validators give several name/shorty-style fields *both* a maximum
+ * and a minimum length, and a name shorter than `min` (e.g. a 1-char group-type name against
+ * namePlural's 2-char floor) would otherwise merely truncate to itself and stay under the minimum.
+ * The padding is deliberately dumb (repeat, don't pluralize) — a name this short is pathological;
+ * the goal is a valid create body, not linguistics.
+ */
+function truncatePadded(value: string, max: number, min: number): string {
+  let padded = value;
+  while (padded.length < min) {
+    padded += value.length > 0 ? value : "x";
+  }
+  return truncate(padded, max);
 }
 
 /** Read a field, preferring a nested `information` object but falling back to the top level. */
@@ -120,8 +142,13 @@ export const RESOURCES: Record<string, AdoptableResource> = {
     createDefaults: (r) => {
       const name = str(r, "name");
       return {
-        namePlural: truncate(name, 30), // required, 2–30 chars: no plural known at create → mirror name, capped
-        shorty: truncate(name, 10), // required, 1–10 chars: first ≤10 chars of the (required, non-empty) name
+        // required, 2–30 chars: no plural known at create → mirror name, capped, and padded up to
+        // the 2-char floor (a 1-char name would otherwise truncate to itself and stay under it).
+        namePlural: truncatePadded(name, 30, 2),
+        // required, 1–10 chars: first ≤10 chars of the name, padded up to the 1-char floor — the
+        // floor only bites if `name` itself is empty (`str` defaults a missing/non-string name to
+        // "", which `truncatePadded` falls back to `"x"` for rather than emitting an empty shorty).
+        shorty: truncatePadded(name, 10, 1),
         color: "default", // required enum: the theme-neutral member of CT's color palette
         permissionDepth: 1, // required int: permissions reach the group's own members only (least-privilege; the value a plain live type carries)
         isLeaderNecessary: false, // don't force a leader onto a freshly created type
@@ -167,7 +194,8 @@ export const RESOURCES: Record<string, AdoptableResource> = {
     // POST /group/roles requires `shorty` (1–10 chars, non-nullable in CT's OpenAPI POST schema) which
     // the tool does not manage (#73 audit). Sent at CREATE only, derived from the declared `name`; not
     // diffed afterward. (`type`/`isLeader`/`sortKey` are all optional/nullable — no default needed.)
-    createDefaults: (r) => ({ shorty: truncate(str(r, "name"), 10) }),
+    // Padded up to the 1-char floor for the same empty-name edge case as group-type's shorty above.
+    createDefaults: (r) => ({ shorty: truncatePadded(str(r, "name"), 10, 1) }),
     // `groupRole` is taken by the permissions DSL (`ct.groupRole` = definePermission("group_role")),
     // so the master-data role resource declares under a distinct name.
     dslName: "roleDefinition",
