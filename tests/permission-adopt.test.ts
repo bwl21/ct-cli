@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { emitAdoptedGrants } from "../src/permissions/adopt.js";
-import { diffGrants, normalizeActual, type DomainType, type RawPermission } from "../src/permissions/grants.js";
+import { diffGrants, normalizeActual, isInheritedOnlyRight, type DomainType, type RawPermission } from "../src/permissions/grants.js";
 import { desiredTuples } from "../src/permissions/plan.js";
 import type { Grant } from "../src/permissions/types.js";
 import type { State } from "../src/state/state.js";
@@ -240,6 +240,34 @@ describe("emitAdoptedGrants", () => {
     const diff = diffGrants(desired, actual);
     expect(diff.toPut).toEqual([]);
     expect(diff.toDelete).toEqual([]);
+  });
+
+  it("full round-trip on a role domain WITH inherited rights is a no-op (#65 acceptance)", () => {
+    // eqrm prod, group_type_role 9 (/Struktur): writable user grants PLUS inherited churchdb:+…
+    // rows (authId >= 10000) that adopt emits only as NOTE comments. Pasting the emitted block
+    // verbatim and diffing it against the SAME live rows must be a no-op — the inherited rows must
+    // NOT show up as `toDelete` (the #65 bug was "0 to grant, 24 to remove").
+    const rows: RawPermission[] = [
+      // writable, user-authored grants that ARE emitted as active config
+      { authId: 1113, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: 5 } }, // churchgroup:administer groups (unscoped)
+      { authId: 1104, dataId: 99, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },   // churchgroup:view group scoped to managed "kids"
+      // inherited-only rows: unscoped, scope [1], scope [2] — emitted only as NOTE comments
+      { authId: 10101, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: 5 } }, // churchdb:+see persons
+      { authId: 10102, dataId: 1, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },    // churchdb:+see group
+      { authId: 10133, dataId: 2, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },    // churchdb:+edit group member fields scope [2]
+    ];
+    const state = stateWithKids();
+    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 9, rows, state });
+    // the inherited rows are surfaced as NOTE comments, never active grants
+    expect(block).toContain('NOTE: "churchdb:+see persons" (authId 10101) is not writable on group_type_role');
+    const grants = parseEmittedGrants(block);
+
+    // Paste-and-plan: diff the emitted (writable-only) declaration against the FULL live row set.
+    const desired = grants.flatMap((g) => desiredTuples({ key: "adopted", domainType: "group_type_role", domainId: 9, grants: [g] }, state));
+    const actual = normalizeActual(rows).filter((t) => !isInheritedOnlyRight("group_type_role", t.authId));
+    const diff = diffGrants(desired, actual);
+    expect(diff.toPut).toEqual([]);
+    expect(diff.toDelete).toEqual([]); // critically: NOT the 3 inherited rows
   });
 
   it("unmanaged group-dimension scope still gets the 'ct adopt group' hint (unchanged behavior)", () => {
