@@ -83,16 +83,17 @@ describe("normalizeRuleset", () => {
 });
 
 describe("putRulesetBody (#77)", () => {
-  it("wraps the ruleset in a single-element array, matching GET's [RuleSet] shape exactly", () => {
+  it("wraps the ruleset as { dynamicGroupRuleSet: [ruleset] } — object root, single-element array property", () => {
     const ruleset = { description: "x", query: {}, process: {} };
-    expect(putRulesetBody(ruleset)).toEqual([ruleset]);
+    expect(putRulesetBody(ruleset)).toEqual({ dynamicGroupRuleSet: [ruleset] });
   });
 
-  it("is NOT the { dynamicGroupRuleSet } object envelope — CT 3.134.1 500s on that shape", () => {
+  it("is NEITHER the bare object NOR the bare array — CT 3.134.1 rejects both (live-decoded, #77)", () => {
     const ruleset = { description: "x", query: {}, process: {} };
     const body = putRulesetBody(ruleset);
-    expect(Array.isArray(body)).toBe(true);
-    expect(body).not.toHaveProperty("dynamicGroupRuleSet");
+    expect(Array.isArray(body)).toBe(false);
+    expect(Array.isArray(body.dynamicGroupRuleSet)).toBe(true);
+    expect(body.dynamicGroupRuleSet).toHaveLength(1);
   });
 });
 

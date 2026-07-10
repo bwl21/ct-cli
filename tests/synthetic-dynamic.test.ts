@@ -142,10 +142,9 @@ describe("dynamic synthetic field — apply", () => {
     await dynamicField().apply({ client: { request } as unknown as Pick<CtClient, "request">, state, id: 5,
       change: { field: "dynamic", from: undefined,
         to: { status: "active", ruleset: { description: "x", query: {}, process: {} } } } });
-    // CT 3.134.1 500s on a bare object — the PUT body must match GET's [RuleSet] array shape exactly,
-    // NOT a `{ dynamicGroupRuleSet }` wrapper.
+    // PUT envelope: `{ dynamicGroupRuleSet: [ruleset] }` — object root, array property (live-decoded, #77).
     expect(request).toHaveBeenNthCalledWith(1, "PUT", "/dynamicgroups/5/ruleset",
-      [{ description: "x", query: {}, process: {} }]);
+      { dynamicGroupRuleSet: [{ description: "x", query: {}, process: {} }] });
     expect(request).toHaveBeenNthCalledWith(2, "PUT", "/dynamicgroups/5/status", { dynamicGroupStatus: "active" });
   });
 
@@ -170,7 +169,7 @@ describe("dynamic synthetic field — apply", () => {
         from: { status: "active", ruleset: { description: "old", query: {}, process: {} } },
         to: { status: "active", ruleset: { description: "new", query: {}, process: {} } } } });
     expect(request).toHaveBeenNthCalledWith(1, "PUT", "/dynamicgroups/5/ruleset",
-      [{ description: "new", query: {}, process: {} }]);
+      { dynamicGroupRuleSet: [{ description: "new", query: {}, process: {} }] });
     expect(request).toHaveBeenNthCalledWith(2, "PUT", "/dynamicgroups/5/status", { dynamicGroupStatus: "active" });
   });
 
