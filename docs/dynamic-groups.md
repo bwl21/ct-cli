@@ -6,7 +6,7 @@ group's dynamic-group configuration — the ruleset and its status — as an
 opt-in extra on `ct.group(...)`, diffed and applied exactly like any other
 managed field.
 
-> People are still never touched. `ct-cli` writes the *ruleset that computes*
+> People are still never touched. `ct-cli` writes the _ruleset that computes_
 > membership, never a person↔group relationship directly.
 
 ## The `dynamic` block
@@ -18,9 +18,7 @@ ct.group({
   groupTypeId: 1,
   dynamic: {
     status: "manual", // "active" | "manual" | "inactive" | "none"
-    ruleset: {
-      /* RuleSet object | { ref: "./x.json" } | churchQuery(...) build */
-    },
+    ruleset: {/* RuleSet object | { ref: "./x.json" } | churchQuery(...) build */},
   },
 });
 ```
@@ -41,7 +39,7 @@ group hierarchy. Validation lives in `src/config/context.ts` (`toDesired`).
   the `dynamic` block (the DSL still requires a `ruleset` object — `{}` is
   fine, since its content is irrelevant on demote) and set
   `status: "none"`. `ct apply` responds with `DELETE
-  /dynamicgroups/{id}/ruleset` followed by `PUT /dynamicgroups/{id}/status`
+/dynamicgroups/{id}/ruleset` followed by `PUT /dynamicgroups/{id}/status`
   with `{ dynamicGroupStatus: "none" }`.
 
 Statuses are validated against exactly `["active", "inactive", "manual",
@@ -65,13 +63,62 @@ created/updated — so `ct apply` always writes against the group's real
    relative to the process CWD at fold time by `resolveRulesetRef`
    (`src/engine/dynamic.ts`); the referenced file's JSON contents are used
    verbatim as the ruleset. Handy for pasting an exported ruleset without
-   inlining a huge JSONLogic tree into the `.ts` config.
+   inlining a huge JSONLogic tree into the `.ts` config. A captured file
+   embeds that instance's numeric ids — see [Portable snapshot files across
+   environments](#portable-snapshot-files-across-environments-76) to make it
+   drive dev and prod from one file.
 3. **Typed query builder** — build the JSONLogic filter with `q` and wrap it
    with `churchQuery` (`src/config/query.ts`, re-exported from
    `src/config/context.ts`).
 
 All three ultimately produce a plain JS object with the same shape; which one
 you pick is purely a matter of how you want to author/version it.
+
+### Portable snapshot files across environments (#76)
+
+A ruleset **captured from a live instance** — `ct adopt group --with-dynamic`, or
+a hand-exported `{ ref: "./rulesets/<key>.json" }` file — is byte-faithful by
+design: the query filters embed _that instance's_ numeric ids (e.g.
+`ctgroup.id ∈ [148, 1228, 32]`, `role.id ∈ [16, 84]`). Those ids are
+**instance-specific**. Point the same file at another environment and CT accepts
+it, but the ids resolve to different or nonexistent entities there, so the
+auto-group computes the wrong (usually empty) membership. This is the one place a
+snapshot is _not_ portable — everything else in the config is logical-ref
+portable (#20/#22).
+
+To make a snapshot portable, replace an **entity id in a query `var` position**
+with a logical reference. The resolver rewrites references anywhere inside the
+ruleset to the per-host id at plan time, and the resolved form still
+normalizes/diffs **byte-faithfully** against CT (so a matching instance stays a
+no-op — it does not re-`PUT` on every apply). Two equivalent ways to author it:
+
+- **Re-author with the typed builder** (preferred for readability):
+  `churchQuery(q.oneof("ctgroup.id", [ref.group("jugend-mainz"), ref.group("jugend-berlin")]))`.
+- **Edit the JSON file in place** — a reference serialises to a plain,
+  hand-editable JSON leaf, so in a captured `rulesets/<key>.json` you can swap a
+  raw id for a marker directly:
+
+  ```jsonc
+  // before (prod-specific, not portable):
+  { "==": [{ "var": "ctgroup.campusId" }, 148] }
+  // after (portable — resolves to each host's Mainz campus id at plan time):
+  { "==": [{ "var": "ctgroup.campusId" }, { "__ctRef": true, "kind": "campus", "key": "mainz" }] }
+  ```
+
+  Marker `kind`s: `campus`, `group`, `group-type`, `role-def` (`key` is the
+  logical key / slug). See `ref` in `src/resolve/refs.ts`.
+
+**Escape hatch — raw numeric ids pass through untouched.** A query that
+references an _operational_ group outside the managed scaffold (no logical key to
+resolve against) can keep the plain number; you then own its per-environment
+correctness. This mirrors the permission scope escape hatch (#49): prefer a
+reference, fall back to a number where no managed key exists.
+
+> **Interim caveat (until adopt auto-rewrites ids — #76):** applying a
+> raw-id prod snapshot to a _different_ environment is mechanically fine (CT
+> accepts it; unknown ids → empty matches) but **semantically wrong** for that
+> environment's memberships. Treat it as a known, documented gap — not a silent
+> one — when rehearsing prod configs against dev.
 
 ### The `RuleSet` shape
 
@@ -84,7 +131,7 @@ see `tests/fixtures/dynamic/README.md`) look like:
   "shorty": "Autom. Mitgliedschaft Alle Mainz",
   "personIdFieldName": "person.id",
   "importance": 0,
-  "query": { "method": "ChurchQuery", "params": { "..." : "..." } },
+  "query": { "method": "ChurchQuery", "params": { "...": "..." } },
   "process": {},
 }
 ```
@@ -96,15 +143,15 @@ sibling of `query`, not an argument to `churchQuery(...)`.
 
 `q` (`src/config/query.ts`) emits a JSONLogic tree:
 
-| helper                        | emits                                    |
-| ------------------------------ | ----------------------------------------- |
-| `q.and(...nodes)`              | `{ and: nodes }`                          |
-| `q.or(...nodes)`               | `{ or: nodes }`                           |
-| `q.not(node)`                  | `{ "!": [node] }`                         |
-| `q.var(name)`                  | `{ var: name }`                           |
-| `q.eq(varName, value)`         | `{ "==": [{ var: varName }, value] }`     |
-| `q.oneof(varName, values)`     | `{ oneof: [{ var: varName }, values] }`   |
-| `q.isnull(varName)`            | `{ isnull: [{ var: varName }] }`          |
+| helper                     | emits                                   |
+| -------------------------- | --------------------------------------- |
+| `q.and(...nodes)`          | `{ and: nodes }`                        |
+| `q.or(...nodes)`           | `{ or: nodes }`                         |
+| `q.not(node)`              | `{ "!": [node] }`                       |
+| `q.var(name)`              | `{ var: name }`                         |
+| `q.eq(varName, value)`     | `{ "==": [{ var: varName }, value] }`   |
+| `q.oneof(varName, values)` | `{ oneof: [{ var: varName }, values] }` |
+| `q.isnull(varName)`        | `{ isnull: [{ var: varName }] }`        |
 
 `var` values may be **logical references** or **raw ids**. Prefer a reference so
 the ruleset is portable across hosts (#20): `q.eq("ctgroup.campusId",
@@ -186,7 +233,7 @@ dev instance.
 
 Dynamic-group state is only ever fetched for a group that is **both**: (a)
 already under state management, and (b) opted in via a `dynamic` block in
-the *current* config (`dynamicField.fold` in `src/engine/synthetic.ts`). A
+the _current_ config (`dynamicField.fold` in `src/engine/synthetic.ts`). A
 managed group without a `dynamic` block is never queried for its
 ruleset/status — any auto-group configuration it happens to have in
 ChurchTools stays completely invisible to `ct plan` / `ct apply`, exactly
