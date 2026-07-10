@@ -87,7 +87,8 @@ function truncate(value: string, max: number): string {
  */
 function truncatePadded(value: string, max: number, min: number): string {
   let padded = value;
-  while (padded.length < min) {
+  while (Array.from(padded).length < min) {
+    // (code-point count, matching truncate() — a single-astral-char name must still pad)
     padded += value.length > 0 ? value : "x";
   }
   return truncate(padded, max);
