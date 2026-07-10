@@ -104,6 +104,15 @@ export interface ResourceInput {
    * setting `false` (or removing it) and re-applying before you destroy.
    */
   preventDestroy?: boolean;
+  /**
+   * Group-only (#75): opt in to CT's `force` create flag so a group can be created with the same
+   * name as an existing one. `POST /groups` otherwise 400s (`forbidden.duplicate.group`) whenever
+   * a same-named group already exists — CT's guard is name-based, not key-based, so two
+   * legitimately same-named groups (e.g. an archived and an active event signup) need this to
+   * both be creatable. Create-time only: never diffed, never in state, never sent on update.
+   * NEVER force by default — omit (or `false`) to keep CT's guard on.
+   */
+  allowDuplicateName?: boolean;
   [field: string]: unknown;
 }
 
@@ -229,9 +238,20 @@ function desugarDynamic(type: string, key: string, dynamic: unknown): DynamicSpe
 }
 
 function toDesired(type: string, input: ResourceInput, location?: string): DesiredResource {
-  const { key, parent, parents, dependsOn = [], preventDestroy, dynamic, ...fields } = input;
+  const { key, parent, parents, dependsOn = [], preventDestroy, dynamic, allowDuplicateName, ...fields } = input;
   if (!key || typeof key !== "string") {
     throw new Error(`${type} declaration is missing a string "key".`);
+  }
+  // Group-only opt-in (#75) into CT's `force` create flag — see ResourceInput.allowDuplicateName.
+  // Destructured out above (never reaches `fields`), so it is accepted but never diffed/managed/
+  // adopted, and never trips the unknown-field warning below.
+  if (allowDuplicateName !== undefined) {
+    if (type !== "group") {
+      throw new Error(`${type} "${key}": "allowDuplicateName" is only valid on a group.`);
+    }
+    if (typeof allowDuplicateName !== "boolean") {
+      throw new Error(`${type} "${key}": "allowDuplicateName" must be a boolean.`);
+    }
   }
   // A nullish/empty `parent` is "no parent", not an opt-in to managed-empty hierarchy.
   if (parent != null && typeof parent !== "string") {
@@ -316,6 +336,7 @@ function toDesired(type: string, input: ResourceInput, location?: string): Desir
     dynamic: dynamicSpec,
     dependsOn: edges,
     preventDestroy,
+    allowDuplicateName,
   };
 }
 

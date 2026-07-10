@@ -9,15 +9,60 @@
  * their own dedicated endpoints, not the owning resource's body — see synthetic.ts.
  */
 import type { CtClient } from "../api/ctClient.js";
+import { CtApiError } from "../api/ctClient.js";
 import type { ManagedResource, State } from "../state/state.js";
 import { upsert, saveState } from "../state/state.js";
-import type { FieldChange, Plan } from "./types.js";
+import type { FieldChange, Plan, PlanItem } from "./types.js";
 import { RESOURCES } from "../resources/registry.js";
 import { assertNotPeople } from "./guard.js";
 import { isSyntheticField, syntheticField } from "./synthetic.js";
 import { reresolvePendingValue } from "../resolve/resolver.js";
 import { hasPendingRef } from "../resolve/refs.js";
 import { formatError } from "../ui.js";
+
+/**
+ * The messageKey CT's `POST /groups` 400s with when a same-named group already exists and the
+ * body did not carry `force: true` (#75). Confirmed against the ChurchTools OpenAPI spec's
+ * analogous `POST /persons` duplicate-guard error envelope (`forbidden.duplicate.person`, the
+ * same `{ message, messageKey, translatedMessage, args, errors }` shape) and the live 400 text
+ * observed against a dev rehearsal instance (issue #75): "Duplicate found. Use force flag to
+ * create group with same name." `POST /groups` itself is undocumented beyond "Bad Request" in the
+ * spec, so both the messageKey AND a text fallback are checked below.
+ */
+const DUPLICATE_GROUP_MESSAGE_KEY = "forbidden.duplicate.group";
+
+/** Detect CT's same-name group-creation guard (#75) from a caught create error. */
+function isDuplicateGroupNameError(err: unknown): boolean {
+  if (!(err instanceof CtApiError) || err.status !== 400) return false;
+  const body = err.body;
+  if (!body || typeof body !== "object") return false;
+  const b = body as Record<string, unknown>;
+  if (b.messageKey === DUPLICATE_GROUP_MESSAGE_KEY) return true;
+  const message = b.message;
+  return (
+    typeof message === "string" &&
+    /duplicate/i.test(message) &&
+    /force flag/i.test(message) &&
+    /group/i.test(message)
+  );
+}
+
+/**
+ * Append actionable guidance (#75) to an otherwise-formatted stop message when a group create
+ * failed on CT's same-name guard without the `allowDuplicateName` opt-in: point at adopting the
+ * existing group (the usual accident) or opting in (the rare intentional-duplicate case). Reuses
+ * `formatError`'s output verbatim — never forks the HTTP status/body formatting.
+ */
+function withDuplicateGroupGuidance(message: string, item: PlanItem): string {
+  return (
+    `${message}\n` +
+    `Guidance: a group named like "${item.key}" likely already exists in ChurchTools. If it should ` +
+    `be managed by this tool, adopt it instead of creating a new one: ` +
+    `\`ct adopt group <id> --env <env> --key ${item.key}\` (find its id with \`ct get groups\`). ` +
+    `If two groups sharing this name is intentional, set \`allowDuplicateName: true\` on this ` +
+    `group's declaration and re-apply.`
+  );
+}
 
 export interface ExecuteDeps {
   client: Pick<CtClient, "request">;
@@ -109,7 +154,10 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         // win) for the POST ONLY. State still records `body` (the managed fields), so the defaults
         // stay unmanaged — a later plan neither diffs nor reverts them. A field still missing after
         // this surfaces as CT's HTTP 400 (#71), not a silent omission.
-        const createBody = spec.createDefaults ? { ...spec.createDefaults(body), ...body } : body;
+        const defaultedBody = spec.createDefaults ? { ...spec.createDefaults(body), ...body } : body;
+        // CT's same-name group-creation guard (#75): opt-in only, via `force: true` on the POST body.
+        // Never a managed field — not in `body`/state, so it never diffs and never touches update.
+        const createBody = item.allowDuplicateName ? { ...defaultedBody, force: true } : defaultedBody;
         assertNotPeople(spec.collectionPath);
         const res = await client.request<{ id: number }>("POST", spec.collectionPath, createBody);
         if (typeof res.id !== "number") {
@@ -155,11 +203,18 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
       // Route through the same formatter the top-level handler uses (#50) so a mid-apply
       // CtApiError's HTTP status + response body survive into the "Stopped at" line (#71) —
       // without it, the stop message was undiagnosable ("... failed", no status/body).
+      let message = formatError(err);
+      // #75: a group create that hit CT's same-name guard without opting in gets actionable
+      // guidance appended — most often this is an unmanaged existing group that should be
+      // adopted, not an intentional duplicate.
+      if (item.action === "create" && item.type === "group" && !item.allowDuplicateName && isDuplicateGroupNameError(err)) {
+        message = withDuplicateGroupGuidance(message, item);
+      }
       return {
         created,
         updated,
         skippedDeletes,
-        failed: { key: item.key, message: formatError(err) },
+        failed: { key: item.key, message },
       };
     }
   }

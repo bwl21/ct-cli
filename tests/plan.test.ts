@@ -309,3 +309,28 @@ describe("group campus assignment (#21)", () => {
     expect(plan.items[0]?.changes).toEqual([]);
   });
 });
+
+describe("allowDuplicateName threading onto create items (#75)", () => {
+  it("carries the flag onto a fresh create item", () => {
+    const plan = computePlan(
+      [{ type: "group", key: "kids_b", fields: { name: "Kids" }, dependsOn: [], allowDuplicateName: true }],
+      stateOf(),
+      new Map(),
+    );
+    expect(plan.items[0]).toMatchObject({ action: "create", allowDuplicateName: true });
+  });
+
+  it("carries the flag onto a recreate create item (managed but vanished from ChurchTools)", () => {
+    const plan = computePlan(
+      [{ type: "group", key: "kids_b", fields: { name: "Kids" }, dependsOn: [], allowDuplicateName: true }],
+      stateOf(managedT("group", "kids_b", 9, { name: "Kids" })),
+      new Map(), // vanished: no actual entry
+    );
+    expect(plan.items[0]).toMatchObject({ action: "create", note: "recreate", allowDuplicateName: true });
+  });
+
+  it("is undefined on a create item when not declared", () => {
+    const plan = computePlan([desired("mainz", { name: "Mainz" })], stateOf(), new Map());
+    expect(plan.items[0]?.allowDuplicateName).toBeUndefined();
+  });
+});

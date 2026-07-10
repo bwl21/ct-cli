@@ -541,4 +541,183 @@ describe("executePlan", () => {
     expect(result.failed?.message).toContain("HTTP 403");
     expect(result.failed?.message).toContain("no permission to create group types");
   });
+
+  describe("allowDuplicateName / force create opt-in (#75)", () => {
+    it("sends force: true on the CREATE POST body when a create item opts in", async () => {
+      const state = emptyState("h");
+      const { client, calls } = recorder({ "POST /groups": { id: 7 } });
+      const plan: Plan = {
+        items: [
+          {
+            type: "group",
+            key: "kids_2026_b",
+            id: null,
+            action: "create",
+            changes: [
+              { field: "name", from: undefined, to: "Kids Elternabend 2026" },
+              { field: "groupTypeId", from: undefined, to: 2 },
+            ],
+            allowDuplicateName: true,
+          },
+        ],
+      };
+      const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+      expect(result.failed).toBeUndefined();
+      expect(calls[0]).toEqual({
+        method: "POST",
+        path: "/groups",
+        body: { name: "Kids Elternabend 2026", groupTypeId: 2, force: true },
+      });
+      // force is create-body only — never stored as a managed field.
+      expect(state.resources.kids_2026_b?.fields).toEqual({
+        name: "Kids Elternabend 2026",
+        groupTypeId: 2,
+      });
+    });
+
+    it("omits force from the CREATE POST body when not opted in", async () => {
+      const state = emptyState("h");
+      const { client, calls } = recorder({ "POST /groups": { id: 7 } });
+      const plan: Plan = {
+        items: [
+          {
+            type: "group",
+            key: "kids_2026_a",
+            id: null,
+            action: "create",
+            changes: [{ field: "name", from: undefined, to: "Kids Elternabend 2026" }],
+          },
+        ],
+      };
+      await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+      expect(calls[0]).toEqual({
+        method: "POST",
+        path: "/groups",
+        body: { name: "Kids Elternabend 2026" },
+      });
+    });
+
+    it("never sends force on the UPDATE path, even if a stale item somehow carried the flag", async () => {
+      const state = emptyState("h");
+      state.resources.team = {
+        type: "group",
+        id: 9,
+        key: "team",
+        fields: { name: "Team" },
+        adoptedAt: "t",
+        updatedAt: "t",
+      };
+      const { client, calls } = recorder();
+      const plan: Plan = {
+        items: [
+          {
+            type: "group",
+            key: "team",
+            id: 9,
+            action: "update",
+            changes: [{ field: "name", from: "Team", to: "Team A" }],
+            actual: { name: "Team" },
+            allowDuplicateName: true,
+          },
+        ],
+      };
+      await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+      expect(calls[0]).toEqual({ method: "PATCH", path: "/groups/9", body: { name: "Team A" } });
+    });
+
+    it("appends adoption/opt-in guidance to the stop message on a duplicate-name 400 (messageKey) without the flag", async () => {
+      const state = emptyState("h");
+      const client = {
+        request: async <T>(): Promise<T> => {
+          throw new CtApiError("POST /groups failed", 400, {
+            message: "Duplicate found. Use force flag to create group with same name.",
+            messageKey: "forbidden.duplicate.group",
+            translatedMessage: "Duplikat gefunden. Nutze das force Flag um die Gruppe trotzdem anzulegen.",
+            args: [],
+            errors: [],
+          });
+        },
+      };
+      const plan: Plan = {
+        items: [
+          {
+            type: "group",
+            key: "kids_2026_b",
+            id: null,
+            action: "create",
+            changes: [{ field: "name", from: undefined, to: "Kids Elternabend 2026" }],
+          },
+        ],
+      };
+      const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+      expect(result.failed?.key).toBe("kids_2026_b");
+      // The shared formatter's output is preserved verbatim (HTTP status + body)...
+      expect(result.failed?.message).toContain("HTTP 400");
+      expect(result.failed?.message).toContain("forbidden.duplicate.group");
+      // ...with one guidance line appended, naming both remedies.
+      expect(result.failed?.message).toContain("ct adopt group <id>");
+      expect(result.failed?.message).toContain("--key kids_2026_b");
+      expect(result.failed?.message).toContain("allowDuplicateName: true");
+    });
+
+    it("also recognises the duplicate-group guard from the 400 message text alone (no messageKey)", async () => {
+      const state = emptyState("h");
+      const client = {
+        request: async <T>(): Promise<T> => {
+          throw new CtApiError("POST /groups failed", 400, {
+            message: "Duplicate found. Use force flag to create group with same name.",
+          });
+        },
+      };
+      const plan: Plan = {
+        items: [
+          { type: "group", key: "kids_2026_b", id: null, action: "create", changes: [{ field: "name", from: undefined, to: "K" }] },
+        ],
+      };
+      const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+      expect(result.failed?.message).toContain("allowDuplicateName: true");
+    });
+
+    it("does NOT append guidance when the create already opted in with allowDuplicateName", async () => {
+      const state = emptyState("h");
+      const client = {
+        request: async <T>(): Promise<T> => {
+          throw new CtApiError("POST /groups failed", 400, {
+            message: "Duplicate found. Use force flag to create group with same name.",
+            messageKey: "forbidden.duplicate.group",
+          });
+        },
+      };
+      const plan: Plan = {
+        items: [
+          {
+            type: "group",
+            key: "kids_2026_b",
+            id: null,
+            action: "create",
+            changes: [{ field: "name", from: undefined, to: "K" }],
+            allowDuplicateName: true,
+          },
+        ],
+      };
+      const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+      expect(result.failed?.message).not.toContain("Guidance:");
+    });
+
+    it("does NOT append duplicate-group guidance for an unrelated 400 (e.g. a validation error)", async () => {
+      const state = emptyState("h");
+      const client = {
+        request: async <T>(): Promise<T> => {
+          throw new CtApiError("POST /groups failed", 400, { message: "name must not be empty" });
+        },
+      };
+      const plan: Plan = {
+        items: [
+          { type: "group", key: "kids", id: null, action: "create", changes: [{ field: "name", from: undefined, to: "" }] },
+        ],
+      };
+      const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+      expect(result.failed?.message).not.toContain("Guidance:");
+    });
+  });
 });

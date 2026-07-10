@@ -153,6 +153,7 @@ export function computePlan(
         action: "create",
         changes: attributeCreate(diffFields(d.fields, {})),
         preventDestroy: d.preventDestroy,
+        allowDuplicateName: d.allowDuplicateName,
       });
       continue;
     }
@@ -199,6 +200,7 @@ export function computePlan(
         changes: attributeCreate(diffFields(d.fields, {})),
         note: "recreate",
         preventDestroy: d.preventDestroy,
+        allowDuplicateName: d.allowDuplicateName,
       });
       continue;
     }
