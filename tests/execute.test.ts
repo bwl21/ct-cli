@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { executePlan } from "../src/engine/execute.js";
 import { emptyState, type State } from "../src/state/state.js";
 import type { Plan } from "../src/engine/types.js";
+import { CtApiError } from "../src/api/ctClient.js";
 
 interface Call {
   method: string;
@@ -389,5 +390,35 @@ describe("executePlan", () => {
     });
     expect(result.failed).toEqual({ key: "zurich", message: "boom" });
     expect(result.created).toEqual([]);
+  });
+
+  it("renders a CtApiError's HTTP status + body in the stop message, via the shared formatter (#71)", async () => {
+    const state = emptyState("h");
+    const client = {
+      request: async <T>(): Promise<T> => {
+        throw new CtApiError("POST /group/grouptypes failed", 403, { message: "no permission to create group types" });
+      },
+    };
+    const plan: Plan = {
+      items: [
+        {
+          type: "campus",
+          key: "struktur",
+          id: null,
+          action: "create",
+          changes: [{ field: "name", from: undefined, to: "S" }],
+        },
+      ],
+    };
+    const result = await executePlan(plan, {
+      client,
+      state,
+      statePath: "s.json",
+      save: noSave,
+      now: fixedNow,
+    });
+    expect(result.failed?.key).toBe("struktur");
+    expect(result.failed?.message).toContain("HTTP 403");
+    expect(result.failed?.message).toContain("no permission to create group types");
   });
 });

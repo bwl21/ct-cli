@@ -17,6 +17,7 @@ import { assertNotPeople } from "./guard.js";
 import { isSyntheticField, syntheticField } from "./synthetic.js";
 import { reresolvePendingValue } from "../resolve/resolver.js";
 import { hasPendingRef } from "../resolve/refs.js";
+import { formatError } from "../ui.js";
 
 export interface ExecuteDeps {
   client: Pick<CtClient, "request">;
@@ -145,11 +146,14 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         updated.push(item.key);
       }
     } catch (err) {
+      // Route through the same formatter the top-level handler uses (#50) so a mid-apply
+      // CtApiError's HTTP status + response body survive into the "Stopped at" line (#71) —
+      // without it, the stop message was undiagnosable ("... failed", no status/body).
       return {
         created,
         updated,
         skippedDeletes,
-        failed: { key: item.key, message: err instanceof Error ? err.message : String(err) },
+        failed: { key: item.key, message: formatError(err) },
       };
     }
   }

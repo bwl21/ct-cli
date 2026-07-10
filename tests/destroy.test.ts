@@ -100,4 +100,23 @@ describe("runDeleteLoop", () => {
     expect(process.exitCode).toBe(1);
     process.exitCode = prevExit;
   });
+
+  it("renders a CtApiError's HTTP status + body in the stop message, via the shared formatter (#71)", async () => {
+    const state = stateWith({ key: "boom", type: "group", id: 1 });
+    const request = vi.fn(async (_m: string, path: string) => {
+      if (path === "/groups/1") throw new CtApiError("DELETE /groups/1 failed", 403, { message: "no permission" });
+      return {};
+    });
+    const save = vi.fn(async () => {});
+    const prevExit = process.exitCode;
+    const errSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await runDeleteLoop({ client: asClient(request), state, statePath: "s.json", ordered: ["boom"], save });
+
+    const combined = errSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(combined).toContain("HTTP 403");
+    expect(combined).toContain("no permission");
+    errSpy.mockRestore();
+    process.exitCode = prevExit;
+  });
 });

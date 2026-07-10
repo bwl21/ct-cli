@@ -13,7 +13,7 @@ import type { DesiredResource } from "../engine/types.js";
 import { writeBackup } from "../engine/backup.js";
 import { resolveBackupDir } from "./apply.js";
 import { confirmTyped, confirmEnv } from "../ui/prompt.js";
-import { info, warn, success, error } from "../ui.js";
+import { info, warn, success, error, formatError } from "../ui.js";
 
 interface DestroyOptions {
   target?: string[];
@@ -91,8 +91,7 @@ async function fetchParentEdges(
     }
     return edges;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    warn(`Failed to fetch group hierarchies for destroy ordering: ${message}. Falling back to tier-only order.`);
+    warn(`Failed to fetch group hierarchies for destroy ordering: ${formatError(err)}. Falling back to tier-only order.`);
     return new Map();
   }
 }
@@ -218,9 +217,10 @@ export async function runDeleteLoop(ctx: DeleteLoopCtx): Promise<void> {
         success(`${managed.type}.${key} (#${managed.id}) already deleted in ChurchTools — removed from state`);
         continue;
       }
-      const message = err instanceof Error ? err.message : String(err);
+      // Same formatter the top-level handler uses (#50) so a non-404 CtApiError's HTTP status +
+      // response body survive into the stop message (#71), not just the bare "... failed" text.
       error(
-        `Stopped at ${key}: ${message}. State saved up to this point — re-run with the remaining targets to resume.`,
+        `Stopped at ${key}: ${formatError(err)}. State saved up to this point — re-run with the remaining targets to resume.`,
       );
       process.exitCode = 1;
       return;
