@@ -8,11 +8,17 @@
  *     resource tier applies — re-resolved at apply time, mirroring the permission
  *     scope pattern in src/permissions/scope.ts).
  *  2. Live catalog master data, matched by `slug(name) === key` with an exact-name
- *     secondary: campus → /campuses, group-type → /group/grouptypes,
- *     group-status → /group/memberstatus, role-def → /group/roles. Each catalog is
- *     fetched at most once per run and cached by a `Map<RefKind, Promise>`, so the
- *     resolver is safe to share across `buildPlan` and `buildPermissionPlan` running
- *     concurrently (both await the same in-flight promise).
+ *     secondary: campus → /campuses, group-type → /group/grouptypes, role-def → /group/roles.
+ *     Each catalog is fetched at most once per run and cached by a `Map<RefKind, Promise>`,
+ *     so the resolver is safe to share across `buildPlan` and `buildPermissionPlan` running
+ *     concurrently (both await the same in-flight promise). group-status ("group-status" /
+ *     `ref.status`) has NO catalog here — ChurchTools exposes no REST list endpoint for group
+ *     statuses at all (live-verified 2026-07-10 on eqrm prod; see the note by `CATALOG_PATH`
+ *     below and #67). A declared `status:` field fails fast at eval time (src/config/context.ts)
+ *     before it ever reaches this resolver — but a `groupStatusId: ref.status(...)` value skips
+ *     that guard (the id-field escape hatch accepts any Ref) and lands on step 3 below, where
+ *     `notFound` special-cases "group-status" to give the same actionable message instead of
+ *     the generic "declare/adopt it" advice, which would be wrong (no such resource, no catalog).
  *  3. Hard error naming the kind, key, referencing site, and host.
  *
  * Unknown / ambiguous references THROW (a config error — distinct from the
@@ -26,6 +32,7 @@ import { slug } from "../resources/registry.js";
 import {
   collectRefs,
   deepMapRefs,
+  GROUP_STATUS_NO_CATALOG,
   isPendingRef,
   isRef,
   pendingRef,
@@ -38,7 +45,7 @@ import {
   type SimpleRef,
 } from "./refs.js";
 
-/** ref kind → managed resource type (state/desired). group-status is read-only master data (catalog only). */
+/** ref kind → managed resource type (state/desired). group-status has neither: no catalog and never managed (#67). */
 const REF_KIND_TYPE: Partial<Record<RefKind, string>> = {
   campus: "campus",
   "group-type": "group-type",
@@ -46,15 +53,23 @@ const REF_KIND_TYPE: Partial<Record<RefKind, string>> = {
   group: "group",
 };
 
-/** ref kind → live catalog path. `group` has no catalog (managed-only); `group-role` is gated. */
+/**
+ * ref kind → live catalog path. `group` has no catalog (managed-only); `group-role` is gated.
+ *
+ * `group-status` is deliberately ABSENT (#67, disproving the prior assumption documented here):
+ * `GET /group/memberstatus` is NOT a group-status catalog — live-verified 2026-07-10 on eqrm prod,
+ * it returns MEMBER statuses (`{id: "active", name: "Active"}, {id: "requested", ...}`, STRING ids),
+ * a completely different dimension from `groupStatusId` (numeric — e.g. 1 = active, 4 = archived on
+ * that instance). Further probing found no REST list endpoint for group statuses at all
+ * (`/groups/statuses` parses as `/groups/{groupId}`, `/group/statuses` and `/groupstatuses` 404) —
+ * neither read nor write. So `status:` sugar fails fast at eval time instead (src/config/context.ts)
+ * rather than reaching this resolver and either resolving against the wrong dimension or landing
+ * here as an unconditional hard error. If CT ever ships a real group-status endpoint, add it back
+ * here and restore the `status` entry to `ID_SUGAR` in context.ts.
+ */
 const CATALOG_PATH: Partial<Record<RefKind, string>> = {
   campus: "/campuses",
   "group-type": "/group/grouptypes",
-  // Assumption (documented): /group/memberstatus rows carry a `name` field, like every other
-  // master-data catalog here (campus/grouptype/role all expose `name`). The endpoint is GET-only
-  // (docs/api-coverage.md #8), so this is matched, never written. If a live instance names the
-  // field differently, resolution falls through to the exact-name secondary and then a hard error.
-  "group-status": "/group/memberstatus",
   "role-def": "/group/roles",
 };
 
@@ -243,6 +258,17 @@ export class Resolver {
   }
 
   private notFound(r: SimpleRef, site: string): Error {
+    // group-status (#67, reviewer follow-up): a `groupStatusId: ref.status(...)` value bypasses the
+    // eval-time guard in src/config/context.ts (the id-field escape hatch accepts any Ref) and lands
+    // here. The generic "declare/adopt it, fix the key" advice below is actively wrong for
+    // group-status — there is no such managed resource type and no catalog to adopt against — so
+    // give the same actionable message the eval-time guard uses instead (shared constant so the two
+    // sites can't drift).
+    if (r.kind === "group-status") {
+      return new Error(
+        `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: ${GROUP_STATUS_NO_CATALOG}`,
+      );
+    }
     const catalog = CATALOG_PATH[r.kind];
     const where = catalog
       ? `no managed resource and no live ${r.kind} at ${catalog} matches key "${r.key}"`

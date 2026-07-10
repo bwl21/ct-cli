@@ -78,14 +78,13 @@ describe("config context", () => {
     expect(r2[0]?.fields).toEqual({ name: "Team", campusId: null });
   });
 
-  it("sugars a logical `campus`/`groupType`/`status` into a Ref-valued id field (#20)", () => {
+  it("sugars a logical `campus`/`groupType` into a Ref-valued id field (#20)", () => {
     const { ct, resources } = createContext();
-    ct.group({ key: "g", name: "G", campus: "mainz", groupType: "ministry_team", status: "active" });
+    ct.group({ key: "g", name: "G", campus: "mainz", groupType: "ministry_team" });
     expect(resources[0]?.fields).toEqual({
       name: "G",
       campusId: { __ctRef: true, kind: "campus", key: "mainz" },
       groupTypeId: { __ctRef: true, kind: "group-type", key: "ministry_team" },
-      groupStatusId: { __ctRef: true, kind: "group-status", key: "active" },
     });
   });
 
@@ -106,6 +105,30 @@ describe("config context", () => {
     const { ct } = createContext();
     expect(() => ct.group({ key: "g", name: "G", parents: "area" as never })).toThrow(/array of string/);
     expect(() => ct.group({ key: "h", name: "H", parents: [1] as never })).toThrow(/array of string/);
+  });
+
+  describe("group-status sugar removed (#67)", () => {
+    it("fails fast, with an actionable error, when `status` is declared", () => {
+      const { ct } = createContext();
+      expect(() => ct.group({ key: "g", name: "G", status: "active" })).toThrow(
+        'group "g": "status" cannot be resolved by name — group statuses have no REST catalog ' +
+          "(GET /group/memberstatus is a different dimension: member statuses, string ids — verified " +
+          '2026-07-10). Declare a numeric "groupStatusId" instead (e.g. "groupStatusId: 1").',
+      );
+    });
+
+    it("still fails fast even when a numeric groupStatusId is also given", () => {
+      const { ct } = createContext();
+      expect(() => ct.group({ key: "g", name: "G", status: "active", groupStatusId: 1 })).toThrow(
+        /"status" cannot be resolved by name/,
+      );
+    });
+
+    it("leaves the numeric groupStatusId escape hatch unchanged", () => {
+      const { ct, resources } = createContext();
+      ct.group({ key: "g", name: "G", groupTypeId: 2, groupStatusId: 1 });
+      expect(resources[0]?.fields).toEqual({ name: "G", groupTypeId: 2, groupStatusId: 1 });
+    });
   });
 
   it("rejects a hierarchy parent that is not a declared group", async () => {
@@ -299,7 +322,7 @@ describe("unknown-field warning (#51)", () => {
       const { ct } = createContext();
       ct.campus({ key: "mainz", name: "Mainz", shorty: "MZ" });
       ct.group({ key: "g", name: "G", groupTypeId: 2, groupStatusId: 1, campusId: 4 });
-      ct.group({ key: "g2", name: "G2", campus: "mainz", groupType: "x", status: "active" });
+      ct.group({ key: "g2", name: "G2", campus: "mainz", groupType: "x", groupStatusId: 1 });
       expect(spy).not.toHaveBeenCalled();
     } finally {
       spy.mockRestore();

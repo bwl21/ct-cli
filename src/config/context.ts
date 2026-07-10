@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import type { DesiredResource, DynamicSpec, DynamicStatus } from "../engine/types.js";
 import type { DomainType } from "../permissions/grants.js";
 import type { DesiredPermission, Grant } from "../permissions/types.js";
-import { isRef, ref, refKey, type Ref } from "../resolve/refs.js";
+import { GROUP_STATUS_NO_CATALOG, isRef, ref, refKey, type Ref } from "../resolve/refs.js";
 import { conventionalRulesetRef, knownFields } from "../resources/registry.js";
 import { warn } from "../ui.js";
 // Re-exported so a config file can pull the query DSL from the same module as
@@ -120,11 +120,15 @@ export interface PermissionInput {
   grants: Grant[];
 }
 
-/** Logical id-field sugar for declarations: a named string field → a Ref-valued numeric id field. */
+/** Logical id-field sugar for declarations: a named string field → a Ref-valued numeric id field.
+ *  `status` (→ `groupStatusId`) is deliberately NOT here (#67): ChurchTools exposes no REST catalog
+ *  for group statuses — `/group/memberstatus` is a different dimension (member statuses, string
+ *  ids), verified live 2026-07-10. A declared `status:` field fails fast in {@link toDesired} instead
+ *  of silently resolving against the wrong dimension. `ref.status`/`RefKind: "group-status"` remain
+ *  in src/resolve/refs.ts so the sugar can return if CT ever ships a real group-status endpoint. */
 const ID_SUGAR: Record<string, { idField: string; make: (key: string) => Ref }> = {
   campus: { idField: "campusId", make: ref.campus },
   groupType: { idField: "groupTypeId", make: ref.groupType },
-  status: { idField: "groupStatusId", make: ref.status },
 };
 
 /** The numeric id fields a declaration may carry — each accepts a number, `null`, or a {@link Ref}. */
@@ -236,8 +240,17 @@ function toDesired(type: string, input: ResourceInput, location?: string): Desir
   if (parents !== undefined && (!Array.isArray(parents) || parents.some((p) => typeof p !== "string"))) {
     throw new Error(`${type} "${key}": "parents" must be an array of string group keys.`);
   }
-  // Logical id-field sugar (#20): a named string field (`campus`/`groupType`/`status`) sugars into
-  // a Ref-valued numeric id field (`campusId`/`groupTypeId`/`groupStatusId`). The per-host resolver
+  // `status` (group status) has no REST catalog to resolve a name against — fail fast here rather
+  // than let it fall through to ID_SUGAR (which no longer carries a "status" entry, so it would
+  // otherwise silently be treated as an unrecognised field and just warn) or, worse, silently pick
+  // the wrong dimension (#67: `/group/memberstatus` is member statuses, string ids — a live-verified
+  // mismatch). Checked before the sugar loop so the message is specific, not the generic unknown-id
+  // fallback below.
+  if (fields.status !== undefined) {
+    throw new Error(`${type} "${key}": "status" cannot be resolved by name — ${GROUP_STATUS_NO_CATALOG}`);
+  }
+  // Logical id-field sugar (#20): a named string field (`campus`/`groupType`) sugars into
+  // a Ref-valued numeric id field (`campusId`/`groupTypeId`). The per-host resolver
   // turns the Ref into a real id at plan time. Declaring BOTH forms (`campus` + `campusId`) is a
   // conflict — reject it rather than silently pick one. Numeric ids still pass straight through.
   for (const [logical, { idField, make }] of Object.entries(ID_SUGAR)) {
@@ -261,10 +274,13 @@ function toDesired(type: string, input: ResourceInput, location?: string): Desir
   for (const idField of ID_FIELDS) {
     const value = fields[idField];
     if (value === undefined || value === null || typeof value === "number" || isRef(value)) continue;
+    // `groupStatusId` has no logical sugar field (#67 — see ID_SUGAR above), so its hint omits the
+    // "use the X field" clause rather than pointing at a sugar that doesn't exist.
+    const sugarName = Object.entries(ID_SUGAR).find(([, s]) => s.idField === idField)?.[0];
+    const hint = sugarName ? ` (use the "${sugarName}" field, or ref.*)` : "";
     throw new Error(
       `${type} "${key}": "${idField}" must be a number (the CT id), null to clear, or a logical ` +
-        `reference (use the "${Object.entries(ID_SUGAR).find(([, s]) => s.idField === idField)?.[0] ?? "logical"}" ` +
-        `field, or ref.*).`,
+        `reference${hint}.`,
     );
   }
   // Warn (never throw) on a declared field the registry does not manage for this type — e.g. a
