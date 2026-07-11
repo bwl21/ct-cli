@@ -1,36 +1,39 @@
 /**
  * Portable-ruleset ergonomics (#76, Stages 1–2): the `var → RefKind` catalog and the pure
  * `portablizeRuleset` reverse-rewrite helper. Everything here is offline and deterministic — the
- * caller supplies the per-kind id→key maps; no network, no live writes.
+ * caller supplies the per-kind id→key maps and the role catalog; no network, no live writes.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import { VAR_REF_KINDS, portablizeRuleset } from "../src/config/query-refs.js";
+import { VAR_REF_KINDS, portablizeRuleset, type RoleCatalogEntry } from "../src/config/query-refs.js";
 import { q, churchQuery } from "../src/config/query.js";
 import { normalizeRuleset } from "../src/engine/dynamic.js";
-import { deepMapRefs, type Ref, type RefKind } from "../src/resolve/refs.js";
+import { deepMapRefs, refKey, type Ref, type RefKind } from "../src/resolve/refs.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 describe("VAR_REF_KINDS catalog (#76 Stage 1)", () => {
-  it("maps every ChurchQuery var observed in the captured prod rulesets to a real RefKind", () => {
-    // Exactly the entity-bearing vars present in ct-structure/rulesets/*.json, verified against the
-    // real files (2026-07-11): the four kinds are the canonical RefKind strings from src/resolve/refs.ts.
+  it("maps every SIMPLE entity var observed in the captured prod rulesets to a real RefKind", () => {
+    // Exactly the simple, name-based entity vars present in ct-structure/rulesets/*.json, verified
+    // against the real files (2026-07-11). `role.id` is NOT here — it is a group-type-scoped role
+    // (groupTypeRoleId) handled by the role special case in portablizeRuleset (see the test below and
+    // the module comment), because role names are not globally unique across group types (#76).
     expect(VAR_REF_KINDS).toEqual({
       "ctgroup.id": "group",
       "ctgroup.campusId": "campus",
       "ctgroup.groupTypeId": "group-type",
       "person.campusId": "campus",
-      "role.id": "role-def",
     });
   });
 
-  it("leaves non-entity and catalog-less vars OUT of the table (escape hatch)", () => {
-    // groupStatusId has no REST catalog (#67) → never a managed entity; isArchived/dateOfDeath are
-    // boolean/date literals. All three must be absent so portablize leaves their numbers untouched.
+  it("leaves role.id, non-entity, and catalog-less vars OUT of the table", () => {
+    // role.id is deliberately absent (fixed in #76, reverting #86's wrong `role-def` mapping): it needs
+    // the (group-type, role-name) special case, not a lone name-based kind. groupStatusId has no REST
+    // catalog (#67); isArchived/dateOfDeath are boolean/date literals.
+    expect(VAR_REF_KINDS["role.id"]).toBeUndefined();
     expect(VAR_REF_KINDS["ctgroup.groupStatusId"]).toBeUndefined();
     expect(VAR_REF_KINDS["person.isArchived"]).toBeUndefined();
     expect(VAR_REF_KINDS["person.dateOfDeath"]).toBeUndefined();
@@ -89,50 +92,159 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
     expect(JSON.stringify(ruleset)).toEqual(before);
   });
 
-  describe("real captured prod ruleset round-trip (sintegrationmeeting.json)", () => {
+  describe("role.id → (group-type, role-name) marker (#76 — the fix for #86's role-def mapping)", () => {
+    // A `role.id` is a groupTypeRoleId: two ids can share a role NAME on different group types, so the
+    // marker must carry the (group-type, role-name) pair, resolved via /group/roles by (groupTypeId, name).
+    const roleCatalog = new Map<number, RoleCatalogEntry>([
+      [84, { groupTypeId: 12, name: "Leiter" }],
+      [16, { groupTypeId: 2, name: "Leiter" }], // SAME name as 84, different group type
+    ]);
+    const groupTypeIdToKey = new Map<number, string>([[12, "local_lead"], [2, "team"]]);
+
+    it("disambiguates two same-named roles by their group type", () => {
+      const ruleset = { query: churchQuery(q.oneof("role.id", [84, 16])) };
+      const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
+        idToKeyByKind: {},
+        roleCatalog,
+        groupTypeIdToKey,
+      });
+      const filter = (out.query as { params: { filter: { oneof: unknown[] } } }).params.filter;
+      expect(filter.oneof[1]).toEqual([
+        { __ctRef: true, kind: "group-type-role", groupType: "local_lead", role: "Leiter" },
+        { __ctRef: true, kind: "group-type-role", groupType: "team", role: "Leiter" },
+      ]);
+      expect(warnings).toEqual([]);
+    });
+
+    it("leaves a role id whose group type is unmanaged numeric, with a { var: 'role.id' } warning", () => {
+      const ruleset = { query: churchQuery(q.oneof("role.id", [84, 999])) };
+      const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
+        idToKeyByKind: {},
+        roleCatalog,
+        groupTypeIdToKey,
+      });
+      const filter = (out.query as { params: { filter: { oneof: unknown[] } } }).params.filter;
+      expect(filter.oneof[1]).toEqual([
+        { __ctRef: true, kind: "group-type-role", groupType: "local_lead", role: "Leiter" },
+        999, // not in roleCatalog → numeric
+      ]);
+      expect(warnings).toEqual([{ var: "role.id", id: 999 }]);
+    });
+
+    it("leaves role.id numeric (with a warning) when no roleCatalog is supplied at all", () => {
+      const ruleset = { query: churchQuery(q.oneof("role.id", [84])) };
+      const { ruleset: out, warnings } = portablizeRuleset(ruleset, { idToKeyByKind: {} });
+      const filter = (out.query as { params: { filter: { oneof: unknown[] } } }).params.filter;
+      expect(filter.oneof[1]).toEqual([84]);
+      expect(warnings).toEqual([{ var: "role.id", id: 84 }]);
+    });
+  });
+
+  describe("process.*.handleMembership.groupTypeRoleId — an out-of-query role field (#76)", () => {
+    const roleCatalog = new Map<number, RoleCatalogEntry>([[66, { groupTypeId: 9, name: "Mitglied" }]]);
+    const groupTypeIdToKey = new Map<number, string>([[9, "struktur"]]);
+
+    it("rewrites the integer field to a group-type-role marker via the same role catalog", () => {
+      const ruleset = {
+        query: churchQuery(q.eq("person.isArchived", 0)),
+        process: { queryResultOnly: { none: { handleMembership: { groupMemberStatus: "active", groupTypeRoleId: 66 } } } },
+      };
+      const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
+        idToKeyByKind: {},
+        roleCatalog,
+        groupTypeIdToKey,
+      });
+      const hm = (out.process as { queryResultOnly: { none: { handleMembership: Record<string, unknown> } } })
+        .queryResultOnly.none.handleMembership;
+      expect(hm.groupTypeRoleId).toEqual({
+        __ctRef: true,
+        kind: "group-type-role",
+        groupType: "struktur",
+        role: "Mitglied",
+      });
+      expect(hm.groupMemberStatus).toBe("active"); // sibling string untouched
+      expect(warnings).toEqual([]);
+    });
+
+    it("leaves the field numeric with a warning when the role is unknown", () => {
+      const ruleset = { process: { queryResultOnly: { none: { handleMembership: { groupTypeRoleId: 4242 } } } } };
+      const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
+        idToKeyByKind: {},
+        roleCatalog,
+        groupTypeIdToKey,
+      });
+      const hm = (out.process as { queryResultOnly: { none: { handleMembership: Record<string, unknown> } } })
+        .queryResultOnly.none.handleMembership;
+      expect(hm.groupTypeRoleId).toBe(4242);
+      expect(warnings).toEqual([{ var: "groupTypeRoleId", id: 4242 }]);
+    });
+  });
+
+  describe("real captured prod ruleset round-trip (skidscheckinopsmz.json)", () => {
+    // The real ct-structure ruleset the #76 fix targets: ctgroup.id ["112","8","1246"], role.id
+    // ["84","85","17","16"], and process...handleMembership.groupTypeRoleId 66 (OUT of the query).
     const raw = JSON.parse(
-      readFileSync(join(here, "fixtures/dynamic/portablize-sintegrationmeeting.json"), "utf8"),
+      readFileSync(join(here, "fixtures/dynamic/portablize-skidscheckinopsmz.json"), "utf8"),
     );
     // captureDynamic normalizes first (numeric-string ids → numbers), so Stage 2 runs on numbers.
     const normalized = normalizeRuleset(raw);
 
-    // Every group/role id present in the fixture, mapped to a logical key.
-    const groupIds = [148, 1228, 32, 1237, 1243, 27, 119, 1974];
-    const roleIds = [16, 84, 85, 17, 90, 91, 15];
+    // The real decode of the referenced ids (live prod /api/group/roles + /group/grouptypes, 2026-07-11).
+    const roleCatalog = new Map<number, RoleCatalogEntry>([
+      [84, { groupTypeId: 12, name: "Leiter" }],
+      [85, { groupTypeId: 12, name: "Organisator" }],
+      [16, { groupTypeId: 2, name: "Leiter" }],
+      [17, { groupTypeId: 2, name: "Organisator" }],
+      [66, { groupTypeId: 9, name: "Mitglied" }], // the process.groupTypeRoleId target
+    ]);
+    const groupTypeIdToKey = new Map<number, string>([[12, "local_lead"], [2, "team"], [9, "struktur"]]);
+    // Group 1246 is deliberately UNMANAGED (not in the map) — the escape hatch: it stays numeric.
     const idToKeyByKind: Partial<Record<RefKind, Map<number, string>>> = {
-      group: new Map(groupIds.map((id) => [id, `group-${id}`])),
-      "role-def": new Map(roleIds.map((id) => [id, `role-${id}`])),
+      group: new Map([[112, "bereich_kids"], [8, "team_kidsdienst"]]),
     };
+    const opts = { idToKeyByKind, roleCatalog, groupTypeIdToKey };
 
-    it("resolves byte-faithfully back to the original ids (round-trip)", () => {
-      const { ruleset: portable } = portablizeRuleset(normalized, { idToKeyByKind });
-      // Inverse map, applied with the SAME deepMapRefs the resolver uses — markers sit exactly where
-      // the ids were, so the whole ruleset restores byte-identical to the normalized original.
+    it("produces (group-type, role-name) markers for the query roles AND the process groupTypeRoleId", () => {
+      const { ruleset: portable } = portablizeRuleset(normalized, opts);
+      const json = JSON.stringify(portable);
+      // A query role marker (84 → local_lead/Leiter) and the process-field marker (66 → struktur/Mitglied).
+      expect(json).toContain('{"__ctRef":true,"kind":"group-type-role","groupType":"local_lead","role":"Leiter"}');
+      const hm = (portable.process as { queryResultOnly: { none: { handleMembership: Record<string, unknown> } } })
+        .queryResultOnly.none.handleMembership;
+      expect(hm.groupTypeRoleId).toEqual({
+        __ctRef: true,
+        kind: "group-type-role",
+        groupType: "struktur",
+        role: "Mitglied",
+      });
+    });
+
+    it("resolves byte-faithfully back to the original ids (round-trip, incl. process.groupTypeRoleId)", () => {
+      const { ruleset: portable } = portablizeRuleset(normalized, opts);
+      // Inverse map keyed by refKey — the identity string the resolver caches by — applied with the SAME
+      // deepMapRefs the resolver uses. Markers sit exactly where the ids were, so the whole ruleset
+      // (query filter AND the out-of-query process.groupTypeRoleId) restores byte-identical.
       const keyToId = new Map<string, number>();
-      for (const [id, key] of [...groupIds.map((id) => [id, `group-${id}`] as const)]) keyToId.set(`group:${key}`, id);
-      for (const [id, key] of [...roleIds.map((id) => [id, `role-${id}`] as const)]) keyToId.set(`role-def:${key}`, id);
-      const back = deepMapRefs(portable, (r: Ref) => keyToId.get(`${r.kind}:${(r as { key: string }).key}`));
+      for (const [id, key] of [[112, "bereich_kids"], [8, "team_kidsdienst"]] as const) {
+        keyToId.set(refKey({ __ctRef: true, kind: "group", key }), id);
+      }
+      for (const [id, entry] of roleCatalog) {
+        keyToId.set(
+          refKey({ __ctRef: true, kind: "group-type-role", groupType: groupTypeIdToKey.get(entry.groupTypeId)!, role: entry.name }),
+          id,
+        );
+      }
+      const back = deepMapRefs(portable, (r: Ref) => keyToId.get(refKey(r)));
       expect(back).toEqual(normalized);
     });
 
-    it("leaves groupStatusId ids numeric with no warnings for them", () => {
-      const { ruleset: portable, warnings } = portablizeRuleset(normalized, { idToKeyByKind });
-      expect(JSON.stringify(portable)).toContain("[1,2,4]"); // the two groupStatusId oneof lists survive
-      expect(warnings).toEqual([]); // every group/role id was mapped, statuses are never candidates
-    });
-
-    it("warns for each unmanaged group/role id when the maps are partial", () => {
-      const partial: Partial<Record<RefKind, Map<number, string>>> = {
-        group: new Map([[148, "group-148"]]),
-        "role-def": new Map(),
-      };
-      const { warnings } = portablizeRuleset(normalized, { idToKeyByKind: partial });
-      // Deterministic query-traversal order; groupStatusId ids (1,2,4) never appear.
-      const ids = warnings.map((w) => w.id);
-      expect(ids).toContain(1228);
-      expect(ids).toContain(16);
-      expect(ids).not.toContain(1); // groupStatusId never warns
-      expect(warnings.every((w) => w.var === "ctgroup.id" || w.var === "role.id")).toBe(true);
+    it("leaves the unmanaged group id (1246) and the groupStatusId lists numeric, warning only for 1246", () => {
+      const { ruleset: portable, warnings } = portablizeRuleset(normalized, opts);
+      const json = JSON.stringify(portable);
+      expect(json).toContain("1246"); // unmanaged group id survives numeric
+      expect(warnings).toEqual([{ var: "ctgroup.id", id: 1246 }]); // exactly the one escape-hatch id
+      // groupStatusId oneof ([1]) is never a candidate → never rewritten, never warned.
+      expect(warnings.some((w) => w.id === 1)).toBe(false);
     });
   });
 });

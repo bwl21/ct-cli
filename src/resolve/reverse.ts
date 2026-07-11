@@ -47,10 +47,20 @@ interface CatalogRecord {
   [k: string]: unknown;
 }
 
+/** A `/group/roles` entry decoded for portablizing a `role.id` / `groupTypeRoleId` (#76). */
+export interface RoleCatalogEntry {
+  /** The group TYPE this role is scoped to — the disambiguator that makes (groupTypeId, name) unique. */
+  groupTypeId: number;
+  /** The role's display name (used to build the portable (group-type, role-name) marker). */
+  name: string;
+}
+
 export class ReverseResolver {
   private readonly client: Pick<CtClient, "get">;
   /** id → logical key, per catalog path, fetched at most once. A failed fetch caches an empty map. */
   private readonly catalogs = new Map<string, Promise<Map<number, string>>>();
+  /** groupTypeRoleId → {groupTypeId, name} from `/group/roles`, fetched at most once (#76). */
+  private roleCatalog?: Promise<Map<number, RoleCatalogEntry>>;
 
   constructor(client: Pick<CtClient, "get">) {
     this.client = client;
@@ -93,6 +103,35 @@ export class ReverseResolver {
   async idToKeyByKind(kind: RefKind): Promise<Map<number, string>> {
     const path = PORTABLE_CATALOG_PATHS[kind];
     return path ? this.index(path) : new Map<number, string>();
+  }
+
+  /**
+   * groupTypeRoleId → {groupTypeId, name} for every `/group/roles` row (#76). Unlike
+   * {@link idToKeyByKind}('role-def') — which keys by `slug(name)` alone and is WRONG for these ids
+   * (role names are not globally unique across group types) — this preserves each role's `groupTypeId`,
+   * so `portablizeRuleset` can reverse-map it to a managed group-type key and emit a (group-type,
+   * role-name) marker. Fetched at most once; a failed/malformed fetch degrades to an empty map (adopt
+   * then leaves the id numeric with a warning, the escape hatch).
+   */
+  async roleGroupTypeCatalog(): Promise<Map<number, RoleCatalogEntry>> {
+    if (!this.roleCatalog) {
+      this.roleCatalog = this.client
+        .get<CatalogRecord[]>("/group/roles")
+        .then((rows) => {
+          const map = new Map<number, RoleCatalogEntry>();
+          if (Array.isArray(rows)) {
+            for (const row of rows) {
+              const groupTypeId = Number(row?.groupTypeId);
+              if (typeof row?.id === "number" && typeof row.name === "string" && Number.isFinite(groupTypeId)) {
+                map.set(row.id, { groupTypeId, name: row.name });
+              }
+            }
+          }
+          return map;
+        })
+        .catch(() => new Map<number, RoleCatalogEntry>());
+    }
+    return this.roleCatalog;
   }
 
   /**

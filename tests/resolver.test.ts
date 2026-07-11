@@ -155,6 +155,79 @@ describe("Resolver.resolve", () => {
   });
 });
 
+describe("Resolver.resolve — group-type-role (groupTypeRoleId, #76)", () => {
+  // The real shape from live prod /group/roles: role NAMES repeat across group types ("Leiter" on both
+  // group type 12 and 2), which is exactly why #86's `role-def` mapping was ambiguous. Only the
+  // (groupTypeId, name) PAIR is unique, so this ref carries the group-type + role name.
+  const rolesCatalog = [
+    { id: 84, name: "Leiter", groupTypeId: 12 },
+    { id: 85, name: "Organisator", groupTypeId: 12 },
+    { id: 16, name: "Leiter", groupTypeId: 2 }, // SAME name as #84, different group type
+    { id: 17, name: "Organisator", groupTypeId: 2 },
+  ];
+  const groupTypesCatalog = [{ id: 12, name: "Local Lead" }, { id: 2, name: "Team" }];
+
+  it("resolves a (group-type, role) pair to its groupTypeRoleId, disambiguating same-named roles", async () => {
+    const client = fakeClient({ "/group/grouptypes": groupTypesCatalog, "/group/roles": rolesCatalog });
+    const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED });
+    // Same role NAME ("Leiter"), different group type → different id: the pair disambiguates.
+    expect(await r.resolve(ref.groupTypeRole("local_lead", "Leiter"), "site")).toBe(84);
+    expect(await r.resolve(ref.groupTypeRole("team", "Leiter"), "site")).toBe(16);
+    // slug- and exact-name both resolve; /group/roles fetched once, cached across all refs.
+    expect(await r.resolve(ref.groupTypeRole("team", "Organisator"), "site")).toBe(17);
+    expect(client.calls["/group/roles"]).toBe(1);
+  });
+
+  it("resolves the group-type half from managed state (no group-type catalog fetch)", async () => {
+    const state = stateWith({
+      local_lead: { type: "group-type", id: 12, key: "local_lead", fields: {}, adoptedAt: "t", updatedAt: "t" },
+    });
+    const client = fakeClient({ "/group/roles": rolesCatalog });
+    const r = new Resolver({ client, state, desired: NO_DESIRED });
+    expect(await r.resolve(ref.groupTypeRole("local_lead", "Organisator"), "site")).toBe(85);
+    expect(client.calls["/group/grouptypes"]).toBeUndefined(); // state hit — no catalog fetch
+  });
+
+  it("errors clearly when no role of that name exists on the group type (lists candidates)", async () => {
+    const client = fakeClient({ "/group/grouptypes": groupTypesCatalog, "/group/roles": rolesCatalog });
+    const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED, host: "hostA" });
+    await expect(r.resolve(ref.groupTypeRole("team", "Ghost"), "ruleset \"r\"")).rejects.toThrow(
+      /group-type-role\(groupType=team, role=Ghost\) referenced at ruleset "r" on hostA: group type #2 has no role named "Ghost".*available: "Leiter", "Organisator".*pass a numeric id/is,
+    );
+  });
+
+  it("errors listing candidates when two roles on the same group type share the name (ambiguous)", async () => {
+    const client = fakeClient({
+      "/group/grouptypes": groupTypesCatalog,
+      "/group/roles": [
+        { id: 84, name: "Leiter", groupTypeId: 12 },
+        { id: 800, name: "Leiter", groupTypeId: 12 }, // duplicate on the SAME group type
+      ],
+    });
+    const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED, host: "hostA" });
+    await expect(r.resolve(ref.groupTypeRole("local_lead", "Leiter"), "site")).rejects.toThrow(
+      /Ambiguous group-type-role\(groupType=local_lead, role=Leiter\).*2 roles on group type #12 match — "Leiter" \(#84\), "Leiter" \(#800\)/,
+    );
+  });
+
+  it("errors when the group-type key itself cannot be resolved", async () => {
+    const client = fakeClient({ "/group/grouptypes": groupTypesCatalog, "/group/roles": rolesCatalog });
+    const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED, host: "hostB" });
+    await expect(r.resolve(ref.groupTypeRole("ghost_type", "Leiter"), "site")).rejects.toThrow(
+      /Cannot resolve group-type:ghost_type referenced at site on hostB/,
+    );
+  });
+
+  it("rejects a same-run-declared (not-yet-created) group type — id only exists once it does", async () => {
+    const desired: DesiredResource[] = [{ type: "group-type", key: "local_lead", fields: {}, dependsOn: [] }];
+    const client = fakeClient({ "/group/roles": rolesCatalog });
+    const r = new Resolver({ client, state: emptyState("h"), desired, host: "hostA" });
+    await expect(r.resolve(ref.groupTypeRole("local_lead", "Leiter"), "site")).rejects.toThrow(
+      /declared in this config but not yet created.*Apply the group type first.*pass a numeric id/is,
+    );
+  });
+});
+
 describe("Resolver.resolveValue", () => {
   it("deep-rewrites refs to ids and fetches each catalog at most once", async () => {
     const client = fakeClient({ "/campuses": [{ id: 5, name: "Mainz" }, { id: 6, name: "Berlin" }] });

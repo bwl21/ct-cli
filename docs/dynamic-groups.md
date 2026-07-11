@@ -105,8 +105,13 @@ no-op — it does not re-`PUT` on every apply). Two equivalent ways to author it
   { "==": [{ "var": "ctgroup.campusId" }, { "__ctRef": true, "kind": "campus", "key": "mainz" }] }
   ```
 
-  Marker `kind`s: `campus`, `group`, `group-type`, `role-def` (`key` is the
-  logical key / slug). See `ref` in `src/resolve/refs.ts`.
+  Simple marker `kind`s carry a single `key` (the logical key / slug):
+  `campus`, `group`, `group-type`. A **role** (`role.id`) uses the compound
+  `group-type-role` marker instead — `{ "__ctRef": true, "kind":
+  "group-type-role", "groupType": "<group-type-key>", "role": "<role-name>" }` —
+  because a ruleset's `role.id` is a **groupTypeRoleId** (a role scoped to a
+  group type), and role names are not globally unique (see the table note
+  below). See `ref` in `src/resolve/refs.ts`.
 
 **Escape hatch — raw numeric ids pass through untouched.** A query that
 references an _operational_ group outside the managed scaffold (no logical key to
@@ -129,17 +134,32 @@ position that maps to a **managed** logical key is rewritten to its `{ __ctRef }
 marker; every other id is left numeric. The `var → RefKind` catalog it keys off
 (`VAR_REF_KINDS`) is:
 
-| ChurchQuery `var`      | marker `kind` | source catalog / state          |
-| ---------------------- | ------------- | ------------------------------- |
-| `ctgroup.id`           | `group`       | managed state (no REST catalog) |
-| `ctgroup.campusId`     | `campus`      | `/campuses`                     |
-| `person.campusId`      | `campus`      | `/campuses`                     |
-| `ctgroup.groupTypeId`  | `group-type`  | `/group/grouptypes`             |
-| `role.id`              | `role-def`    | `/group/roles`                  |
+| ChurchQuery `var`      | marker `kind`      | source catalog / state          |
+| ---------------------- | ------------------ | ------------------------------- |
+| `ctgroup.id`           | `group`            | managed state (no REST catalog) |
+| `ctgroup.campusId`     | `campus`           | `/campuses`                     |
+| `person.campusId`      | `campus`           | `/campuses`                     |
+| `ctgroup.groupTypeId`  | `group-type`       | `/group/grouptypes`             |
+| `role.id`              | `group-type-role`  | `/group/roles` (by `groupTypeId` + name) |
 
-`role.id` maps to **`role-def`** (the global role catalog `/group/roles`, a
-single numeric id) — not `group-role`, which is a compound (group, role)
-permission _domain_ a lone `role.id` number cannot express.
+The same `group-type-role` rewrite also covers the **out-of-query** integer
+field `process.*.handleMembership.groupTypeRoleId` (the target role a
+query-result membership is granted with) — it is a groupTypeRoleId too, just not
+inside the query.
+
+`role.id` maps to **`group-type-role`**, a compound **(group-type,
+role-name)** marker — _not_ `role-def` (a bare `/group/roles` name lookup) and
+_not_ `group-role` (a group-instance permission domain). A ruleset's `role.id`
+is a **groupTypeRoleId**: a role scoped to a group **type**. Role names are
+**not globally unique** across group types — live-verified on prod
+(2026-07-11, `/api/group/roles`, 46 roles): **3** roles named "Leiter", **6**
+"Organisator", **6** "Mitglied", each on a different group type. So a bare name
+(`role-def`) is genuinely ambiguous and the resolver throws. Only the
+**(groupTypeId, name) pair is unique** (0 collisions across all 46 roles), so the
+marker carries the group-type key + role name, and the resolver picks the one
+`/group/roles` row whose `groupTypeId` matches this host's group type and whose
+name slugs to the role. This corrects the earlier `role-def` mapping (#86),
+which was unresolvable on the real instance.
 
 The flag is **default OFF**: auto-rewriting an id you _thought_ was managed would
 silently change query semantics, so you opt in per invocation. Ids that don't map

@@ -44,6 +44,17 @@ describe("refKey / refLabel", () => {
     expect(refKey(ref.groupRole("g", "r"))).toBe("group-role:g r");
     expect(refLabel(ref.groupType("mt"))).toBe("group-type:mt");
     expect(refLabel(ref.groupRole("g", "r"))).toBe("group-role(group=g, role=r)");
+    // group-type-role (#76): a compound (group-type, role) pair, keyed/labelled distinctly.
+    expect(ref.groupTypeRole("local_lead", "Leiter")).toEqual({
+      __ctRef: true,
+      kind: "group-type-role",
+      groupType: "local_lead",
+      role: "Leiter",
+    });
+    expect(refKey(ref.groupTypeRole("local_lead", "Leiter"))).toBe("group-type-role:local_lead Leiter");
+    expect(refLabel(ref.groupTypeRole("local_lead", "Leiter"))).toBe(
+      "group-type-role(groupType=local_lead, role=Leiter)",
+    );
   });
 });
 

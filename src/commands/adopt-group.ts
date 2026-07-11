@@ -18,7 +18,7 @@ import { prepareEnv } from "../env/context.js";
 import { normalizeRuleset } from "../engine/dynamic.js";
 import type { DynamicStatus } from "../engine/types.js";
 import { RESOURCES, configSnippet, fromInformation, slug } from "../resources/registry.js";
-import { ReverseResolver } from "../resolve/reverse.js";
+import { ReverseResolver, type RoleCatalogEntry } from "../resolve/reverse.js";
 import type { RefKind } from "../resolve/refs.js";
 import { portablizeRuleset } from "../config/query-refs.js";
 import { loadState, saveState, upsert, type State } from "../state/state.js";
@@ -249,13 +249,19 @@ export function adoptGroupCommand(): Command {
       const results: ResolvedAdoption[] = [];
       const reports: Array<{ action: "created" | "updated"; id: number; key: string }> = [];
 
-      // Portable-ruleset catalogs (#76): fetch the catalog-backed id→key maps ONCE (campus/group-type/
-      // role-def). The `group` map is state-derived and rebuilt per capture (it grows as this run adopts).
+      // Portable-ruleset catalogs (#76): fetch the catalog-backed id→key maps ONCE (campus/group-type).
+      // The `group` map is state-derived and rebuilt per capture (it grows as this run adopts). Roles are
+      // NOT a simple id→key map — a `role.id`/`groupTypeRoleId` is group-type-scoped and role names are
+      // not globally unique, so we fetch the (groupTypeId, name) catalog plus the group-type id→key map
+      // and let portablizeRuleset emit (group-type, role-name) markers (fixes #86's `role-def` mapping).
       const portableCatalogMaps: Partial<Record<RefKind, Map<number, string>>> = {};
+      let roleCatalog: Map<number, RoleCatalogEntry> | undefined;
+      let groupTypeIdToKey: Map<number, string> | undefined;
       if (opts.withDynamic && opts.portableRulesets) {
         portableCatalogMaps.campus = await reverse.idToKeyByKind("campus");
         portableCatalogMaps["group-type"] = await reverse.idToKeyByKind("group-type");
-        portableCatalogMaps["role-def"] = await reverse.idToKeyByKind("role-def");
+        groupTypeIdToKey = portableCatalogMaps["group-type"];
+        roleCatalog = await reverse.roleGroupTypeCatalog();
       }
 
       for (const id of resolvedIds) {
@@ -285,6 +291,8 @@ export function adoptGroupCommand(): Command {
               }
               const { ruleset, warnings } = portablizeRuleset(captured.normalizedRuleset, {
                 idToKeyByKind: { ...portableCatalogMaps, group: groupMap },
+                roleCatalog,
+                groupTypeIdToKey,
               });
               rulesetToWrite = ruleset;
               if (warnings.length > 0) {
