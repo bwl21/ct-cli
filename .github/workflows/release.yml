@@ -55,11 +55,10 @@ jobs:
           bun build --compile --target=bun-linux-x64    ./src/index.ts --outfile release/ct-linux-x64
           chmod +x release/ct-darwin-arm64 release/ct-darwin-x64 release/ct-linux-x64
 
-      - name: Package npm-pack tarball
-        run: |
-          npm pack --pack-destination release
-          mv release/*.tgz release/ct-cli.tgz
-
+      # The release tarball is packed in the `release` job (via @semantic-release/exec)
+      # AFTER semantic-release bumps the version — packing it here would embed the
+      # placeholder 0.1.0 (see #84). The binaries + INSTALL.md below are version-agnostic
+      # assets the smoke jobs and release attach.
       - name: Write install note
         run: |
           cat > release/INSTALL.md <<'EOF'
@@ -177,5 +176,6 @@ jobs:
             -p @semantic-release/commit-analyzer@13 \
             -p @semantic-release/release-notes-generator@14 \
             -p @semantic-release/npm@12 \
+            -p @semantic-release/exec@6 \
             -p @semantic-release/github@11 \
             semantic-release

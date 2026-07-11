@@ -5,6 +5,13 @@
     "@semantic-release/release-notes-generator",
     "@semantic-release/npm",
     [
+      "@semantic-release/exec",
+      {
+        "//": "Runs AFTER @semantic-release/npm has written the bumped version into package.json, so this tarball carries the real release version (not the placeholder 0.1.0 the build job packs pre-bump). Renamed to the fixed filename the stable releases/latest/download/ct-cli.tgz URL depends on (README + INSTALL.md). See #84.",
+        "prepareCmd": "npm pack --pack-destination release && mv release/eqrm-ct-cli-${nextRelease.version}.tgz release/ct-cli.tgz"
+      }
+    ],
+    [
       "@semantic-release/github",
       {
         "successCommentCondition": false,
