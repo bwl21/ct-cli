@@ -17,7 +17,7 @@
 import type { State } from "../state/state.js";
 import { findByTypeId } from "../state/state.js";
 import { CATALOG } from "./catalog.js";
-import { normalizeActual, isInheritedOnlyRight, type DomainType, type GrantTuple, type RawPermission } from "./grants.js";
+import { normalizeActual, type DomainType, type GrantTuple, type RawPermission } from "./grants.js";
 
 /** DSL function name for each domain type — the call the emitted block should be pasted as. */
 const DSL_FN: Record<DomainType, string> = {
@@ -113,7 +113,7 @@ export function emitAdoptedGrants(args: {
   } else {
     body.push("  grants: [");
     for (const g of collapse(grants)) {
-      const r = grantLines(g, rev, state, domainType);
+      const r = grantLines(g, rev, state);
       body.push(...r.lines);
       if (r.omitted) omitted += 1;
     }
@@ -159,14 +159,13 @@ interface GrantLinesResult {
  *
  * Round-trip invariant (locked by tests): every ACTIVE (non-comment) line this emits must pass
  * `desiredTuples` (`src/permissions/plan.ts`) without throwing — anything the planner would
- * reject (group_type_role authIds >= 10000, a scoped right without a declarable scope, an
- * unscoped right carrying dataIds) is emitted as a comment instead.
+ * reject (a scoped right without a declarable scope, an unscoped right carrying dataIds) is emitted
+ * as a comment instead.
  */
 function grantLines(
   g: CollapsedGrant,
   rev: Map<number, ReverseEntry>,
   state: State,
-  domainType: DomainType,
 ): GrantLinesResult {
   const entry = rev.get(g.authId);
   if (!entry) {
@@ -181,21 +180,10 @@ function grantLines(
     };
   }
 
-  // Mirror the planner's writability guard: `desiredTuples` throws for group_type_role grants
-  // with authId >= 10000 (the `churchdb:+…` family) — they are readable here via inheritance but
-  // not writable on this domain type, so emitting them would break the paste-and-plan round trip.
-  // The reconciler excludes these SAME rows from the actual set via the shared predicate (#65).
-  if (isInheritedOnlyRight(domainType, g.authId)) {
-    return {
-      omitted: true,
-      lines: [
-        `    // NOTE: "${entry.name}" (authId ${g.authId}) is not writable on group_type_role — this right`,
-        "    //       reaches roles via inheritance only (authId >= 10000). Declaring it here would be",
-        "    //       rejected at plan time, so it is intentionally left as a comment.",
-      ],
-    };
-  }
-
+  // No authId cutoff (#65): the grants reaching here already passed `normalizeActual` (line ~100),
+  // which drops the system baseline (`modifiedPid === -1`) and every `isInherited` row — so what is
+  // left is admin-authored DIRECT grants, INCLUDING the writable `authId >= 10000` group-member rights
+  // Equippers curates on group_type_role. Those ARE declarable and are emitted as active grants.
   if (entry.scopeField != null && entry.scopeField !== GROUP_SCOPE_FIELD) {
     // Scoped right whose scope dimension is NOT a group (e.g. "cc_securitylevel", "cdb_comment_viewer")
     // — its dataIds name something this tool has no managed/logical representation for (a security

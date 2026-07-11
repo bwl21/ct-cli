@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { emitAdoptedGrants } from "../src/permissions/adopt.js";
-import { diffGrants, normalizeActual, isInheritedOnlyRight, type DomainType, type RawPermission } from "../src/permissions/grants.js";
+import { diffGrants, normalizeActual, type DomainType, type RawPermission } from "../src/permissions/grants.js";
 import { desiredTuples } from "../src/permissions/plan.js";
 import type { Grant } from "../src/permissions/types.js";
 import type { State } from "../src/state/state.js";
@@ -133,18 +133,19 @@ describe("emitAdoptedGrants", () => {
     expect(block).toContain("grants: [],");
   });
 
-  it("group_type_role right with authId >= 10000 → NOTE comment, never an active grant", () => {
-    // "churchdb:+edit group infos" (authId 10122) — desiredTuples rejects it on group_type_role.
+  it("group_type_role admin-authored authId >= 10000 member right IS emitted as an active grant (#65)", () => {
+    // "churchdb:+edit group infos" (authId 10122) — an admin-authored (pid 5) MEMBER right CT lets you
+    // write on group_type_role. It is now managed: emitted as an active grant, never a NOTE comment.
     const rows: RawPermission[] = [
       { authId: 10122, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
     const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 42, rows, state: emptyState() });
 
-    expect(block).toContain('NOTE: "churchdb:+edit group infos" (authId 10122) is not writable on group_type_role');
-    expect(parseEmittedGrants(block)).toEqual([]);
+    expect(block).not.toContain("NOTE:");
+    expect(parseEmittedGrants(block)).toEqual(["churchdb:+edit group infos"]);
   });
 
-  it("group_role right with authId >= 10000 IS emitted (only group_type_role rejects it)", () => {
+  it("group_role right with authId >= 10000 IS emitted (both domains manage member rights)", () => {
     const rows: RawPermission[] = [
       { authId: 10122, dataId: null, type: "grant", domainId: 7, meta: { modifiedPid: 5 } },
     ];
@@ -178,8 +179,8 @@ describe("emitAdoptedGrants", () => {
       domainType: "group_type_role",
       domainId: 42,
       rows: [
-        { authId: 999999, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // unknown
-        { authId: 10122, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // GTR-unwritable
+        { authId: 999999, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // unknown authId
+        { authId: 1104, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // scoped right granted globally
       ],
       state: emptyState(),
     });
@@ -242,32 +243,40 @@ describe("emitAdoptedGrants", () => {
     expect(diff.toDelete).toEqual([]);
   });
 
-  it("full round-trip on a role domain WITH inherited rights is a no-op (#65 acceptance)", () => {
-    // eqrm prod, group_type_role 9 (/Struktur): writable user grants PLUS inherited churchdb:+…
-    // rows (authId >= 10000) that adopt emits only as NOTE comments. Pasting the emitted block
-    // verbatim and diffing it against the SAME live rows must be a no-op — the inherited rows must
-    // NOT show up as `toDelete` (the #65 bug was "0 to grant, 24 to remove").
+  it("admin-authored member rights (authId >= 10000) are managed; system/inherited rows excluded (#65)", () => {
+    // eqrm prod, group_type_role 9 (/Struktur): admin-authored churchdb:+… MEMBER rights (authId >=
+    // 10000, isInherited:false, modifiedPid != -1) that CT lets you write — verified live (24 such
+    // rows, modifiedPid 1/3891). They must be adopted as ACTIVE grants and round-trip to a no-op.
+    // The self-re-adding system baseline (modifiedPid === -1) and truly-inherited rows must be
+    // EXCLUDED by normalizeActual and NEVER show up as `toDelete` (the #65 bug was "0 grant, 24 remove").
+    // The reconciliation boundary is inheritance + system-baseline, NOT the authId — hence the
+    // excluded rows below also carry authId >= 10000, proving the authId is not the cutoff.
     const rows: RawPermission[] = [
-      // writable, user-authored grants that ARE emitted as active config
-      { authId: 1113, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: 5 } }, // churchgroup:administer groups (unscoped)
+      // writable, user-authored grants (unscoped + group-scoped) — emitted active
+      { authId: 1113, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: 5 } }, // churchgroup:administer groups
       { authId: 1104, dataId: 99, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },   // churchgroup:view group scoped to managed "kids"
-      // inherited-only rows: unscoped, scope [1], scope [2] — emitted only as NOTE comments
-      { authId: 10101, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: 5 } }, // churchdb:+see persons
-      { authId: 10102, dataId: 1, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },    // churchdb:+see group
-      { authId: 10133, dataId: 2, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },    // churchdb:+edit group member fields scope [2]
+      // admin-authored MEMBER rights (authId >= 10000) — NOW managed: unscoped + security-level scopes
+      { authId: 10107, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: 5 } }, // churchdb:+add person (unscoped)
+      { authId: 10101, dataId: 2, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },    // churchdb:+see persons scope [2]
+      { authId: 10133, dataId: 1, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },    // churchdb:+edit group member fields scope [1]
+      // EXCLUDED (authId >= 10000 too): system baseline + a truly-inherited row → never revoked
+      { authId: 10122, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: -1 } }, // system baseline
+      { authId: 10111, dataId: null, type: "grant", domainId: 9, isInherited: true },          // inherited
     ];
     const state = stateWithKids();
     const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 9, rows, state });
-    // the inherited rows are surfaced as NOTE comments, never active grants
-    expect(block).toContain('NOTE: "churchdb:+see persons" (authId 10101) is not writable on group_type_role');
+    // the admin-authored member rights are emitted as ACTIVE grants, never NOTE comments
+    expect(block).not.toContain("NOTE:");
+    expect(block).toContain("churchdb:+add person");
     const grants = parseEmittedGrants(block);
 
-    // Paste-and-plan: diff the emitted (writable-only) declaration against the FULL live row set.
+    // Paste-and-plan: diff the emitted declaration against the FULL live row set. normalizeActual
+    // drops the system-baseline + inherited rows, so they never appear as revokes.
     const desired = grants.flatMap((g) => desiredTuples({ key: "adopted", domainType: "group_type_role", domainId: 9, grants: [g] }, state));
-    const actual = normalizeActual(rows).filter((t) => !isInheritedOnlyRight("group_type_role", t.authId));
+    const actual = normalizeActual(rows);
     const diff = diffGrants(desired, actual);
     expect(diff.toPut).toEqual([]);
-    expect(diff.toDelete).toEqual([]); // critically: NOT the 3 inherited rows
+    expect(diff.toDelete).toEqual([]); // critically: the system/inherited rows are NOT revoked
   });
 
   it("unmanaged group-dimension scope still gets the 'ct adopt group' hint (unchanged behavior)", () => {
