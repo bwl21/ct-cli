@@ -1,0 +1,181 @@
+{
+  "description": "Automatische Mitgliedschaft für Gruppe #1597",
+  "shorty": "Autom. Mitgliedschaft Gruppe #1597",
+  "personIdFieldName": "person.id",
+  "importance": 0,
+  "query": {
+    "method": "ChurchQuery",
+    "params": {
+      "groupBy": [
+        "person.id"
+      ],
+      "filter": {
+        "and": [
+          {
+            "dterm": [
+              {
+                "title": "group.automatic-membership.default-archived.title"
+              },
+              {
+                "==": [
+                  {
+                    "var": "person.isArchived"
+                  },
+                  0
+                ]
+              }
+            ]
+          },
+          {
+            "or": [
+              {
+                "dterm": [
+                  {
+                    "title": "nur LEITER",
+                    "stereotype": [
+                      "groupmembership"
+                    ]
+                  },
+                  {
+                    "and": [
+                      {
+                        "and": [
+                          {
+                            "oneof": [
+                              {
+                                "var": "ctgroup.groupStatusId"
+                              },
+                              [
+                                1,
+                                2,
+                                4
+                              ]
+                            ]
+                          },
+                          {
+                            "oneof": [
+                              {
+                                "var": "ctgroup.id"
+                              },
+                              [
+                                "148",
+                                "1228",
+                                "32",
+                                "1237",
+                                "1243",
+                                "27",
+                                "119"
+                              ]
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "and": [
+                          {
+                            "oneof": [
+                              {
+                                "var": "role.id"
+                              },
+                              [
+                                "16",
+                                "84",
+                                "85",
+                                "17",
+                                "90",
+                                "91"
+                              ]
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "dterm": [
+                  {
+                    "title": "ALLE",
+                    "stereotype": [
+                      "groupmembership"
+                    ]
+                  },
+                  {
+                    "and": [
+                      {
+                        "and": [
+                          {
+                            "oneof": [
+                              {
+                                "var": "ctgroup.groupStatusId"
+                              },
+                              [
+                                1,
+                                2,
+                                4
+                              ]
+                            ]
+                          },
+                          {
+                            "oneof": [
+                              {
+                                "var": "ctgroup.id"
+                              },
+                              [
+                                "1974"
+                              ]
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "and": [
+                          {
+                            "oneof": [
+                              {
+                                "var": "role.id"
+                              },
+                              [
+                                "15",
+                                "16",
+                                "17"
+                              ]
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "primaryEntityAlias": "person",
+      "responseFields": [
+        "person.id",
+        "person.firstName",
+        "person.lastName"
+      ]
+    }
+  },
+  "process": {
+    "groupOnly": {
+      "active": {
+        "handleMembership": {
+          "groupMemberStatus": "none"
+        }
+      }
+    },
+    "queryResultOnly": {
+      "none": {
+        "handleMembership": {
+          "groupMemberStatus": "active"
+        }
+      }
+    },
+    "groupAndQueryResult": {}
+  }
+}

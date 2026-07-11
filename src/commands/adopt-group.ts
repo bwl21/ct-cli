@@ -19,6 +19,8 @@ import { normalizeRuleset } from "../engine/dynamic.js";
 import type { DynamicStatus } from "../engine/types.js";
 import { RESOURCES, configSnippet, fromInformation, slug } from "../resources/registry.js";
 import { ReverseResolver } from "../resolve/reverse.js";
+import type { RefKind } from "../resolve/refs.js";
+import { portablizeRuleset } from "../config/query-refs.js";
 import { loadState, saveState, upsert, type State } from "../state/state.js";
 import { success, info, warn, out } from "../ui.js";
 
@@ -30,6 +32,7 @@ interface AdoptGroupOptions {
   type?: string;
   childrenOf?: string;
   withDynamic?: boolean;
+  portableRulesets?: boolean;
 }
 
 const GROUP_SPEC = RESOURCES.group!;
@@ -179,6 +182,11 @@ export function adoptGroupCommand(): Command {
       "--with-dynamic",
       "also capture each dynamic group's ruleset to rulesets/<key>.json and emit the dynamic: block",
     )
+    .option(
+      "--portable-rulesets",
+      "when capturing rulesets (--with-dynamic), rewrite managed entity ids in the query into portable " +
+        "logical ref markers; unmanaged ids stay numeric with a warning (opt-in; #76)",
+    )
     .action(async (ids: string[], _localOpts: AdoptGroupOptions, command: Command) => {
       // `adopt` (the parent) also declares `-k/--key`, `-s/--state`, `-e/--env`, and `--dry-run` —
       // for its own `<type> <id>` action. Commander does not merge same-named options declared on
@@ -241,6 +249,15 @@ export function adoptGroupCommand(): Command {
       const results: ResolvedAdoption[] = [];
       const reports: Array<{ action: "created" | "updated"; id: number; key: string }> = [];
 
+      // Portable-ruleset catalogs (#76): fetch the catalog-backed id→key maps ONCE (campus/group-type/
+      // role-def). The `group` map is state-derived and rebuilt per capture (it grows as this run adopts).
+      const portableCatalogMaps: Partial<Record<RefKind, Map<number, string>>> = {};
+      if (opts.withDynamic && opts.portableRulesets) {
+        portableCatalogMaps.campus = await reverse.idToKeyByKind("campus");
+        portableCatalogMaps["group-type"] = await reverse.idToKeyByKind("group-type");
+        portableCatalogMaps["role-def"] = await reverse.idToKeyByKind("role-def");
+      }
+
       for (const id of resolvedIds) {
         const resource = await client.get<Record<string, unknown>>(GROUP_SPEC.itemPath(id));
         const key =
@@ -258,11 +275,30 @@ export function adoptGroupCommand(): Command {
           const captured = await captureDynamic(id, client);
           if (captured) {
             const relPath = `rulesets/${key}.json`;
+            let rulesetToWrite = captured.normalizedRuleset;
+            if (opts.portableRulesets) {
+              // Managed group ids come from state (no catalog for `group`), including any group this
+              // same run already adopted; the master-data kinds come from the catalog maps above.
+              const groupMap = new Map<number, string>();
+              for (const r of Object.values(state.resources)) {
+                if (r.type === "group") groupMap.set(r.id, r.key);
+              }
+              const { ruleset, warnings } = portablizeRuleset(captured.normalizedRuleset, {
+                idToKeyByKind: { ...portableCatalogMaps, group: groupMap },
+              });
+              rulesetToWrite = ruleset;
+              if (warnings.length > 0) {
+                warn(
+                  `left ${warnings.length} unmanaged id(s) numeric in ${key}.json — ` +
+                    `operational/unmanaged refs, not portable (escape hatch)`,
+                );
+              }
+            }
             if (!opts.dryRun) {
               await mkdir(join(process.cwd(), "rulesets"), { recursive: true });
               await writeFile(
                 join(process.cwd(), relPath),
-                `${JSON.stringify(captured.normalizedRuleset, null, 2)}\n`,
+                `${JSON.stringify(rulesetToWrite, null, 2)}\n`,
                 "utf8",
               );
             }
