@@ -15,6 +15,7 @@
  * the caller keeps the numeric id and flags it with a `// TODO: no logical match` comment.
  */
 import type { CtClient } from "../api/ctClient.js";
+import type { RefKind } from "./refs.js";
 import { slug } from "../resources/registry.js";
 
 /**
@@ -26,6 +27,18 @@ import { slug } from "../resources/registry.js";
 const REVERSE_ID_FIELDS: Record<string, { catalog: string; sugar: string }> = {
   campusId: { catalog: "/campuses", sugar: "campus" },
   groupTypeId: { catalog: "/group/grouptypes", sugar: "groupType" },
+};
+
+/**
+ * RefKind → master-data catalog path, for portablizing captured ruleset ids (#76). Mirrors the
+ * forward resolver's CATALOG_PATH (src/resolve/resolver.ts) so the id→key map here inverts exactly
+ * what the resolver's slug-primary lookup maps back on any host. `group` is deliberately absent — it
+ * has no catalog (managed-only); its id→key map comes from managed state, supplied by the caller.
+ */
+const PORTABLE_CATALOG_PATHS: Partial<Record<RefKind, string>> = {
+  campus: "/campuses",
+  "group-type": "/group/grouptypes",
+  "role-def": "/group/roles",
 };
 
 interface CatalogRecord {
@@ -69,6 +82,17 @@ export class ReverseResolver {
   /** The logical key for a numeric id in the given catalog, or `undefined` when unmatched. */
   private async keyForId(catalog: string, id: number): Promise<string | undefined> {
     return (await this.index(catalog)).get(id);
+  }
+
+  /**
+   * id → logical-key map for a catalog-backed {@link RefKind}, for portablizing captured ruleset ids
+   * (#76 Stage 3). Reuses the same cached master-data index as {@link sugarFields} (campus/group-type)
+   * plus the global role catalog. A kind with no catalog (e.g. `group` — managed-only) yields an empty
+   * map; the caller supplies those ids from managed state instead.
+   */
+  async idToKeyByKind(kind: RefKind): Promise<Map<number, string>> {
+    const path = PORTABLE_CATALOG_PATHS[kind];
+    return path ? this.index(path) : new Map<number, string>();
   }
 
   /**

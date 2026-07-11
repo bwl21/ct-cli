@@ -29,6 +29,7 @@ function makeClient() {
     30: { id: 30, name: "All Mainz", information: { groupTypeId: 5, groupStatusId: 1 } },
     // campusId 0 (Mainz) exercises campus reverse-resolution — including the id-0 edge — end to end.
     31: { id: 31, name: "Static Group", information: { groupTypeId: 5, groupStatusId: 1, campusId: 0 } },
+    33: { id: 33, name: "Portable Dynamic", information: { groupTypeId: 5, groupStatusId: 1 } },
   };
   const children: Record<number, number[]> = {
     40: [41, 42],
@@ -47,10 +48,26 @@ function makeClient() {
   // plain group adopt (see the assertion in the --with-dynamic capture test below).
   const campuses = [{ id: 0, name: "Mainz" }];
   const memberStatuses = [{ id: 1, name: "Aktiv" }];
+  // Global role catalog (/group/roles) — the `role-def` kind's catalog, used to portablize `role.id`.
+  const roles = [{ id: 7, name: "Leiter" }];
   const rulesets: Record<number, Record<string, unknown>> = {
     30: { description: "x", query: { "==": [{ var: "a" }, "1"] }, process: {} },
+    // A ruleset carrying every portablizable var shape (#76): a managed group id (10) + an unmanaged
+    // one (999); a campus id (0); a role id (7); and a catalog-less groupStatusId list (untouched).
+    33: {
+      description: "portable",
+      query: {
+        and: [
+          { oneof: [{ var: "ctgroup.id" }, ["10", "999"]] },
+          { "==": [{ var: "ctgroup.campusId" }, "0"] },
+          { oneof: [{ var: "role.id" }, ["7"]] },
+          { oneof: [{ var: "ctgroup.groupStatusId" }, ["1", "2"]] },
+        ],
+      },
+      process: {},
+    },
   };
-  const statuses: Record<number, string> = { 30: "active" };
+  const statuses: Record<number, string> = { 30: "active", 33: "active" };
 
   const get = vi.fn(async (path: string): Promise<unknown> => {
     let m = /^\/groups\/(\d+)$/.exec(path);
@@ -63,6 +80,7 @@ function makeClient() {
     if (m) return (children[Number(m[1])] ?? []).map((id) => ({ id }));
     if (path === "/group/grouptypes") return groupTypes;
     if (path === "/campuses") return campuses;
+    if (path === "/group/roles") return roles;
     if (path === "/group/memberstatus") return memberStatuses;
     m = /^\/dynamicgroups\/(\d+)\/ruleset$/.exec(path);
     if (m) {
@@ -330,6 +348,61 @@ describe("ct adopt group --with-dynamic", () => {
       configDir: workDir,
     });
     expect(plan.items.every((i) => i.action === "no-op")).toBe(true);
+  });
+});
+
+describe("ct adopt group --with-dynamic --portable-rulesets (#76 Stage 3)", () => {
+  /** Adopt group 10 first (→ managed key "area_a") so the dynamic ruleset's ctgroup.id 10 is managed. */
+  async function adoptWithManagedGroup(extraArgs: string[]): Promise<void> {
+    await run(["group", "10", "--state", statePath]);
+    await run(["group", "33", "--with-dynamic", ...extraArgs, "--state", statePath]);
+  }
+
+  it("rewrites managed group/campus/role ids to ref markers and leaves groupStatusId numeric", async () => {
+    await adoptWithManagedGroup(["--portable-rulesets"]);
+    const written = JSON.parse(await readFile(join(workDir, "rulesets", "portable_dynamic.json"), "utf8"));
+    const and = (written.query as { and: Array<Record<string, unknown[]>> }).and;
+
+    // ctgroup.id: 10 is managed (→ ref.group("area_a")); 999 is unmanaged (→ stays numeric).
+    expect(and[0]!.oneof![1]).toEqual([{ __ctRef: true, kind: "group", key: "area_a" }, 999]);
+    // campusId 0 → the Mainz campus marker (slug of the catalog name).
+    expect(and[1]!["=="]![1]).toEqual({ __ctRef: true, kind: "campus", key: "mainz" });
+    // role.id 7 → role-def marker (global /group/roles catalog), NOT group-role.
+    expect(and[2]!.oneof![1]).toEqual([{ __ctRef: true, kind: "role-def", key: "leiter" }]);
+    // groupStatusId has no catalog (#67) → left numeric, untouched.
+    expect(and[3]!.oneof![1]).toEqual([1, 2]);
+  });
+
+  it("warns once naming the file for the unmanaged id it left numeric (escape hatch)", async () => {
+    const errs: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((s) => {
+      errs.push(String(s));
+      return true;
+    });
+    try {
+      await adoptWithManagedGroup(["--portable-rulesets"]);
+    } finally {
+      spy.mockRestore();
+    }
+    const warned = errs.join("");
+    expect(warned).toMatch(/left 1 unmanaged id\(s\) numeric in portable_dynamic\.json/);
+    expect(warned).toContain("escape hatch");
+  });
+
+  it("is OFF by default: a plain --with-dynamic capture keeps raw numeric ids (no markers)", async () => {
+    await adoptWithManagedGroup([]); // no --portable-rulesets
+    const written = JSON.parse(await readFile(join(workDir, "rulesets", "portable_dynamic.json"), "utf8"));
+    const and = (written.query as { and: Array<Record<string, unknown[]>> }).and;
+    expect(and[0]!.oneof![1]).toEqual([10, 999]); // raw ids, no rewrite
+    expect(JSON.stringify(written)).not.toContain("__ctRef");
+  });
+
+  it("--dry-run --portable-rulesets writes no file", async () => {
+    await run(["group", "10", "--state", statePath]);
+    await run(["group", "33", "--with-dynamic", "--portable-rulesets", "--dry-run", "--state", statePath]);
+    await expect(
+      readFile(join(workDir, "rulesets", "portable_dynamic.json"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
 

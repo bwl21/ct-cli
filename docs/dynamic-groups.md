@@ -114,7 +114,44 @@ resolve against) can keep the plain number; you then own its per-environment
 correctness. This mirrors the permission scope escape hatch (#49): prefer a
 reference, fall back to a number where no managed key exists.
 
-> **Interim caveat (until adopt auto-rewrites ids — #76):** applying a
+#### Auto-rewrite on capture: `--portable-rulesets` (opt-in, #76)
+
+Rather than hand-editing markers into a freshly captured file, let adopt do it:
+
+```sh
+ct adopt group <id> --with-dynamic --portable-rulesets
+```
+
+With the flag, `ct adopt group --with-dynamic` runs the captured (normalized)
+ruleset through `portablizeRuleset` (`src/config/query-refs.ts`) before writing
+`rulesets/<key>.json`: every numeric id sitting in a known ChurchQuery `var`
+position that maps to a **managed** logical key is rewritten to its `{ __ctRef }`
+marker; every other id is left numeric. The `var → RefKind` catalog it keys off
+(`VAR_REF_KINDS`) is:
+
+| ChurchQuery `var`      | marker `kind` | source catalog / state          |
+| ---------------------- | ------------- | ------------------------------- |
+| `ctgroup.id`           | `group`       | managed state (no REST catalog) |
+| `ctgroup.campusId`     | `campus`      | `/campuses`                     |
+| `person.campusId`      | `campus`      | `/campuses`                     |
+| `ctgroup.groupTypeId`  | `group-type`  | `/group/grouptypes`             |
+| `role.id`              | `role-def`    | `/group/roles`                  |
+
+`role.id` maps to **`role-def`** (the global role catalog `/group/roles`, a
+single numeric id) — not `group-role`, which is a compound (group, role)
+permission _domain_ a lone `role.id` number cannot express.
+
+The flag is **default OFF**: auto-rewriting an id you _thought_ was managed would
+silently change query semantics, so you opt in per invocation. Ids that don't map
+to a managed key (an operational group outside the scaffold, or the catalog-less
+`ctgroup.groupStatusId`, #67) stay numeric — the escape hatch — and adopt emits a
+warning naming the file:
+
+```text
+! left 2 unmanaged id(s) numeric in jugend.json — operational/unmanaged refs, not portable (escape hatch)
+```
+
+> **Interim caveat (when NOT using `--portable-rulesets`):** applying a
 > raw-id prod snapshot to a _different_ environment is mechanically fine (CT
 > accepts it; unknown ids → empty matches) but **semantically wrong** for that
 > environment's memberships. Treat it as a known, documented gap — not a silent
