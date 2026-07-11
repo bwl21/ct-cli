@@ -29,9 +29,11 @@ describe("desiredTuples", () => {
       { key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchgroup:view group"] }, state),
     ).toThrow(/is a scoped right.*must be declared as \{ right/is);
   });
-  it("rejects authId >= 10000 on group_type_role", () => {
-    expect(() => desiredTuples({ key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchdb:+see persons"] }, state))
-      .toThrow(/10000/); // churchdb:+see persons is authId 10101
+  it("accepts an admin-authored authId >= 10000 member right on group_type_role (#65)", () => {
+    // The old authId>=10000 rejection is gone — admin-authored member rights CT lets you write are
+    // now declarable. "churchdb:+add person" (authId 10107) is unscoped, so a bare string is valid.
+    expect(desiredTuples({ key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchdb:+add person"] }, state))
+      .toEqual([{ authId: 10107, dataId: [], type: "grant" }]);
   });
 
   it("fans out a multi-element scope into one single-dataId tuple per dataId (idempotency: ChurchTools reads scoped grants back one row per dataId)", () => {
@@ -143,34 +145,34 @@ describe("buildPermissionPlan", () => {
     expect(warnings.some((w) => w.includes("987654") && w.includes("group_type_role #8"))).toBe(true);
   });
 
-  it("excludes inherited rights (authId >= 10000) from the ACTUAL diff set on group_type_role (#65)", async () => {
-    // eqrm prod, group_type_role 9: 5 writable user grants are declared, but the domain also reads
-    // back inherited churchdb:+… rows (authId >= 10000) that CANNOT be declared (desiredTuples
-    // rejects them) nor adopted (emitted as NOTE comments). If those live rows entered the ACTUAL
-    // set they would have no desired counterpart and land in toDelete — the #65 bug ("0 to grant,
-    // 24 to remove", a no-op that can never converge). They must be excluded from the diff.
+  it("reconciles admin-authored member rights; excludes system-baseline + inherited rows (#65)", async () => {
+    // eqrm prod, group_type_role 9: admin-authored churchdb:+… MEMBER rights (authId >= 10000,
+    // isInherited:false, modifiedPid != -1) ARE managed — an undeclared one must be revoked. The
+    // self-re-adding system baseline (modifiedPid === -1) and truly-inherited rows are excluded by
+    // normalizeActual and NEVER revoked (the #65 bug was "0 to grant, 24 to remove"). The boundary is
+    // inheritance + system-baseline, NOT the authId — so the excluded rows below carry authId >= 10000 too.
     const client = { get: vi.fn(async () => [
-      // the one writable, user-authored grant that IS declared
+      // declared writable grant — matches, no diff
       { domainType: "group_type_role", domainId: 9, authId: 1113, dataId: null, type: "grant", meta: { modifiedPid: 5 } },
-      // inherited-only rows (authId >= 10000): unscoped, scoped [1], scoped [2]
-      { domainType: "group_type_role", domainId: 9, authId: 10101, dataId: null, type: "grant", meta: { modifiedPid: 5 } },
-      { domainType: "group_type_role", domainId: 9, authId: 10102, dataId: 1, type: "grant", meta: { modifiedPid: 5 } },
-      { domainType: "group_type_role", domainId: 9, authId: 10133, dataId: 2, type: "grant", meta: { modifiedPid: 5 } },
+      // admin-authored member right (authId >= 10000, pid 5) that is UNDECLARED → must be revoked
+      { domainType: "group_type_role", domainId: 9, authId: 10107, dataId: null, type: "grant", meta: { modifiedPid: 5 } },
+      // system baseline + inherited (authId >= 10000) → excluded, never revoked
+      { domainType: "group_type_role", domainId: 9, authId: 10122, dataId: null, type: "grant", meta: { modifiedPid: -1 } },
+      { domainType: "group_type_role", domainId: 9, authId: 10111, dataId: null, type: "grant", isInherited: true },
     ]) };
     const { items, warnings, fetchErrors } = await buildPermissionPlan(client as never, state,
       [{ key: "struktur", domainType: "group_type_role", domainId: 9, grants: ["churchgroup:administer groups"] }]);
     expect(fetchErrors).toEqual([]);
-    expect(items[0]?.diff.toPut).toEqual([]);    // the declared writable grant already matches
-    expect(items[0]?.diff.toDelete).toEqual([]); // NONE of the inherited rows are proposed for revocation
-    // a single informational summary line, not one warning per inherited row
-    const inheritedWarnings = warnings.filter((w) => w.includes("inherited right"));
-    expect(inheritedWarnings).toHaveLength(1);
-    expect(inheritedWarnings[0]).toMatch(/group_type_role #9.*3 inherited right/);
+    expect(items[0]?.diff.toPut).toEqual([]); // the declared writable grant already matches
+    // the undeclared admin-authored member right IS revoked; the baseline + inherited rows are NOT
+    expect(items[0]?.diff.toDelete).toEqual([{ authId: 10107, dataId: [], type: "grant" }]);
+    // the old "inherited right" informational warning is gone (that authId-based exclusion is removed)
+    expect(warnings.filter((w) => w.includes("inherited right"))).toHaveLength(0);
   });
 
-  it("group_role does NOT exclude authId >= 10000 — only group_type_role inherits (#65)", async () => {
-    // The predicate is domain-scoped: on group_role the churchdb:+… rights ARE writable/declarable,
-    // so a live one that is undeclared must still be revoked (no accidental blanket exclusion).
+  it("reconciles admin-authored authId >= 10000 rights on group_role too (no authId cutoff, #65)", async () => {
+    // No authId cutoff on either domain: on group_role the churchdb:+… rights ARE writable/declarable,
+    // so a live admin-authored one that is undeclared must still be revoked (no blanket exclusion).
     const client = { get: vi.fn(async (path: string) => {
       if (path === "/groups/42/roles") return [{ id: 2882, name: "Leiter" }];
       if (path === "/permissions/group_role") return [
@@ -190,7 +192,7 @@ describe("buildPermissionPlan", () => {
     const client = { get: vi.fn(async () => [
       { domainType: "group_type_role", domainId: 9, authId: 1113, dataId: null, type: "grant", meta: { modifiedPid: 5 } }, // declared
       { domainType: "group_type_role", domainId: 9, authId: 1104, dataId: 42, type: "grant", meta: { modifiedPid: 5 } },   // undeclared user grant
-      { domainType: "group_type_role", domainId: 9, authId: 10101, dataId: null, type: "grant", meta: { modifiedPid: 5 } }, // inherited → excluded
+      { domainType: "group_type_role", domainId: 9, authId: 10101, dataId: null, type: "grant", isInherited: true },        // inherited → excluded
     ]) };
     const { items } = await buildPermissionPlan(client as never, state,
       [{ key: "struktur", domainType: "group_type_role", domainId: 9, grants: ["churchgroup:administer groups"] }]);

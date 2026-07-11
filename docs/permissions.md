@@ -270,10 +270,12 @@ to be accepted by `ct plan` (the round trip is locked by tests):
   - A scoped right granted **globally** in CT (row with no `dataId`) is a
     `WARNING` comment either way — the DSL deliberately cannot declare a
     global grant of a scoped right.
-- **Not-writable rights become `NOTE` comments.** On `group_type_role`, rights
-  with `authId >= 10000` (the `churchdb:+…` family) are readable via inheritance
-  but rejected at plan time (see "Domain rules" below), so they are never
-  emitted as grants.
+- **System-baseline and inherited rows are dropped, not emitted.** Adoption runs
+  the live rows through `normalizeActual`, which excludes the self-re-adding
+  system baseline (`modifiedPid === -1`) and any `isInherited` row. Admin-authored
+  direct grants — **including** the writable `authId >= 10000` `churchdb:+…`
+  member rights CT lets you set on `group_type_role` — are emitted as active
+  grants (no authId cutoff; #65).
 - **Only `group_role` / `group_type_role`** are valid; people domains are
   refused (the same hard boundary as everywhere else).
 
@@ -293,11 +295,14 @@ and `ct plan`.
 
 ## Domain rules (validated, throw on violation)
 
-- **`group_type_role` requires `authId < 10000`.** Rights with `authId >=
-  10000` are not writable through this domain type in ChurchTools; declaring
-  one under `ct.groupTypeRole` throws at plan/evaluation time
-  (`src/permissions/plan.ts`, `desiredTuples`). Use `ct.groupRole` for those
-  rights instead.
+- **No authId cutoff.** Admin-authored member rights (`authId >= 10000`, the
+  `churchdb:+…` family) ARE writable on `group_type_role` and can be declared
+  under `ct.groupTypeRole` — verified live (eqrm prod `group_type_role/9` carries
+  24 such admin-set rows). What ct never reconciles is decided by the live row's
+  flags, not its authId: `normalizeActual` drops the system baseline
+  (`modifiedPid === -1`) and every `isInherited` row, so those are neither adopted
+  nor revoked (#65). Earlier versions blocked `authId >= 10000` outright — that was
+  too broad and is removed.
 - **Revocation is a later extension, not exposed yet.** `GrantTuple.type` is
   typed as `"grant" | "revoke"`, but the DSL and `desiredTuples` currently
   only ever *emit* `"grant"` tuples — there is no config-level way to declare

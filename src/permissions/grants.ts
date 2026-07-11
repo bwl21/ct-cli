@@ -5,31 +5,17 @@
  */
 export type DomainType = "group_role" | "group_type_role";
 
-/**
- * Smallest authId of the inheritance-only rights family (the `churchdb:+…` rights). These reach
- * roles via inheritance and are NOT writable on a group_type_role domain — CT exposes them as
- * readable rows there, but any write is rejected.
- */
-export const INHERITED_RIGHT_MIN_AUTH_ID = 10000;
-
-/**
- * Whether a right is readable-but-not-writable on this domain type: it reaches roles via
- * inheritance only, so it can neither be declared (`desiredTuples` throws for it) nor adopted
- * (adopt emits it as a NOTE comment, never an active grant).
- *
- * SINGLE SOURCE OF TRUTH — this predicate MUST be shared by three sites that would otherwise drift
- * and reopen issue #65:
- *  1. `desiredTuples` (plan.ts) rejects declaring such a right,
- *  2. `emitAdoptedGrants` (adopt.ts) excludes it from the emitted block, and
- *  3. `buildPermissionPlan` (plan.ts) excludes matching LIVE rows from the ACTUAL diff set.
- * If (1)/(2) exclude a right but (3) keeps it, the plan demands a revoke the DSL can never satisfy
- * — pasted adopt output can never converge to a no-op (the #65 bug).
- *
- * Today only group_type_role carries such rights (authId >= 10000).
- */
-export function isInheritedOnlyRight(domainType: DomainType, authId: number): boolean {
-  return domainType === "group_type_role" && authId >= INHERITED_RIGHT_MIN_AUTH_ID;
-}
+// What reconciliation owns vs. leaves untouched is decided SOLELY by `normalizeActual` below:
+// it drops the self-re-adding system baseline (`modifiedPid === -1`) and any `isInherited` row, so
+// only admin-authored DIRECT grants are managed. There is intentionally NO authId-based cutoff.
+//
+// (History, #65: an earlier `isInheritedOnlyRight(domainType, authId) = authId >= 10000` predicate
+// gated declaration/adoption/diff on the authId. That was too broad — it also excluded the
+// admin-authored `authId >= 10000` group-member rights (e.g. "Add group members" 10107) that CT DOES
+// let you write on a group_type_role domain and that Equippers prod actually curates. Verified live
+// on eqrm prod `group_type_role/9`: 24 such rows carry `isInherited:false` and `modifiedPid` 1/3891.
+// The real, verified boundary is inheritance + system-baseline, which normalizeActual already
+// enforces on every path that reads actuals — the #65 no-op guarantee holds without the authId cutoff.)
 
 export interface GrantTuple {
   authId: number;

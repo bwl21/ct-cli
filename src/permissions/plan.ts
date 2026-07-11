@@ -11,7 +11,7 @@ import type { DesiredResource } from "../engine/types.js";
 import { resolveAuthId, CATALOG_META, KNOWN_AUTH_IDS } from "./catalog.js";
 import { compareVersions } from "../api/version.js";
 import { resolveScope } from "./scope.js";
-import { normalizeActual, diffGrants, isInheritedOnlyRight, INHERITED_RIGHT_MIN_AUTH_ID, type GrantTuple, type GrantDiff, type DomainType, type RawPermission } from "./grants.js";
+import { normalizeActual, diffGrants, type GrantTuple, type GrantDiff, type DomainType, type RawPermission } from "./grants.js";
 import type { DesiredPermission } from "./types.js";
 import { Resolver } from "../resolve/resolver.js";
 import { isPendingRef, refKey, refLabel, type Ref } from "../resolve/refs.js";
@@ -43,9 +43,6 @@ export function desiredTuples(
   return p.grants.flatMap((g): GrantTuple[] => {
     const name = typeof g === "string" ? g : g.right;
     const entry = resolveAuthId(name);
-    if (isInheritedOnlyRight(p.domainType, entry.authId)) {
-      throw new Error(`${p.domainType} "${p.key}": "${name}" (authId ${entry.authId}) is not writable — ${p.domainType} requires authId < 10000.`);
-    }
     if (typeof g === "string") {
       // A scoped right declared as a bare string would emit `dataId: []` — a silent GLOBAL grant.
       // Refuse it: a scoped right must be declared as `{ right, scope: [...] }` so the scope is explicit.
@@ -188,14 +185,11 @@ export async function buildPermissionPlan(
     const all = byType.get(p.domainType);
     if (all == null) continue; // fetch failed for this domainType — recorded above
     const normalizedAll = normalizeActual(all.filter((r) => r.domainId === p.domainId));
-    // Inherited-rights guard (#65): a group_type_role reads back rights it acquires via inheritance
-    // (the `churchdb:+…` family, authId >= 10000) as live rows, but those rights are NOT writable on
-    // this domain — `desiredTuples` refuses to declare them and `ct adopt grants` emits them only as
-    // NOTE comments. If they stayed in the ACTUAL set they would have no desired counterpart and land
-    // in `toDelete`, so `ct plan` would demand revokes the DSL can never satisfy — a no-op would be
-    // impossible for any role domain with inheritance. Exclude them here (below, after the
-    // unknown-authId guard), mirroring the exact predicate the declaration/adopt sides use, and
-    // surface a single informational summary line.
+    // Actuals are already filtered by `normalizeActual`: the self-re-adding system baseline
+    // (`modifiedPid === -1`) and every `isInherited` row are dropped, so what remains is admin-authored
+    // DIRECT grants — INCLUDING the writable `authId >= 10000` group-member rights Equippers curates on
+    // group_type_role (e.g. "Add group members" 10107). Those are reconciled like any other grant; there
+    // is no authId cutoff (see grants.ts — the old `authId >= 10000` exclusion was too broad, #65).
     //
     // Unknown-authId guard (#25): a live GRANT whose authId is absent from the catalog cannot be
     // named or described. Keep it OUT of the diff — otherwise, having no desired counterpart, it
@@ -203,20 +197,11 @@ export async function buildPermissionPlan(
     // Instead, warn (naming authId + domain) and leave it untouched. Idempotent: excluded every run.
     // (Revoke/deny rows with an unknown authId are already `preserved` by diffGrants, so ignore them
     // here — only unknown grant rows are the churn/silent-revoke hazard.)
-    //
-    // Order matters: the unknown-authId check runs FIRST so an unknown authId that merely happens to
-    // be >= 10000 is reported as unknown, not misclassified as an inherited catalog right. Only KNOWN
-    // rights reach the inherited-rights check.
     const knownActual: GrantTuple[] = [];
     const unknownAuthIds = new Set<number>();
-    const inheritedAuthIds = new Set<number>();
     for (const t of normalizedAll) {
       if (t.type === "grant" && !KNOWN_AUTH_IDS.has(t.authId)) {
         unknownAuthIds.add(t.authId);
-        continue;
-      }
-      if (isInheritedOnlyRight(p.domainType, t.authId)) {
-        inheritedAuthIds.add(t.authId);
         continue;
       }
       knownActual.push(t);
@@ -226,13 +211,6 @@ export async function buildPermissionPlan(
         `${p.domainType} #${p.domainId} ("${p.key}"): a live grant carries authId ${authId}, which is ` +
           `not in the permission catalog — left untouched (never revoked). Regenerate the catalog ` +
           `(\`npm run regenerate:permission-catalog\`) if this right should be manageable.`,
-      );
-    }
-    if (inheritedAuthIds.size > 0) {
-      warnings.push(
-        `${p.domainType} #${p.domainId} ("${p.key}"): ${inheritedAuthIds.size} inherited right(s) ` +
-          `(authId >= ${INHERITED_RIGHT_MIN_AUTH_ID}) are readable but not writable on ${p.domainType} — left untouched ` +
-          `(never revoked); they reach roles via inheritance only.`,
       );
     }
     items.push({ key: p.key, domainType: p.domainType, domainId: p.domainId, diff: diffGrants(desiredTuples(p, state, declaredGroupKeys), knownActual) });
