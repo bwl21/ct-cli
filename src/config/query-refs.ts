@@ -8,26 +8,32 @@
  * known-entity numeric ids a fresh capture carries into those markers. This module supplies the two
  * pure, offline pieces for that:
  *   - {@link VAR_REF_KINDS}: which ChurchQuery `var` maps to which {@link RefKind} (Stage 1), and
- *   - {@link portablizeRuleset}: the reverse-rewrite over a caller-supplied id→key map (Stage 2).
+ *   - {@link portablizeRuleset}: the reverse-rewrite over caller-supplied catalogs (Stage 2).
  */
-import type { RefKind, SimpleRef } from "../resolve/refs.js";
+import type { GroupTypeRoleRef, RefKind, SimpleRef } from "../resolve/refs.js";
+import type { RoleCatalogEntry } from "../resolve/reverse.js";
+
+export type { RoleCatalogEntry };
 
 /**
  * ChurchQuery `var` name → the {@link RefKind} its id operand denotes. The kinds are the canonical
  * RefKind strings the resolver already speaks (src/resolve/refs.ts) — do NOT invent new ones.
  *
  * Verified against the real captured prod rulesets (ct-structure/rulesets/*.json, 2026-07-11); the
- * full set of entity-bearing vars present there is exactly these five:
+ * entity-bearing vars present there that this simple name-based table covers are exactly these four:
  *   - `ctgroup.id`          → `group`      (a group's own id)
  *   - `ctgroup.campusId`    → `campus`
  *   - `ctgroup.groupTypeId` → `group-type`
  *   - `person.campusId`     → `campus`
- *   - `role.id`             → `role-def`
  *
- * `role.id` is `role-def`, NOT `group-role`: the query filters on the GLOBAL role-catalog id
- * (`/group/roles`, exactly the catalog the resolver's `role-def` kind reads — see CATALOG_PATH in
- * src/resolve/resolver.ts), a single numeric id. `group-role` is a compound (group, role) permission
- * DOMAIN, addressed by a pair — a different currency that a lone `role.id` number cannot express.
+ * `role.id` is DELIBERATELY NOT here (fixed in #76, reverting #86's `role-def` mapping). A ruleset's
+ * `role.id` is a **groupTypeRoleId** — a role scoped to a group TYPE — not a global role-catalog id.
+ * Role NAMES are not globally unique across group types (live prod, 2026-07-11: 3 roles named "Leiter",
+ * 6 "Organisator", 6 "Mitglied", each on a different group type), so mapping it to `role-def` (which
+ * keys `/group/roles` by `slug(name)` alone) makes the resolver throw "ambiguous". Only the
+ * (groupTypeId, name) PAIR is unique (0 collisions across all 46 prod roles), so `role.id` needs the
+ * catalog-driven special case in {@link portablizeRuleset} that emits a `group-type-role` marker — a
+ * lone name-based table entry cannot express it.
  *
  * Deliberately absent (the escape hatch — unknown vars are left untouched by {@link portablizeRuleset}):
  *   - `ctgroup.groupStatusId` — group statuses have NO REST catalog (#67; `/group/memberstatus` is a
@@ -39,8 +45,23 @@ export const VAR_REF_KINDS: Readonly<Record<string, RefKind>> = {
   "ctgroup.campusId": "campus",
   "ctgroup.groupTypeId": "group-type",
   "person.campusId": "campus",
-  "role.id": "role-def",
 };
+
+/**
+ * The ChurchQuery `var` whose id operands are group-type-scoped role ids (`groupTypeRoleId`), handled
+ * by the {@link portablizeRuleset} role special case rather than the name-based {@link VAR_REF_KINDS}
+ * table (see the comment there for why). The same rewrite also covers the OUT-of-query
+ * `process.*.handleMembership.groupTypeRoleId` integer field (see {@link ROLE_FIELD_NAME}).
+ */
+const ROLE_VAR = "role.id";
+
+/**
+ * The `process.*.handleMembership.groupTypeRoleId` object field: the target role a query-result-only /
+ * group-and-query-result membership is granted with. It is a groupTypeRoleId just like a `role.id`
+ * operand, but sits OUTSIDE the query subtree, so the walk rewrites it by object-key match, not by a
+ * sibling `{ var }` leaf. Rewritten through the SAME role catalog + group-type map (#76).
+ */
+const ROLE_FIELD_NAME = "groupTypeRoleId";
 
 /** An id left numeric because no managed logical key mapped to it — collected, not thrown (escape hatch). */
 export interface PortablizeWarning {
@@ -51,6 +72,16 @@ export interface PortablizeWarning {
 export interface PortablizeOptions {
   /** Per-kind numeric-id → logical-key maps, supplied by the caller (from state/catalogs). Deterministic. */
   idToKeyByKind: Partial<Record<RefKind, Map<number, string>>>;
+  /**
+   * `/group/roles` catalog: groupTypeRoleId → {groupTypeId, name}, for rewriting `role.id` operands and
+   * `handleMembership.groupTypeRoleId` fields (#76). Omit to leave every role id numeric (with a warning).
+   */
+  roleCatalog?: Map<number, RoleCatalogEntry>;
+  /**
+   * Managed group-type id → logical key, to reverse-map a role's `groupTypeId` to a portable group-type
+   * key. A role whose group type is unmanaged (no key) is left numeric with a warning (escape hatch).
+   */
+  groupTypeIdToKey?: Map<number, string>;
 }
 
 export interface PortablizeResult {
@@ -67,20 +98,23 @@ function varNameOf(node: unknown): string | undefined {
 
 /**
  * Rewrite the known-entity numeric ids a captured ruleset carries into logical `{ __ctRef }` markers,
- * so the same snapshot resolves per-host (#76 Stage 2). Pure and deterministic: the caller supplies
- * `idToKeyByKind` (from managed state / master-data catalogs) — no network, no mutation of the input.
+ * so the same snapshot resolves per-host (#76 Stage 2). Pure and deterministic: the caller supplies the
+ * id→key maps and the role catalog (from managed state / master-data catalogs) — no network, no mutation
+ * of the input.
  *
- * The walk keys off JSONLogic operand arrays: an operator whose operands include a `{ var: <name> }`
- * leaf whose `<name>` is in {@link VAR_REF_KINDS} has its OTHER operands treated as id values (a
- * scalar for `==`, an array for `oneof`). Each numeric id in that position is replaced with the ref
- * marker when it maps to a managed key, else left numeric and reported in `warnings`. Every other
- * position — unknown vars (the escape hatch: `groupStatusId`, `isArchived`, …), string labels,
- * booleans — passes through structurally unchanged. Expects a normalized ruleset (numeric-string ids
- * already coerced to numbers by src/engine/dynamic.ts `normalizeRuleset`, as the adopt path does).
+ * Simple entity vars ({@link VAR_REF_KINDS}) rewrite off a sibling `{ var: <name> }` leaf: each numeric
+ * id in the operand position becomes a `{ __ctRef, kind, key }` marker when it maps to a managed key,
+ * else stays numeric and is reported in `warnings`. The `role.id` var and the out-of-query
+ * `handleMembership.groupTypeRoleId` field are groupTypeRoleIds: each is looked up in `roleCatalog` to
+ * recover its (groupTypeId, name), the groupTypeId is reverse-mapped to a managed group-type key, and a
+ * `{ __ctRef, kind: "group-type-role", groupType, role }` marker is emitted (else numeric + warning).
+ * Every other position — unknown vars (`groupStatusId`, `isArchived`, …), string labels, booleans —
+ * passes through structurally unchanged. Expects a normalized ruleset (numeric-string ids already
+ * coerced to numbers by src/engine/dynamic.ts `normalizeRuleset`, as the adopt path does).
  */
 export function portablizeRuleset(
   ruleset: Record<string, unknown>,
-  { idToKeyByKind }: PortablizeOptions,
+  { idToKeyByKind, roleCatalog, groupTypeIdToKey }: PortablizeOptions,
 ): PortablizeResult {
   const warnings: PortablizeWarning[] = [];
 
@@ -94,10 +128,27 @@ export function portablizeRuleset(
     return value;
   };
 
-  const mapValueOperand = (value: unknown, kind: RefKind, varName: string): unknown =>
-    Array.isArray(value)
-      ? value.map((el) => mapScalar(el, kind, varName)) // oneof id list
-      : mapScalar(value, kind, varName); // == scalar
+  // A groupTypeRoleId → (group-type, role-name) marker, resolvable per host by the `group-type-role`
+  // resolver. Leaves the id numeric (with a warning) when the role is unknown to the catalog or its
+  // group type is unmanaged — the escape hatch, identical in spirit to mapScalar's.
+  const mapRoleScalar = (value: unknown, varName: string): unknown => {
+    if (typeof value !== "number") return value;
+    const entry = roleCatalog?.get(value);
+    const groupTypeKey = entry ? groupTypeIdToKey?.get(entry.groupTypeId) : undefined;
+    if (entry && groupTypeKey !== undefined) {
+      return {
+        __ctRef: true,
+        kind: "group-type-role",
+        groupType: groupTypeKey,
+        role: entry.name,
+      } as GroupTypeRoleRef;
+    }
+    warnings.push({ var: varName, id: value });
+    return value;
+  };
+
+  const mapOperand = (value: unknown, map: (v: unknown) => unknown): unknown =>
+    Array.isArray(value) ? value.map(map) : map(value); // oneof id list vs `==` scalar
 
   const walk = (node: unknown): unknown => {
     if (Array.isArray(node)) {
@@ -106,8 +157,14 @@ export function portablizeRuleset(
         const varName = varNameOf(node[varIdx])!;
         const kind = VAR_REF_KINDS[varName];
         if (kind !== undefined) {
-          // Known entity var: keep the `{ var }` leaf, rewrite the sibling id operand(s).
-          return node.map((el, i) => (i === varIdx ? el : mapValueOperand(el, kind, varName)));
+          // Known simple entity var: keep the `{ var }` leaf, rewrite the sibling id operand(s).
+          return node.map((el, i) =>
+            i === varIdx ? el : mapOperand(el, (v) => mapScalar(v, kind, varName)),
+          );
+        }
+        if (varName === ROLE_VAR) {
+          // Group-type-scoped role var (#76): rewrite siblings through the role catalog, not VAR_REF_KINDS.
+          return node.map((el, i) => (i === varIdx ? el : mapOperand(el, (v) => mapRoleScalar(v, ROLE_VAR))));
         }
         // Unknown var (escape hatch) — recurse structurally, leaving its numeric ids untouched.
       }
@@ -115,7 +172,14 @@ export function portablizeRuleset(
     }
     if (node !== null && typeof node === "object") {
       const out: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(node as Record<string, unknown>)) out[k] = walk(v);
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        // `handleMembership.groupTypeRoleId` sits outside the query, so it has no `{ var }` leaf to key
+        // off — rewrite it by object-key match, through the same role catalog as the `role.id` operand.
+        out[k] =
+          k === ROLE_FIELD_NAME && typeof v === "number"
+            ? mapRoleScalar(v, ROLE_FIELD_NAME)
+            : walk(v);
+      }
       return out;
     }
     return node;

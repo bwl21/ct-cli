@@ -18,7 +18,14 @@
  *     inside a query `var` value or `ct.groupTypeRole({ groupType: "…" })`.
  */
 
-export type RefKind = "campus" | "group-type" | "group-status" | "role-def" | "group" | "group-role";
+export type RefKind =
+  | "campus"
+  | "group-type"
+  | "group-status"
+  | "role-def"
+  | "group"
+  | "group-role"
+  | "group-type-role";
 
 /**
  * Shared explanation for why a group-status reference can never be resolved by name (#67):
@@ -50,7 +57,32 @@ export interface GroupRoleRef {
   role: string;
 }
 
-export type Ref = SimpleRef | GroupRoleRef;
+/**
+ * Compound reference: a group-type-scoped role — CT's `groupTypeRoleId`, addressed by its
+ * (group-type, role-name) pair (#76). This is what a captured dynamic-group ruleset's ChurchQuery
+ * `role.id` operand (and a `process.*.handleMembership.groupTypeRoleId` field) actually holds: a role
+ * that belongs to a specific group TYPE, exposed at `GET /group/roles` with a `groupTypeId` per row.
+ *
+ * It is a NEW kind, deliberately NOT reused from either {@link SimpleRef} `role-def` or the compound
+ * {@link GroupRoleRef} `group-role`, because neither can address this id correctly:
+ *   - `role-def` keys the GLOBAL `/group/roles` catalog by `slug(name)` alone — but role NAMES are not
+ *     globally unique across group types (live prod, 2026-07-11: 3 roles named "Leiter", 6 "Organisator",
+ *     6 "Mitglied", each on a different group type), so a lone name is genuinely ambiguous and the
+ *     resolver throws. That was #86's wrong decision, which this ref replaces.
+ *   - `group-role` is a (group-INSTANCE, role) permission-pairing domainId resolved via a specific
+ *     group's `/groups/{id}/roles` — a different id in a different currency, keyed by a group not a type.
+ * The (groupTypeId, name) PAIR IS unique (verified: 0 collisions across all 46 prod roles), so this ref
+ * carries the group-type key + role name and the resolver picks the one `/group/roles` row matching both.
+ * Mirrors {@link GroupRoleRef}'s compound shape (two string fields, no single `key`) for consistency.
+ */
+export interface GroupTypeRoleRef {
+  __ctRef: true;
+  kind: "group-type-role";
+  groupType: string;
+  role: string;
+}
+
+export type Ref = SimpleRef | GroupRoleRef | GroupTypeRoleRef;
 
 function requireKey(kind: RefKind, value: unknown): string {
   if (typeof value !== "string" || value.length === 0) {
@@ -81,6 +113,18 @@ export const ref = {
     group: requireKey("group-role", group),
     role: requireKey("group-role", role),
   }),
+  /**
+   * A group-type-scoped role (`groupTypeRoleId`), by its (group-type, role-name) pair (#76). The
+   * resolver maps it to this host's numeric groupTypeRoleId by finding the `/group/roles` row whose
+   * `groupTypeId` is the group-type's id AND whose name slugs to `role`. See {@link GroupTypeRoleRef}
+   * for why the pair is required (role names are not globally unique across group types).
+   */
+  groupTypeRole: (groupType: string, role: string): GroupTypeRoleRef => ({
+    __ctRef: true,
+    kind: "group-type-role",
+    groupType: requireKey("group-type-role", groupType),
+    role: requireKey("group-type-role", role),
+  }),
 };
 
 export function isRef(value: unknown): value is Ref {
@@ -89,12 +133,26 @@ export function isRef(value: unknown): value is Ref {
 
 /** Stable identity string for caching/deduping a Ref (not for display — see {@link refLabel}). */
 export function refKey(r: Ref): string {
-  return r.kind === "group-role" ? `group-role:${r.group} ${r.role}` : `${r.kind}:${r.key}`;
+  switch (r.kind) {
+    case "group-role":
+      return `group-role:${r.group} ${r.role}`;
+    case "group-type-role":
+      return `group-type-role:${r.groupType} ${r.role}`;
+    default:
+      return `${r.kind}:${r.key}`;
+  }
 }
 
 /** Human-readable label for error messages and plan rendering. */
 export function refLabel(r: Ref): string {
-  return r.kind === "group-role" ? `group-role(group=${r.group}, role=${r.role})` : `${r.kind}:${r.key}`;
+  switch (r.kind) {
+    case "group-role":
+      return `group-role(group=${r.group}, role=${r.role})`;
+    case "group-type-role":
+      return `group-type-role(groupType=${r.groupType}, role=${r.role})`;
+    default:
+      return `${r.kind}:${r.key}`;
+  }
 }
 
 /**
@@ -165,7 +223,9 @@ export function collectPendingRefKeys(value: unknown): string[] {
   const walk = (v: unknown): void => {
     if (isPendingRef(v)) {
       const r = v.__pendingRef;
-      if (r.kind !== "group-role") out.push(r.key);
+      // Compound refs (group-role, group-type-role) resolve to a concrete id at plan time and never go
+      // pending, so only the simple, single-`key` kinds contribute an apply-order dependency here.
+      if (r.kind !== "group-role" && r.kind !== "group-type-role") out.push(r.key);
       return;
     }
     if (Array.isArray(v)) {

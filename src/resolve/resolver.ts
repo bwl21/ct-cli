@@ -39,6 +39,7 @@ import {
   refKey,
   refLabel,
   type GroupRoleRef,
+  type GroupTypeRoleRef,
   type PendingRef,
   type Ref,
   type RefKind,
@@ -133,6 +134,7 @@ export class Resolver {
   /** Resolve one Ref to a numeric id, or a {@link PendingRef} for a same-run-created managed target. */
   async resolve(r: Ref, site: string): Promise<number | PendingRef> {
     if (r.kind === "group-role") return this.resolveGroupRole(r, site);
+    if (r.kind === "group-type-role") return this.resolveGroupTypeRole(r, site);
     // (1) managed desired ∪ state by logical key
     const type = REF_KIND_TYPE[r.kind];
     if (type !== undefined) {
@@ -229,6 +231,63 @@ export class Resolver {
     return domainId;
   }
 
+  /**
+   * Resolve a group-type-scoped role (`groupTypeRoleId`) by its (group-type, role) pair to this host's
+   * numeric id (#76). Role names are NOT globally unique across group types (live prod, 2026-07-11: 3
+   * "Leiter", 6 "Organisator", 6 "Mitglied" — each on a different group type), which is exactly why a
+   * lone `role-def` name is ambiguous; the (groupTypeId, name) PAIR is unique (0 collisions across all
+   * 46 prod roles). So: resolve the group-type key to this host's group-type id (managed state ∪ the
+   * `/group/grouptypes` catalog — reusing the normal group-type resolution), then pick the ONE
+   * `/group/roles` row whose `groupTypeId` matches AND whose name slugs to `role`. Exactly one match by
+   * construction; 0 or >1 is a hard error listing candidates (mirrors resolveGroupRole's error style).
+   * Returns a number — never a PendingRef (the catalog id exists independently of any same-run apply).
+   */
+  private async resolveGroupTypeRole(r: GroupTypeRoleRef, site: string): Promise<number> {
+    const groupTypeId = await this.groupTypeIdForRole(r, site);
+    const rows = await this.catalog("role-def"); // /group/roles — same cached catalog as role-def
+    const inType = rows.filter((row) => Number(row.groupTypeId) === groupTypeId);
+    // slug-primary, exact-name secondary — identical matching to every other catalog lookup.
+    const bySlug = inType.filter((row) => typeof row.name === "string" && slug(row.name) === slug(r.role));
+    const matches = bySlug.length >= 1 ? bySlug : inType.filter((row) => row.name === r.role);
+    if (matches.length === 0) {
+      const available = inType
+        .map((row) => (typeof row.name === "string" ? JSON.stringify(row.name) : `#${row.id}`))
+        .join(", ");
+      throw new Error(
+        `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: group type #${groupTypeId} ` +
+          `has no role named "${r.role}"${available ? ` (available: ${available})` : ""}. Fix the role ` +
+          `name, or pass a numeric id.`,
+      );
+    }
+    if (matches.length > 1) {
+      const list = matches.map((c) => `${JSON.stringify(c.name)} (#${c.id})`).join(", ");
+      throw new Error(
+        `Ambiguous ${refLabel(r)} referenced at ${site} on ${this.host}: ${matches.length} roles on group ` +
+          `type #${groupTypeId} match — ${list}. Rename to disambiguate, or pass a numeric id.`,
+      );
+    }
+    return matches[0]!.id;
+  }
+
+  /**
+   * Resolve the group-type half of a group-type-role ref to a concrete numeric id, reusing the normal
+   * group-type resolution (managed state ∪ `/group/grouptypes` catalog). A same-run-declared group type
+   * would resolve to a PendingRef here — reject it, since the role catalog can't be filtered without a
+   * concrete id (its message tells the author to apply the group type first or pass a numeric role id).
+   */
+  private async groupTypeIdForRole(r: GroupTypeRoleRef, site: string): Promise<number> {
+    const gtRef: SimpleRef = { __ctRef: true, kind: "group-type", key: r.groupType };
+    const resolved = await this.resolve(gtRef, site);
+    if (typeof resolved !== "number") {
+      throw new Error(
+        `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: group type "${r.groupType}" ` +
+          `is declared in this config but not yet created — a group-type-scoped role id only exists once ` +
+          `the group type does. Apply the group type first, then re-run, or pass a numeric id.`,
+      );
+    }
+    return resolved;
+  }
+
   /** Resolve the group half of a group_role ref to a managed group id (state ∪ declared). */
   private groupIdForRole(r: GroupRoleRef, site: string): number {
     const managed = this.state.resources[r.group];
@@ -310,6 +369,11 @@ function pendingIdFromState(r: Ref, state: State): number {
     // A group_role ref resolves to a concrete pairing id at plan time (never a PendingRef — a
     // same-run group is rejected up front), so a pending one should never reach apply.
     throw new Error(`Pending ${refLabel(r)} reached apply — group_role refs never go pending (#25).`);
+  }
+  if (r.kind === "group-type-role") {
+    // A group-type-role ref resolves to a concrete /group/roles id at plan time (the catalog id exists
+    // independently of any same-run apply), so a pending one should never reach apply either (#76).
+    throw new Error(`Pending ${refLabel(r)} reached apply — group-type-role refs never go pending (#76).`);
   }
   const managed = state.resources[r.key];
   if (!managed) {

@@ -48,8 +48,10 @@ function makeClient() {
   // plain group adopt (see the assertion in the --with-dynamic capture test below).
   const campuses = [{ id: 0, name: "Mainz" }];
   const memberStatuses = [{ id: 1, name: "Aktiv" }];
-  // Global role catalog (/group/roles) — the `role-def` kind's catalog, used to portablize `role.id`.
-  const roles = [{ id: 7, name: "Leiter" }];
+  // Global role catalog (/group/roles), each row carrying its `groupTypeId` — used to portablize a
+  // `role.id` groupTypeRoleId into a (group-type, role-name) marker (#76). Role 7 is a "Leiter" on
+  // group type 5 ("Team").
+  const roles = [{ id: 7, name: "Leiter", groupTypeId: 5 }];
   const rulesets: Record<number, Record<string, unknown>> = {
     30: { description: "x", query: { "==": [{ var: "a" }, "1"] }, process: {} },
     // A ruleset carrying every portablizable var shape (#76): a managed group id (10) + an unmanaged
@@ -367,8 +369,11 @@ describe("ct adopt group --with-dynamic --portable-rulesets (#76 Stage 3)", () =
     expect(and[0]!.oneof![1]).toEqual([{ __ctRef: true, kind: "group", key: "area_a" }, 999]);
     // campusId 0 → the Mainz campus marker (slug of the catalog name).
     expect(and[1]!["=="]![1]).toEqual({ __ctRef: true, kind: "campus", key: "mainz" });
-    // role.id 7 → role-def marker (global /group/roles catalog), NOT group-role.
-    expect(and[2]!.oneof![1]).toEqual([{ __ctRef: true, kind: "role-def", key: "leiter" }]);
+    // role.id 7 → group-type-role marker keyed by (group type "team", role "Leiter"), NOT a bare
+    // role-def name (which would be ambiguous — role names are not globally unique across group types, #76).
+    expect(and[2]!.oneof![1]).toEqual([
+      { __ctRef: true, kind: "group-type-role", groupType: "team", role: "Leiter" },
+    ]);
     // groupStatusId has no catalog (#67) → left numeric, untouched.
     expect(and[3]!.oneof![1]).toEqual([1, 2]);
   });

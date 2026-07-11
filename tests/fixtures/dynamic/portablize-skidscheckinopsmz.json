@@ -1,0 +1,167 @@
+{
+  "description": "Automatische Mitgliedschaft für Gruppe #1092",
+  "shorty": "Autom. Mitgliedschaft Gruppe #1092",
+  "personIdFieldName": "person.id",
+  "importance": 0,
+  "query": {
+    "method": "ChurchQuery",
+    "params": {
+      "groupBy": [
+        "person.id"
+      ],
+      "filter": {
+        "and": [
+          {
+            "and": [
+              {
+                "==": [
+                  {
+                    "var": "person.isArchived"
+                  },
+                  0
+                ]
+              }
+            ]
+          },
+          {
+            "or": [
+              {
+                "dterm": [
+                  {
+                    "stereotype": [
+                      "groupmembership"
+                    ],
+                    "title": "Mitgliedschaft in einer Gruppe"
+                  },
+                  {
+                    "and": [
+                      {
+                        "and": [
+                          {
+                            "oneof": [
+                              {
+                                "var": "ctgroup.groupStatusId"
+                              },
+                              [
+                                1
+                              ]
+                            ]
+                          },
+                          {
+                            "oneof": [
+                              {
+                                "var": "ctgroup.id"
+                              },
+                              [
+                                "112",
+                                "8"
+                              ]
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "and": [
+                          {
+                            "oneof": [
+                              {
+                                "var": "role.id"
+                              },
+                              [
+                                "84",
+                                "85",
+                                "17",
+                                "16"
+                              ]
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "dterm": [
+                  {
+                    "stereotype": [
+                      "groupmembership"
+                    ],
+                    "title": "Mitgliedschaft in einer Gruppe"
+                  },
+                  {
+                    "and": [
+                      {
+                        "and": [
+                          {
+                            "oneof": [
+                              {
+                                "var": "ctgroup.groupStatusId"
+                              },
+                              [
+                                1
+                              ]
+                            ]
+                          },
+                          {
+                            "oneof": [
+                              {
+                                "var": "ctgroup.id"
+                              },
+                              [
+                                "1246"
+                              ]
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "and": [
+                          {
+                            "oneof": [
+                              {
+                                "var": "role.id"
+                              },
+                              [
+                                "16",
+                                "17"
+                              ]
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "primaryEntityAlias": "person",
+      "responseFields": [
+        "person.id",
+        "person.firstName",
+        "person.lastName"
+      ]
+    }
+  },
+  "process": {
+    "groupOnly": {
+      "active": {
+        "handleMembership": {
+          "groupMemberStatus": "none"
+        }
+      }
+    },
+    "queryResultOnly": {
+      "none": {
+        "handleMembership": {
+          "groupMemberStatus": "active",
+          "groupTypeRoleId": 66
+        }
+      }
+    },
+    "groupAndQueryResult": {}
+  }
+}
