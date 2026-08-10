@@ -231,9 +231,9 @@ runnable example.
 
 ### Permissions
 
-`ct.groupRole` / `ct.groupTypeRole` declare ChurchTools permission grants
-(group-role and group-type-role rights) as code, reconciled with the same
-`plan`/`apply` workflow:
+`ct.groupRole` / `ct.groupTypeRole` / `ct.status` declare ChurchTools permission
+grants (group-role, group-type-role and person-status rights) as code,
+reconciled with the same `plan`/`apply` workflow:
 
 ```ts
 ct.groupTypeRole({
@@ -243,6 +243,14 @@ ct.groupTypeRole({
     "churchgroup:view",                                          // unscoped
     { right: "churchgroup:view group", scope: ["kids_area"] },   // scoped to a managed group
   ],
+});
+
+ct.status({
+  key: "core_external_login",
+  personStatus: "5 - Core", // domain BY PERSON-STATUS NAME — resolved against /statuses (#90)
+  // A status grant reaches EVERY person carrying that status — the instance-wide lever.
+  // -1 is CT's "all values of this dimension" sentinel (here: every external system).
+  grants: [{ right: "churchcore:login to external system", scope: [-1] }],
 });
 ```
 

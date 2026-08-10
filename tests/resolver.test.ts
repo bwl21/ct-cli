@@ -47,6 +47,30 @@ describe("Resolver.resolve", () => {
     expect(await r.resolve(ref.groupType("ministry_team"), "site")).toBe(2);
   });
 
+  // PERSON statuses DO have a flat catalog (`GET /statuses`), unlike GROUP statuses in the test below (#90).
+  it("resolves a person status from the /statuses catalog by slug(name)", async () => {
+    const client = fakeClient({
+      "/statuses": [
+        { id: 0, name: "Unbekannt" },
+        { id: 4, name: "3 - Group Active" },
+        { id: 6, name: "5 - Core" },
+      ],
+    });
+    const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED });
+    expect(await r.resolve(ref.personStatus("3_group_active"), "site")).toBe(4);
+    // Exact-name fallback, for a name that does not survive slugging cleanly.
+    expect(await r.resolve(ref.personStatus("5 - Core"), "site")).toBe(6);
+    // Status id 0 must come back as 0, not be mistaken for "unresolved".
+    expect(await r.resolve(ref.personStatus("unbekannt"), "site")).toBe(0);
+    expect(client.calls["/statuses"]).toBe(1); // one fetch, memoized across all three
+  });
+
+  it("errors on a person-status ref with no catalog match", async () => {
+    const client = fakeClient({ "/statuses": [{ id: 0, name: "Unbekannt" }] });
+    const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED });
+    await expect(r.resolve(ref.personStatus("5_core"), "site")).rejects.toThrow(/5_core/);
+  });
+
   it("has no group-status catalog — a group-status ref is a hard error, never resolved against /group/memberstatus (#67)", async () => {
     // /group/memberstatus IS mocked here (as a member-statuses catalog would be on a live host), to
     // prove the resolver never even looks at it for a group-status ref — group statuses have no

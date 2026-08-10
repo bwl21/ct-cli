@@ -23,6 +23,7 @@ import { normalizeActual, type DomainType, type GrantTuple, type RawPermission }
 const DSL_FN: Record<DomainType, string> = {
   group_role: "ct.groupRole",
   group_type_role: "ct.groupTypeRole",
+  status: "ct.status",
 };
 
 /**

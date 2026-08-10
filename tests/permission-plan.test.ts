@@ -214,4 +214,40 @@ describe("buildPermissionPlan", () => {
       [], undefined, CATALOG_META!.ctVersion);
     expect(warnings).toEqual([]);
   });
+  // The PERSON-status domain end to end (#90): a `personStatus` ref resolves against /statuses, the
+  // planner bulk-fetches /permissions/status, and the live `dataId: -1` ALL sentinel round-trips to
+  // a clean no-op — which is the whole point (an instance-wide grant that churned every plan would
+  // rewrite everyone's rights on every apply).
+  it("resolves a status domain by person-status name and reconciles the -1 ALL sentinel idempotently", async () => {
+    const client = { get: vi.fn(async (path: string) => {
+      if (path === "/statuses") return [{ id: 4, name: "3 - Group Active" }, { id: 6, name: "5 - Core" }];
+      if (path === "/permissions/status") return [
+        { domainType: "status", domainId: 6, authId: 18, dataId: -1, type: "grant", meta: { modifiedPid: 1 } },
+      ];
+      throw new Error(`unexpected path ${path}`);
+    }) };
+    const { items, warnings, fetchErrors } = await buildPermissionPlan(client as never, state, [
+      { key: "core_login", domainType: "status", domainId: ref.personStatus("5 - Core"),
+        grants: [{ right: "churchcore:login to external system", scope: [-1] }] },
+    ]);
+    expect(fetchErrors).toEqual([]);
+    expect(warnings).toEqual([]);
+    expect(items[0]?.domainId).toBe(6);       // resolved from the /statuses catalog
+    expect(items[0]?.diff.toPut).toEqual([]); // live -1 row matches the declaration
+    expect(items[0]?.diff.toDelete).toEqual([]);
+  });
+
+  it("proposes the status grant on a status that does not carry it yet", async () => {
+    const client = { get: vi.fn(async (path: string) => {
+      if (path === "/statuses") return [{ id: 4, name: "3 - Group Active" }];
+      if (path === "/permissions/status") return [];
+      throw new Error(`unexpected path ${path}`);
+    }) };
+    const { items } = await buildPermissionPlan(client as never, state, [
+      { key: "group_active_login", domainType: "status", domainId: ref.personStatus("3 - Group Active"),
+        grants: [{ right: "churchcore:login to external system", scope: [-1] }] },
+    ]);
+    expect(items[0]?.domainId).toBe(4);
+    expect(items[0]?.diff.toPut).toEqual([{ authId: 18, dataId: [-1], type: "grant" }]);
+  });
 });

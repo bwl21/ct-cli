@@ -16,15 +16,15 @@ interface AdoptGrantsOptions {
 /** Accept the DSL's `group_role` and the hyphenated CLI-friendly `group-role`; reject anything else. */
 function normalizeDomainType(raw: string): DomainType {
   const t = raw.trim().replace(/-/g, "_");
-  if (t === "group_role" || t === "group_type_role") return t;
+  if (t === "group_role" || t === "group_type_role" || t === "status") return t;
   throw new Error(
-    `Invalid domain type "${raw}" — expected "group_role" or "group_type_role" (people domains are never managed).`,
+    `Invalid domain type "${raw}" — expected "group_role", "group_type_role" or "status" (people domains are never managed).`,
   );
 }
 
 /**
  * `ct adopt grants <domainType> <domainId>` — read the live permission rows for a domain and print
- * a paste-ready `ct.groupRole` / `ct.groupTypeRole` config block. Grants are NOT state-tracked, so
+ * a paste-ready `ct.groupRole` / `ct.groupTypeRole` / `ct.status` config block. Grants are NOT state-tracked, so
  * this prints config only; it never writes the state file (contrast `ct adopt <type> <id>`).
  */
 export function adoptGrantsCommand(): Command {
@@ -32,7 +32,7 @@ export function adoptGrantsCommand(): Command {
     .description(
       "Print a paste-ready grants config block from a live domain's permission rows (does not write state)",
     )
-    .argument("<domainType>", "group_role | group_type_role")
+    .argument("<domainType>", "group_role | group_type_role | status")
     .argument("<domainId>", "the domainId of the permission domain object")
     .option(
       "-s, --state <path>",

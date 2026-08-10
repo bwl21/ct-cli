@@ -47,4 +47,18 @@ export default (ct: ConfigContext): void => {
     role: "Leiter",
     grants: [{ right: "churchgroup:edit group memberships of group", scope: ["kids_area"] }],
   });
+
+  // status (#90): the domain is a PERSON status, declared by name and resolved
+  // against the live `/statuses` catalog per host (numeric escape hatch:
+  // `id: <statusId>`). A grant here reaches EVERY person carrying that status,
+  // so this is the instance-wide lever — there is deliberately no per-person
+  // domain (people are never managed by this tool).
+  //
+  // `scope: [-1]` is ChurchTools' "all values of this dimension" sentinel — here
+  // "every external system". CT reads -1 back verbatim, so it stays a no-op.
+  ct.status({
+    key: "core_external_login",
+    personStatus: "5 - Core",
+    grants: [{ right: "churchcore:login to external system", scope: [-1] }],
+  });
 };

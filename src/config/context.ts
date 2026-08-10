@@ -126,6 +126,8 @@ export interface PermissionInput {
   group?: string;
   /** `group_role`: the role name (paired with `group`) — resolves to the pairing domainId (#25). */
   role?: string;
+  /** `status`: the PERSON status by name/key (`/statuses`) — sugars into a Ref-valued domainId (#90). */
+  personStatus?: string;
   grants: Grant[];
 }
 
@@ -153,8 +155,17 @@ function domainKeyPart(domainId: number | Ref): string {
  *  - `group_type_role`: numeric `id`, or logical `groupType: "<key>"` → `ref.groupType(...)`.
  *  - `group_role`: numeric `id`, or logical `group` + `role` → `ref.groupRole(...)` (the resolver
  *    maps the pair to its pairing domainId at plan time; see #25).
+ *  - `status`: numeric `id`, or logical `personStatus: "<key>"` → `ref.personStatus(...)`, resolved
+ *    against the `/statuses` catalog (#90).
  * Declaring both a numeric `id` and a logical form is a conflict.
  */
+/** The logical field name each domain type offers, for the "provide id or ..." error message. */
+const LOGICAL_FIELD: Record<DomainType, string> = {
+  group_type_role: '"groupType"',
+  group_role: '"group" + "role"',
+  status: '"personStatus"',
+};
+
 function resolveDomainInput(domainType: DomainType, input: PermissionInput): number | Ref {
   const hasId = input.id !== undefined;
   const bothError = (logical: string): Error =>
@@ -168,6 +179,13 @@ function resolveDomainInput(domainType: DomainType, input: PermissionInput): num
         throw new Error(`${domainType} "${input.key}": "groupType" must be a non-empty group-type key.`);
       return ref.groupType(input.groupType);
     }
+  } else if (domainType === "status") {
+    if (input.personStatus !== undefined) {
+      if (hasId) throw bothError('"personStatus"');
+      if (typeof input.personStatus !== "string" || !input.personStatus)
+        throw new Error(`${domainType} "${input.key}": "personStatus" must be a non-empty person-status key.`);
+      return ref.personStatus(input.personStatus);
+    }
   } else {
     // group_role
     if (input.group !== undefined || input.role !== undefined) {
@@ -177,10 +195,11 @@ function resolveDomainInput(domainType: DomainType, input: PermissionInput): num
       return ref.groupRole(input.group, input.role);
     }
   }
+  // A person status id may legitimately be 0 ("Unbekannt"), so this guard must stay a type/finite
+  // check — never a truthiness one.
   if (typeof input.id !== "number" || !Number.isFinite(input.id)) {
-    const logical = domainType === "group_type_role" ? '"groupType"' : '"group" + "role"';
     throw new Error(
-      `${domainType} "${input.key}": provide a numeric "id" (the domainId) or the logical ${logical} form.`,
+      `${domainType} "${input.key}": provide a numeric "id" (the domainId) or the logical ${LOGICAL_FIELD[domainType]} form.`,
     );
   }
   return input.id;
@@ -198,6 +217,13 @@ export interface ConfigContext {
   roleDefinition(input: ResourceInput): void;
   groupRole(input: PermissionInput): void;
   groupTypeRole(input: PermissionInput): void;
+  /**
+   * Grants on a PERSON status (`status` domain, #90) — they apply to every person carrying that
+   * status, so this is the instance-wide lever. Addressed by `personStatus: "<name/key>"` (resolved
+   * against `/statuses`) or the numeric `id:` escape hatch. Note that person statuses are a different
+   * dimension from group statuses (`groupStatusId`), which have no catalog at all (#67).
+   */
+  status(input: PermissionInput): void;
 }
 
 export type ConfigModule = (ct: ConfigContext) => void | Promise<void>;
@@ -458,6 +484,7 @@ export function createContext(): {
     roleDefinition: define("group-role"),
     groupRole: definePermission("group_role"),
     groupTypeRole: definePermission("group_type_role"),
+    status: definePermission("status"),
   };
   return { ct, resources, permissions };
 }

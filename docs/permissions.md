@@ -1,10 +1,10 @@
-# Permissions (`ct.groupRole` / `ct.groupTypeRole`)
+# Permissions (`ct.groupRole` / `ct.groupTypeRole` / `ct.status`)
 
-Declare ChurchTools permission grants — group-role and group-type-role rights —
-as code, and reconcile them idempotently with the same `ct plan` / `ct apply`
-workflow used for structural resources (issue #13).
+Declare ChurchTools permission grants — group-role, group-type-role and
+person-status rights — as code, and reconcile them idempotently with the same
+`ct plan` / `ct apply` workflow used for structural resources (issue #13).
 
-## The two DSL functions
+## The three DSL functions
 
 ```ts
 export default (ct) => {
@@ -24,10 +24,17 @@ export default (ct) => {
     // "edit group memberships of group" is a scoped right, so it takes a `scope: [...]`.
     grants: [{ right: "churchgroup:edit group memberships of group", scope: ["kids_area"] }],
   });
+
+  ct.status({
+    key: "core_external_login",
+    personStatus: "5 - Core",  // domain BY PERSON-STATUS NAME — resolved against /statuses (#90)
+    // -1 is ChurchTools' "all values of this dimension" sentinel (here: every external system).
+    grants: [{ right: "churchcore:login to external system", scope: [-1] }],
+  });
 };
 ```
 
-Both take `{ key, <domain>, grants }`, where `<domain>` is either a logical
+All three take `{ key, <domain>, grants }`, where `<domain>` is either a logical
 reference or a numeric `id`:
 
 - **`key`** — the logical key, unique across the whole config (shared
@@ -44,6 +51,10 @@ reference or a numeric `id`:
     Declaring both a logical form and a numeric `id` is a conflict and throws.
     See "domainId semantics" for the resolution assumption still to be
     confirmed live.
+  - `ct.status` — `personStatus: "<name>"` resolves against the live
+    `/statuses` catalog per host, or `id: <statusId>` targets one directly.
+    **Person** statuses ("0 - First", "3 - Group Active", …), not group statuses
+    — see "domainId semantics".
 - **`grants`** — an array of `Grant`s, each either:
   - a bare string, `"module:right"` — an **unscoped** grant, or
   - an object `{ right: "module:right", scope: (string | number)[] }` — a
@@ -121,6 +132,20 @@ The two DSL functions manage two different ChurchTools "domain types," and
   specific group's specific role, *not* the group's id and *not* the role's
   id. Declare it portably as `group: "<key>", role: "<name>"` (resolved per
   host, #25) or directly as `id: <domainId>`.
+- **`status`** (`ct.status`) — the domain is a **person status's own id**
+  (`GET /statuses`: `0 Unbekannt`, `1 0 - First`, …). A grant here applies to
+  **every person carrying that status**, which makes it the only instance-wide
+  lever CT offers short of granting per person — and people domains are
+  permanently out of scope (`src/engine/guard.ts`). Declare it portably as
+  `personStatus: "<name>"` (#90) or directly as `id: <statusId>`. Note `id: 0`
+  is a real, declarable domain ("Unbekannt"), so the numeric guard is a type
+  check, not a truthiness one.
+
+  > **Person status ≠ group status.** `groupStatusId` (`ct.group`) is a
+  > different dimension with **no** REST catalog at all (#67) and must always be
+  > written as a number. Person statuses do have one (`GET /statuses`, flat
+  > array of `{id, name}` — live-verified 2026-08-10 on eqrm prod), so they
+  > resolve by name like campuses and group types.
 
   > **ASSUMPTION — verify once on a live instance (`eqrm-dev`).** The reference
   > form resolves by reading the group's own role list
@@ -222,6 +247,20 @@ therefore be a plain number instead of a string:
 { right: "churchdb:security level view own data", scope: [1, 2, 3, 5] },
 ```
 
+A numeric entry must be an integer `>= 0`, or the special value `-1` —
+ChurchTools' **"all values of this dimension" sentinel**. CT stores and reads
+`-1` back verbatim (it is expanded only in the derived `/permissions/global`
+view), so a declared `-1` diffs against a live `-1` and stays a clean no-op:
+
+```ts
+// every external system, present and future
+{ right: "churchcore:login to external system", scope: [-1] },
+```
+
+Note `0` is a legitimate dataId on several dimensions (campus "Mainz" is id 0 on
+eqrm prod), so it is accepted like any other — only values below `-1` and
+non-integers are rejected.
+
 Numeric entries pass straight through with no state lookup, no pending
 resolution, and no re-resolution at apply time (their `dataId` is already
 final). They can be freely mixed with logical group keys in the same `scope`
@@ -235,7 +274,7 @@ To bring an instance's existing rights under management without hand-transcribin
 them, read the live rows and emit a paste-ready config block:
 
 ```bash
-ct adopt grants group_type_role 42   # or: group_role, and the hyphenated group-type-role
+ct adopt grants group_type_role 42   # or: group_role / status, and the hyphenated group-type-role
 ```
 
 It fetches `GET /permissions/<domainType>/<domainId>`, runs the rows through the
@@ -276,8 +315,10 @@ to be accepted by `ct plan` (the round trip is locked by tests):
   direct grants — **including** the writable `authId >= 10000` `churchdb:+…`
   member rights CT lets you set on `group_type_role` — are emitted as active
   grants (no authId cutoff; #65).
-- **Only `group_role` / `group_type_role`** are valid; people domains are
-  refused (the same hard boundary as everywhere else).
+- **Only `group_role` / `group_type_role` / `status`** are valid; people domains
+  are refused (the same hard boundary as everywhere else). A `status` block is
+  emitted with a numeric `id:` — rename it to the portable
+  `personStatus: "<name>"` form when you paste it in.
 
 > **Warning — comment-only grants are pending revocations.** Reconciliation is
 > set-based: a live grant absent from the pasted declaration lands in

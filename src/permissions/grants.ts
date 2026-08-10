@@ -3,7 +3,12 @@
  * Actuals exclude the self-re-adding system baseline (modifiedPid === -1) and inherited rows,
  * so reconciliation owns only user-authored grants and never fights the platform.
  */
-export type DomainType = "group_role" | "group_type_role";
+/**
+ * The permission domains this tool reconciles. `status` is CT's PERSON-status domain (#90) — a grant
+ * there applies to every person carrying that status, which is the only instance-wide lever CT offers
+ * short of granting per person (a people domain, permanently out of scope — see engine/guard.ts).
+ */
+export type DomainType = "group_role" | "group_type_role" | "status";
 
 // What reconciliation owns vs. leaves untouched is decided SOLELY by `normalizeActual` below:
 // it drops the self-re-adding system baseline (`modifiedPid === -1`) and any `isInherited` row, so
