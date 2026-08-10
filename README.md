@@ -47,7 +47,7 @@ Early scaffold. See the [epic (#1)](https://github.com/eqrm/ct-cli/issues/1) and
   readable (`ct get person-masterdata`, `ct get data-fields`) — schema in scope,
   per-record field **values** never. Definitions are read-only (no REST write
   endpoint); the boundary + writability evidence is in
-  [`docs/field-definitions.md`](docs/field-definitions.md).
+  [`docs/handbuch/field-definitions.md`](docs/handbuch/field-definitions.md).
 
 ## Requirements
 
@@ -203,7 +203,7 @@ into a function and call it once per campus, prefixing every key with
 hierarchy (`parents`) scoped to that campus. `ct plan`/`ct apply` order
 campuses → groups → hierarchy automatically via the dependency graph, and
 an undeclared `parents` reference throws at config-load time (typo guard).
-See [`docs/blueprints.md`](docs/blueprints.md) for the full guide and
+See [`docs/handbuch/blueprints.md`](docs/handbuch/blueprints.md) for the full guide and
 [`examples/campus-blueprint.config.ts`](examples/campus-blueprint.config.ts)
 for a runnable example.
 
@@ -223,7 +223,7 @@ ct.group({
 
 `ct apply --refresh` opts in to a post-apply, per-group membership
 recompute for every dynamic group that changed. See
-[`docs/dynamic-groups.md`](docs/dynamic-groups.md) for the full guide (the
+[`docs/handbuch/dynamic-groups.md`](docs/handbuch/dynamic-groups.md) for the full guide (the
 `status` states, the three ways to supply a ruleset, the typed query DSL,
 and how drift normalization avoids cosmetic false diffs) and
 [`examples/dynamic-group.config.ts`](examples/dynamic-group.config.ts) for a
@@ -258,7 +258,7 @@ Right names (`"module:right"`) are validated against a static, offline
 catalog — discover them with `ct get permissions-catalog`. Grants you remove
 from the config are diffed as deletions and reconciled via `ct apply`, same
 as any other resource; system-default and inherited grants are never touched
-or surfaced. See [`docs/permissions.md`](docs/permissions.md) for the full
+or surfaced. See [`docs/handbuch/permissions.md`](docs/handbuch/permissions.md) for the full
 guide (domainId semantics, scope resolution, domain rules, the
 baseline-tolerance model) and
 [`examples/permissions.config.ts`](examples/permissions.config.ts) for a

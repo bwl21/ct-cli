@@ -35,13 +35,13 @@ const RESOURCE_PATHS: Record<string, ResourceSpec> = {
   "target-groups": { path: "/group/targetgroups" },
   "dynamic-groups": { path: "/dynamicgroups" },
   "relationship-types": { path: "/person/relationshiptypes" },
-  // Schema/DEFINITIONS only — never person records or field VALUES (#47/#48; see docs/field-definitions.md).
+  // Schema/DEFINITIONS only — never person records or field VALUES (#47/#48; see docs/handbuch/field-definitions.md).
   // The person master-data MODEL: sexes/titles/statuses/campuses plus the security-level enumeration
   // that churchdb permission scopes (cc_securitylevel) reference. Single object → unpaginated.
   "person-masterdata": { path: "/person/masterdata", paginated: false },
   // Unified data-field DEFINITION catalog (Datenfelder): person master-data fields AND group custom
   // fields in one list, discriminated per-row by `fieldCategory` (e.g. table `cdb_gruppe` = group).
-  // Read-only: mutation is only via the legacy churchdb admin AJAX, not REST — see docs/field-definitions.md.
+  // Read-only: mutation is only via the legacy churchdb admin AJAX, not REST — see docs/handbuch/field-definitions.md.
   "data-fields": { path: "/dbfields" },
   permissions: { path: "/permissions/global", paginated: false },
 };

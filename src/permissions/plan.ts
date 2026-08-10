@@ -143,7 +143,7 @@ export async function buildPermissionPlan(
     warnings.push(
       `Permission catalog was captured from ChurchTools ${CATALOG_META.ctVersion} but this instance ` +
         `runs ${instanceVersion}. Right names/authIds may be stale — regenerate it with ` +
-        `\`npm run regenerate:permission-catalog\` (see docs/permissions.md).`,
+        `\`npm run regenerate:permission-catalog\` (see docs/handbuch/permissions.md).`,
     );
   }
   // Resolve logical domainIds (#20) up front. Shares the command layer's resolver so master-data

@@ -1,3 +1,12 @@
+---
+title: Field definitions & security levels
+sources:
+  - src/commands/get.ts
+  - src/api/ctClient.ts
+sources_hash: 580645532edbdf9a
+reviewed: 2026-08-10
+---
+
 # Field definitions & security levels (#47, #48)
 
 `ct` can **read** the structural *schema* that defines what data a person or a
@@ -26,7 +35,7 @@ ct get data-fields         # all data-field definitions (person + group), one ro
 - `ct get person-masterdata` → `GET /person/masterdata`. A single object (not a
   paged list) — the versionable person master-data model. It carries the
   security-level enumeration (`securityLevels`), which is the model the churchdb
-  permission scopes reference (`cc_securitylevel`; see `docs/permissions.md`).
+  permission scopes reference (`cc_securitylevel`; see [`permissions.md`](permissions.md)).
   This is where **security levels** are surfaced — ChurchTools has no dedicated
   standalone security-levels REST resource; the Persons/Groups master-data module
   is where they are defined, and `/person/masterdata` is its download.

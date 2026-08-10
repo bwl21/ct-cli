@@ -73,7 +73,7 @@ describe("dynamic synthetic field — fold", () => {
   });
 
   it("demote-to-none converges: a kept authored ruleset folds to the same sentinel as the actual side (no-op)", async () => {
-    // docs/dynamic-groups.md tells users to KEEP the dynamic block when demoting, so the authored
+    // docs/handbuch/dynamic-groups.md tells users to KEEP the dynamic block when demoting, so the authored
     // ruleset is still present with status "none". The actual side is the { status:"none", ruleset:{} }
     // sentinel — folding the full ruleset would diff forever. Both must collapse to the same sentinel.
     const state: State = { version: 1, host: "h",

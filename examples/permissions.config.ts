@@ -1,14 +1,14 @@
 /**
  * Runnable example: a group-type-role declaration with one unscoped (global)
  * grant and one scoped grant, plus a group-role declared by (group, role)
- * reference (#25). See docs/permissions.md for the full feature guide, and
+ * reference (#25). See docs/handbuch/permissions.md for the full feature guide, and
  * `ct get permissions-catalog` to discover right names.
  *
  * Portable references (#20): the permission domain is declared by name
  * (`groupType: "kids"`) instead of a hardcoded numeric domainId — the per-host
  * resolver maps it to that instance's group-type id at plan time. The numeric
  * escape hatch still works: pass `id: <domainId>` to target one directly (see
- * docs/permissions.md "domainId semantics").
+ * docs/handbuch/permissions.md "domainId semantics").
  */
 import type { ConfigContext } from "../src/config/context.js";
 
@@ -29,7 +29,7 @@ export default (ct: ConfigContext): void => {
       // (`scopeField: "cdb_gruppe"` in the catalog — a scoped right).
       // `scope` entries are logical group keys here; a right whose scopeField
       // is NOT a group (e.g. "cc_securitylevel") instead takes a raw numeric
-      // dataId, e.g. `scope: [1, 2]` — see docs/permissions.md "Numeric scope
+      // dataId, e.g. `scope: [1, 2]` — see docs/handbuch/permissions.md "Numeric scope
       // escape hatch (#49)".
       { right: "churchgroup:view group", scope: ["kids_area"] },
     ],
@@ -39,7 +39,7 @@ export default (ct: ConfigContext): void => {
   // pair instead of a numeric domainId. The group must be managed (declared
   // above / adopted) and already created; the resolver maps the pair to the
   // pairing domainId per host. Numeric escape hatch: `id: <domainId>` instead
-  // of `group`/`role`. (See docs/permissions.md "domainId semantics" for the
+  // of `group`/`role`. (See docs/handbuch/permissions.md "domainId semantics" for the
   // resolution assumption still to be confirmed live.)
   ct.groupRole({
     key: "kids_leiter_grant",
