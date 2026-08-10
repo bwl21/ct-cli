@@ -520,4 +520,43 @@ describe("permission declarations", () => {
       }),
     ).rejects.toThrow(/Duplicate permission target.*group-type:mt/s);
   });
+
+  // The PERSON-status permission domain (#89) — the instance-wide grant lever.
+  it("collects a status declaration and sugars `personStatus` into a person-status Ref", async () => {
+    const { permissions } = await evaluateConfig((ct: ConfigContext) =>
+      ct.status({
+        key: "core_login",
+        personStatus: "5 - Core",
+        grants: [{ right: "churchcore:login to external system", scope: [-1] }],
+      }),
+    );
+    expect(permissions[0]).toMatchObject({
+      key: "core_login",
+      domainType: "status",
+      domainId: { __ctRef: true, kind: "person-status", key: "5 - Core" },
+    });
+  });
+
+  // Status id 0 ("Unbekannt") is a legitimate domain — the numeric guard must be a type check,
+  // not a truthiness one, or that whole status becomes undeclarable.
+  it("accepts a numeric status domainId of 0", async () => {
+    const { permissions } = await evaluateConfig((ct: ConfigContext) =>
+      ct.status({ key: "unknown_status", id: 0, grants: [] }),
+    );
+    expect(permissions[0]?.domainId).toBe(0);
+  });
+
+  it("rejects declaring both a numeric id and personStatus on a status domain", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) =>
+        ct.status({ key: "s", id: 6, personStatus: "5 - Core", grants: [] }),
+      ),
+    ).rejects.toThrow(/either "id".*or "personStatus".*not both/);
+  });
+
+  it("names personStatus as the logical form when a status domain has neither", async () => {
+    await expect(
+      evaluateConfig((ct: ConfigContext) => ct.status({ key: "s", grants: [] } as never)),
+    ).rejects.toThrow(/provide a numeric "id".*or the logical "personStatus" form/);
+  });
 });

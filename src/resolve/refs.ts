@@ -22,6 +22,7 @@ export type RefKind =
   | "campus"
   | "group-type"
   | "group-status"
+  | "person-status"
   | "role-def"
   | "group"
   | "group-role"
@@ -42,10 +43,10 @@ export const GROUP_STATUS_NO_CATALOG =
   `group statuses have no REST catalog (GET /group/memberstatus is a different dimension: member ` +
   `statuses, string ids — verified 2026-07-10). Declare a numeric "groupStatusId" instead (e.g. "groupStatusId: 1").`;
 
-/** Simple key-addressed reference: campus / group type / group status / role definition / group. */
+/** Simple key-addressed reference: campus / group type / group status / person status / role definition / group. */
 export interface SimpleRef {
   __ctRef: true;
-  kind: "campus" | "group-type" | "group-status" | "role-def" | "group";
+  kind: "campus" | "group-type" | "group-status" | "person-status" | "role-def" | "group";
   key: string;
 }
 
@@ -99,6 +100,13 @@ export const ref = {
   campus: (key: string): SimpleRef => ({ __ctRef: true, kind: "campus", key: requireKey("campus", key) }),
   groupType: (key: string): SimpleRef => ({ __ctRef: true, kind: "group-type", key: requireKey("group-type", key) }),
   status: (key: string): SimpleRef => ({ __ctRef: true, kind: "group-status", key: requireKey("group-status", key) }),
+  /**
+   * A PERSON status (`/statuses` — "0 - First", "3 - Group Active", …), the domain of a `status`
+   * permission declaration. Unrelated to {@link ref.status} (GROUP status, `groupStatusId`), which
+   * has no catalog at all (#67) — person statuses do, so this one resolves by name like any other
+   * master-data ref.
+   */
+  personStatus: (key: string): SimpleRef => ({ __ctRef: true, kind: "person-status", key: requireKey("person-status", key) }),
   roleDef: (key: string): SimpleRef => ({ __ctRef: true, kind: "role-def", key: requireKey("role-def", key) }),
   group: (key: string): SimpleRef => ({ __ctRef: true, kind: "group", key: requireKey("group", key) }),
   /**

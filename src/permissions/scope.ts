@@ -11,6 +11,13 @@ import type { GrantTuple } from "./grants.js";
 export interface ScopeResolution { key: string; id: number | null; numeric?: boolean }
 
 /**
+ * ChurchTools' "every value of this dimension" dataId. CT both accepts it on write and reads it back
+ * verbatim, expanding it only in the derived `/permissions/global` view — so a declared `-1` diffs
+ * against a live `-1` and stays a clean no-op.
+ */
+export const ALL_SCOPE_SENTINEL = -1;
+
+/**
  * Resolve a scope array against DESIRED ∪ STATE. Each entry is either:
  *
  * - a **logical group key** (`string`) — resolved against managed groups, exactly as before, or
@@ -40,8 +47,14 @@ export function resolveScope(
   const pending: ScopeResolution[] = [];
   for (const key of scopeKeys) {
     if (typeof key === "number") {
-      if (!Number.isInteger(key) || key <= 0) {
-        throw new Error(`Invalid numeric scope entry ${JSON.stringify(key)} — a numeric scope must be a positive integer dataId.`);
+      // `-1` is ChurchTools' ALL sentinel (verified live 2026-08-10: `churchcore:login to external
+      // system` with `dataId: -1` reads back through `/permissions/global` expanded to every external
+      // system id). `0` is a real dataId on more than one dimension (campus "Mainz" is id 0 on eqrm
+      // prod). So the floor is -1, not 1 — anything below that is a typo, not a sentinel.
+      if (!Number.isInteger(key) || key < ALL_SCOPE_SENTINEL) {
+        throw new Error(
+          `Invalid numeric scope entry ${JSON.stringify(key)} — a numeric scope must be an integer dataId (>= 0), or ${ALL_SCOPE_SENTINEL} for ChurchTools' "all" sentinel.`,
+        );
       }
       resolved.push({ key: String(key), id: key, numeric: true });
       continue;

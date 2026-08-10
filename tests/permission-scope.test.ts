@@ -42,9 +42,25 @@ describe("resolveScope", () => {
     ]);
   });
 
-  it("rejects a non-positive-integer numeric scope entry", () => {
-    expect(() => resolveScope([0], state)).toThrow(/numeric scope/i);
+  it("rejects a non-integer or below-sentinel numeric scope entry", () => {
     expect(() => resolveScope([-3], state)).toThrow(/numeric scope/i);
     expect(() => resolveScope([1.5], state)).toThrow(/numeric scope/i);
+  });
+
+  // 0 is a real dataId on more than one CT dimension — campus "Mainz" is id 0 on eqrm prod — so it
+  // must pass through like any other, not be rejected as falsy.
+  it("accepts dataId 0 as an ordinary scope entry", () => {
+    expect(resolveScope([0], state)).toEqual([{ key: "0", id: 0, numeric: true }]);
+  });
+
+  // -1 is ChurchTools' "all values of this dimension" sentinel (e.g. `churchcore:login to external
+  // system` granted for every external system). CT reads it back verbatim, so it must survive the
+  // round trip unchanged or the grant would churn on every plan.
+  it("accepts the -1 ALL sentinel and sorts it first", () => {
+    expect(resolveScope([-1], state)).toEqual([{ key: "-1", id: -1, numeric: true }]);
+    expect(resolveScope([3, -1], state)).toEqual([
+      { key: "-1", id: -1, numeric: true },
+      { key: "3", id: 3, numeric: true },
+    ]);
   });
 });
