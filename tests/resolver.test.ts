@@ -47,7 +47,7 @@ describe("Resolver.resolve", () => {
     expect(await r.resolve(ref.groupType("ministry_team"), "site")).toBe(2);
   });
 
-  // PERSON statuses DO have a flat catalog (`GET /statuses`), unlike GROUP statuses in the test below (#89).
+  // PERSON statuses DO have a flat catalog (`GET /statuses`), unlike GROUP statuses in the test below (#90).
   it("resolves a person status from the /statuses catalog by slug(name)", async () => {
     const client = fakeClient({
       "/statuses": [

@@ -521,7 +521,7 @@ describe("permission declarations", () => {
     ).rejects.toThrow(/Duplicate permission target.*group-type:mt/s);
   });
 
-  // The PERSON-status permission domain (#89) — the instance-wide grant lever.
+  // The PERSON-status permission domain (#90) — the instance-wide grant lever.
   it("collects a status declaration and sugars `personStatus` into a person-status Ref", async () => {
     const { permissions } = await evaluateConfig((ct: ConfigContext) =>
       ct.status({

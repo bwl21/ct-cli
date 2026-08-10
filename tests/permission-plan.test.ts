@@ -214,7 +214,7 @@ describe("buildPermissionPlan", () => {
       [], undefined, CATALOG_META!.ctVersion);
     expect(warnings).toEqual([]);
   });
-  // The PERSON-status domain end to end (#89): a `personStatus` ref resolves against /statuses, the
+  // The PERSON-status domain end to end (#90): a `personStatus` ref resolves against /statuses, the
   // planner bulk-fetches /permissions/status, and the live `dataId: -1` ALL sentinel round-trips to
   // a clean no-op — which is the whole point (an instance-wide grant that churned every plan would
   // rewrite everyone's rights on every apply).

@@ -48,7 +48,7 @@ export default (ct: ConfigContext): void => {
     grants: [{ right: "churchgroup:edit group memberships of group", scope: ["kids_area"] }],
   });
 
-  // status (#89): the domain is a PERSON status, declared by name and resolved
+  // status (#90): the domain is a PERSON status, declared by name and resolved
   // against the live `/statuses` catalog per host (numeric escape hatch:
   // `id: <statusId>`). A grant here reaches EVERY person carrying that status,
   // so this is the instance-wide lever — there is deliberately no per-person

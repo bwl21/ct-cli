@@ -27,7 +27,7 @@ export default (ct) => {
 
   ct.status({
     key: "core_external_login",
-    personStatus: "5 - Core",  // domain BY PERSON-STATUS NAME — resolved against /statuses (#89)
+    personStatus: "5 - Core",  // domain BY PERSON-STATUS NAME — resolved against /statuses (#90)
     // -1 is ChurchTools' "all values of this dimension" sentinel (here: every external system).
     grants: [{ right: "churchcore:login to external system", scope: [-1] }],
   });
@@ -137,7 +137,7 @@ The two DSL functions manage two different ChurchTools "domain types," and
   **every person carrying that status**, which makes it the only instance-wide
   lever CT offers short of granting per person — and people domains are
   permanently out of scope (`src/engine/guard.ts`). Declare it portably as
-  `personStatus: "<name>"` (#89) or directly as `id: <statusId>`. Note `id: 0`
+  `personStatus: "<name>"` (#90) or directly as `id: <statusId>`. Note `id: 0`
   is a real, declarable domain ("Unbekannt"), so the numeric guard is a type
   check, not a truthiness one.
 

@@ -71,7 +71,7 @@ const REF_KIND_TYPE: Partial<Record<RefKind, string>> = {
 const CATALOG_PATH: Partial<Record<RefKind, string>> = {
   campus: "/campuses",
   "group-type": "/group/grouptypes",
-  // PERSON statuses — the domain of a `status` permission declaration (#89). Unlike GROUP statuses
+  // PERSON statuses — the domain of a `status` permission declaration (#90). Unlike GROUP statuses
   // (see the note above), these DO have a flat REST catalog: `GET /statuses` returns
   // `[{id, name, shorty, …}]` — live-verified 2026-08-10 on eqrm prod. (`/person/masterdata` carries
   // the same rows under a `statuses` key, but nested; this catalog reader expects a top-level array.)

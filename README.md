@@ -247,7 +247,7 @@ ct.groupTypeRole({
 
 ct.status({
   key: "core_external_login",
-  personStatus: "5 - Core", // domain BY PERSON-STATUS NAME — resolved against /statuses (#89)
+  personStatus: "5 - Core", // domain BY PERSON-STATUS NAME — resolved against /statuses (#90)
   // A status grant reaches EVERY person carrying that status — the instance-wide lever.
   // -1 is CT's "all values of this dimension" sentinel (here: every external system).
   grants: [{ right: "churchcore:login to external system", scope: [-1] }],

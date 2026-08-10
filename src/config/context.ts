@@ -126,7 +126,7 @@ export interface PermissionInput {
   group?: string;
   /** `group_role`: the role name (paired with `group`) — resolves to the pairing domainId (#25). */
   role?: string;
-  /** `status`: the PERSON status by name/key (`/statuses`) — sugars into a Ref-valued domainId (#89). */
+  /** `status`: the PERSON status by name/key (`/statuses`) — sugars into a Ref-valued domainId (#90). */
   personStatus?: string;
   grants: Grant[];
 }
@@ -156,7 +156,7 @@ function domainKeyPart(domainId: number | Ref): string {
  *  - `group_role`: numeric `id`, or logical `group` + `role` → `ref.groupRole(...)` (the resolver
  *    maps the pair to its pairing domainId at plan time; see #25).
  *  - `status`: numeric `id`, or logical `personStatus: "<key>"` → `ref.personStatus(...)`, resolved
- *    against the `/statuses` catalog (#89).
+ *    against the `/statuses` catalog (#90).
  * Declaring both a numeric `id` and a logical form is a conflict.
  */
 /** The logical field name each domain type offers, for the "provide id or ..." error message. */
@@ -218,7 +218,7 @@ export interface ConfigContext {
   groupRole(input: PermissionInput): void;
   groupTypeRole(input: PermissionInput): void;
   /**
-   * Grants on a PERSON status (`status` domain, #89) — they apply to every person carrying that
+   * Grants on a PERSON status (`status` domain, #90) — they apply to every person carrying that
    * status, so this is the instance-wide lever. Addressed by `personStatus: "<name/key>"` (resolved
    * against `/statuses`) or the numeric `id:` escape hatch. Note that person statuses are a different
    * dimension from group statuses (`groupStatusId`), which have no catalog at all (#67).
