@@ -1,0 +1,7 @@
+# Pinned toolchain for this section's standalone MkDocs build (`.github/workflows/docs.yml`).
+# Kept in lockstep with eqrm/churchtools-connector's `requirements-docs.txt` so the section
+# renders identically here and in the site that consumes it — bump both together, and
+# deliberately (`pip index versions <package>`), never via `pip install -U`.
+mkdocs==1.6.1
+mkdocs-material==9.7.7
+pymdown-extensions==11.0.1

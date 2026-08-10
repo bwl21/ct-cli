@@ -31,7 +31,7 @@ changes materially.
   `capturedFrom`, `ctVersion`, `capturedAt`, `rightCount`. `catalog.ts` splits
   it off at load so no consumer (`resolveAuthId`, `ct get permissions-catalog`,
   grant adoption) ever sees it as a right. `ctVersion` drives `ct plan`'s
-  staleness warning — see `docs/permissions.md` "Catalog lifecycle & staleness".
+  staleness warning — see `docs/handbuch/permissions.md` "Catalog lifecycle & staleness".
 
 - **key** — `"<modulename>:<auth>"`, the DSL vocabulary (e.g. `churchgroup:view group`).
 - **authId** — numeric id sent in the `PermissionRequest` write body.
@@ -41,7 +41,7 @@ changes materially.
   declarable via a **logical group key** in the DSL's `scope: [...]`. Any other non-null
   `scopeField` (`cc_securitylevel`, `cdb_comment_viewer`, `cdb_station`, …) names a dimension this
   tool has no managed representation for, so it can only be declared via the **numeric scope
-  escape hatch** (`scope: [1, 2, 3]`, #49) — see `docs/permissions.md`.
+  escape hatch** (`scope: [1, 2, 3]`, #49) — see `docs/handbuch/permissions.md`.
 - **revocable** — whether the right supports `type: "revoke"` (`isRevocable` in the source).
 - **desc** — human description (`bezeichnung`).
 

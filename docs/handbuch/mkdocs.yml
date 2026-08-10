@@ -1,0 +1,83 @@
+# Mini config for ct-cli's section of the Handbuch (#89, publishing contract in
+# eqrm/churchtools-connector#1114).
+#
+# A page publishes only if it lives under docs/handbuch/ and is reachable from this
+# nav — everything else in docs/ (api-coverage.md, group-field-decisions.md,
+# runbook-manual-surface.md, superpowers/) stays invisible on purpose: it is
+# developer- and operator-facing material, not reader-facing reference.
+#
+# These pages are the GENERIC ChurchTools reference — how ChurchTools' own group,
+# permission and dynamic-group model actually works — as opposed to eqrm/ct-structure's
+# docs/, which describe one specific instance. That is why they belong in the Handbuch's
+# "ChurchTools-Grundlagen" section rather than in this repo's README.
+#
+# LANGUAGE MISMATCH (deliberate, see #89): the Handbuch is German, these pages are
+# English. They are placed here now and translated (or moved to Betrieb) by the
+# follow-on content epic — hence `language: en` below, so search and UI chrome at
+# least match the page text while the mismatch stands.
+#
+# Built standalone via `mkdocs build -f docs/handbuch/mkdocs.yml --strict`;
+# eqrm/churchtools-connector#1115 replaces that with an `!include` from the root config
+# once mkdocs-monorepo-plugin exists.
+site_name: ct-cli — ChurchTools-Grundlagen
+site_description: Generic ChurchTools reference — permissions, dynamic groups, field definitions, blueprints
+docs_dir: .
+site_dir: ../../site/handbuch
+strict: true
+
+# docs_dir is the section directory itself, so this config would otherwise be copied
+# into the built site as a static file.
+exclude_docs: |
+  mkdocs.yml
+
+theme:
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search:
+      lang: en
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+
+nav:
+  - Overview: index.md
+  - Permissions: permissions.md
+  - Dynamic groups: dynamic-groups.md
+  - Field definitions: field-definitions.md
+  - Blueprints: blueprints.md

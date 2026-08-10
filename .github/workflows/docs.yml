@@ -1,0 +1,53 @@
+name: Docs
+
+# Two gates over docs/handbuch/ — the section published into the Handbuch's
+# "ChurchTools-Grundlagen" (#89, publishing contract in eqrm/churchtools-connector#1114):
+#
+# 1. `build` — mkdocs --strict, so a broken link or a page missing from the nav fails
+#    the PR here rather than silently in the consuming site build.
+# 2. `staleness` — the estate-wide reusable checker (eqrm/churchtools-connector#1120).
+#    It reads each page's `sources:` globs and fails a PR that changes documented code
+#    without re-signing the page. The single implementation lives in the connector repo
+#    on purpose: reimplementing it per language would give us four subtly different gates.
+#
+# Re-signing a page means recomputing `sources_hash` over its `sources:` — a sha256 over
+# each resolved file's `<relative-path>\0<contents>\0`, sorted, truncated to 16 hex chars
+# (see the connector's `App\Services\Docs\SourcesHasher`). Bumping `reviewed:` alone does
+# NOT satisfy the gate; the point is that someone re-read the page against the new code.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/handbuch/**"
+      - "src/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/handbuch/**"
+      - "src/**"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install MkDocs
+        run: pip install -r docs/handbuch/requirements.txt
+      - name: Build the section (strict)
+        run: mkdocs build -f docs/handbuch/mkdocs.yml --strict
+
+  # `src/**` changed without the matching page re-signed → this fails. Signing is the
+  # acknowledgement, not the file appearing in the diff.
+  staleness:
+    uses: eqrm/churchtools-connector/.github/workflows/docs-staleness.yml@main
+    with:
+      docs-path: docs/handbuch
+    secrets: inherit

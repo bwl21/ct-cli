@@ -1,3 +1,15 @@
+---
+title: Dynamic groups (auto-groups)
+sources:
+  - src/config/query.ts
+  - src/config/query-refs.ts
+  - src/engine/dynamic.ts
+  - src/engine/synthetic.ts
+  - src/commands/adopt-group.ts
+sources_hash: 785c613f106cbd8a
+reviewed: 2026-08-10
+---
+
 # Auto-groups (dynamic groups)
 
 ChurchTools "dynamic groups" (aka auto-groups) compute their membership from a
@@ -320,6 +332,6 @@ instance.
 
 ## Full example
 
-See [`examples/dynamic-group.config.ts`](../examples/dynamic-group.config.ts)
+See [`examples/dynamic-group.config.ts`](https://github.com/eqrm/ct-cli/blob/main/examples/dynamic-group.config.ts)
 for a runnable config declaring a campus and a dynamic group built with the
 typed query DSL.

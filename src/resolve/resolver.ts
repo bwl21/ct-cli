@@ -98,7 +98,7 @@ export interface ResolverDeps {
  *
  *   1. A `group_role` domain is keyed by CT's internal (group, role) PAIRING id — one id per
  *      (this specific group, this specific role). It is NEITHER the group's id NOR the shared
- *      role-definition id (this matches the long-standing code/docs comment; docs/permissions.md
+ *      role-definition id (this matches the long-standing code/docs comment; docs/handbuch/permissions.md
  *      "domainId semantics").
  *   2. That pairing id is exposed on the group's OWN role list, `GET /groups/{groupId}/roles`, as
  *      each row's {@link GROUP_ROLE_PAIRING_FIELD} (`id`), and rows carry a `name` we match the

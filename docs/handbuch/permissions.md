@@ -1,3 +1,14 @@
+---
+title: Permissions
+sources:
+  - src/permissions/**
+  - src/resolve/resolver.ts
+  - src/resolve/refs.ts
+  - src/config/context.ts
+sources_hash: 49ef267c4843eeb4
+reviewed: 2026-08-10
+---
+
 # Permissions (`ct.groupRole` / `ct.groupTypeRole` / `ct.status`)
 
 Declare ChurchTools permission grants — group-role, group-type-role and
@@ -387,6 +398,6 @@ is idempotent.
 
 ## Example
 
-See [`examples/permissions.config.ts`](../examples/permissions.config.ts) for
+See [`examples/permissions.config.ts`](https://github.com/eqrm/ct-cli/blob/main/examples/permissions.config.ts) for
 a runnable `ct.groupTypeRole` declaration with one global grant and one
 scoped grant.

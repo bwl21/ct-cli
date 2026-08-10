@@ -87,5 +87,5 @@ the runbook's re-audit procedure once the schema is regenerated.
 | Person master-data model          | `/person/masterdata`           | ✅ (single object) | ❌                    | **Read-only.** Versionable master-data model incl. the `securityLevels` enumeration. No write endpoint (edited in the CT master-data admin UI).                |
 | Data-field definitions (Datenfelder) | `/dbfields`, `/dbfields/{id}` | list ✅ / by-id ✅ | ❌                    | **Read-only.** Unified person + group field definitions, discriminated by `fieldCategory`. Mutation only via legacy churchdb AJAX (`db_insert/update/deletefields`), not REST. |
 
-See [`docs/field-definitions.md`](field-definitions.md) for the full writability
+See [`docs/handbuch/field-definitions.md`](handbuch/field-definitions.md) for the full writability
 decision, evidence, and the schema/values boundary.

@@ -1,6 +1,6 @@
 /**
  * Runnable example: a campus + a dynamic ("auto") group whose ruleset is
- * built with the typed query DSL. See docs/dynamic-groups.md for the full
+ * built with the typed query DSL. See docs/handbuch/dynamic-groups.md for the full
  * feature guide.
  *
  * Portable references (#20): the ruleset's `campusId` filter is written as a
@@ -19,7 +19,7 @@ export default (ct: ConfigContext): void => {
   // this ordering automatically. `dynamic` is a synthetic sub-resource field
   // (like `parents`), not a separate resource type: its ruleset/status write is
   // folded into the group's OWN tier-1 apply and routed to the dynamic-group
-  // endpoints inline (see src/engine/synthetic.ts and docs/dynamic-groups.md).
+  // endpoints inline (see src/engine/synthetic.ts and docs/handbuch/dynamic-groups.md).
   ct.group({
     key: "all_mainz",
     name: "Alle Mainz",

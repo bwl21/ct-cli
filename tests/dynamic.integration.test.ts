@@ -38,7 +38,7 @@ describe.runIf(live)("dynamic round-trip (live)", () => {
  *
  * The two tests above write back CT's OWN GET output, so they are drift-free by construction: if
  * CT silently rewrote/normalized a RuleSet-level field (`description`, `shorty`, `importance`,
- * `personIdFieldName`, `process` — see docs/dynamic-groups.md "Drift, normalization, and no-op
+ * `personIdFieldName`, `process` — see docs/handbuch/dynamic-groups.md "Drift, normalization, and no-op
  * re-applies") on PUT, those tests could never observe it, because the value they wrote back
  * already matched. This test authors fresh field values instead, so it CAN observe such rewrites.
  * If it fails, the failure message names exactly which RuleSet-level field(s) changed — add those
@@ -53,7 +53,7 @@ describe.runIf(live)("dynamic round-trip (live)", () => {
  * instance — one whose ruleset this test may freely overwrite. The test captures the group's
  * current ruleset before writing and restores it in a `finally`, but a process kill / crash mid-run
  * would leave the group holding the test-authored ruleset — never point this at a group anyone
- * depends on. See docs/dynamic-groups.md and tests/fixtures/dynamic/README.md for how to run this.
+ * depends on. See docs/handbuch/dynamic-groups.md and tests/fixtures/dynamic/README.md for how to run this.
  */
 describe.runIf(live && liveWrite)("dynamic ruleset round-trip pin (#36, live write)", () => {
   it("a user-authored PUT round-trips through GET, and a plan built from it is a no-op", async () => {

@@ -1,15 +1,25 @@
+---
+title: Blueprints
+sources:
+  - src/config/context.ts
+  - src/engine/graph.ts
+  - src/engine/hierarchy.ts
+sources_hash: d69dbf11ba71e8eb
+reviewed: 2026-08-10
+---
+
 # Blueprints (parametrized, reusable config)
 
 A "blueprint" is not a feature the tool implements — it's a naming for a
 pattern the existing config DSL already supports for free. `ct.config.ts`
 default-exports a plain function that receives the injected
-[`ConfigContext`](../src/config/context.ts) (`ct.campus`, `ct.group`,
+[`ConfigContext`](https://github.com/eqrm/ct-cli/blob/main/src/config/context.ts) (`ct.campus`, `ct.group`,
 `ct.groupTypeRole`, ...) and calls it however you like: in a loop, from a
 helper function, across multiple files. There is no special "blueprint"
 API, decorator, or registration step — just TypeScript functions closing
 over `ct` (issue #7).
 
-See [`examples/campus-blueprint.config.ts`](../examples/campus-blueprint.config.ts)
+See [`examples/campus-blueprint.config.ts`](https://github.com/eqrm/ct-cli/blob/main/examples/campus-blueprint.config.ts)
 for a complete, runnable example; this doc walks through what it does and
 why.
 
@@ -58,7 +68,7 @@ The **numeric escape hatch** stays available: pass `campusId: <existing id>`
 (CT stores it at `information.campusId`; `campusId: null` clears it) or
 `groupTypeId: 2` to target one instance's id directly. `ct plan` diffs a campus
 assign/move/clear as a normal field update — see
-[`docs/group-field-decisions.md`](group-field-decisions.md). Declaring both the
+[`docs/group-field-decisions.md`](https://github.com/eqrm/ct-cli/blob/main/docs/group-field-decisions.md). Declaring both the
 logical and the numeric form for one field (`campus` + `campusId`) is a conflict
 and throws at eval time.
 
@@ -90,8 +100,8 @@ itself.
 ## `parents` scopes hierarchy per campus
 
 Group hierarchy (`parents`) is opt-in and references other groups **by
-key** (see [`docs/dynamic-groups.md`](dynamic-groups.md) and the DSL doc
-comment in [`src/config/context.ts`](../src/config/context.ts)). Because
+key** (see [`dynamic-groups.md`](dynamic-groups.md) and the DSL doc
+comment in [`src/config/context.ts`](https://github.com/eqrm/ct-cli/blob/main/src/config/context.ts)). Because
 each campus's group keys are prefixed, a blueprint's `parents: [lead]`
 inside `kidsArea` naturally scopes hierarchy to that one campus's own
 `lead` variable — `berlin_kids_0_3`'s `parents` can only ever point at
@@ -120,7 +130,7 @@ convention and lexical scoping do that for you.
 
 Because a blueprint is just code calling `ct.*`, it can freely mix resource
 types. `kidsArea` declares a `dynamic` block (an auto-group, #14 — see
-[`docs/dynamic-groups.md`](dynamic-groups.md)) on the "all members" group
+[`dynamic-groups.md`](dynamic-groups.md)) on the "all members" group
 right alongside the plain groups:
 
 ```ts
@@ -143,7 +153,7 @@ ct.group({
 ```
 
 And the outer default export layers a permission grant (#13 — see
-[`docs/permissions.md`](permissions.md)) on a shared `groupTypeRole`
+[`permissions.md`](permissions.md)) on a shared `groupTypeRole`
 template, declared once and applying across every campus's groups of that
 type:
 
@@ -167,14 +177,14 @@ export default (ct: ConfigContext): void => {
 
 There's nothing blueprint-specific about `dynamic` or `groupTypeRole` here
 — they're the same DSL calls documented in
-[`docs/dynamic-groups.md`](dynamic-groups.md) and
-[`docs/permissions.md`](permissions.md), just invoked from inside a
+[`dynamic-groups.md`](dynamic-groups.md) and
+[`permissions.md`](permissions.md), just invoked from inside a
 reusable function instead of inline at the top level.
 
 ## Ordering is automatic
 
 `ct plan` / `ct apply` order every declared resource with
-[`orderKeys`](../src/engine/graph.ts), which sorts by a fixed type tier
+[`orderKeys`](https://github.com/eqrm/ct-cli/blob/main/src/engine/graph.ts), which sorts by a fixed type tier
 (`campus` / `group-type` / ... at tier 0, `group` at tier 1) and then, within
 a tier, by dependency edges — honouring ties by original declaration order.
 A blueprint doesn't need to worry about sequencing:
@@ -189,7 +199,7 @@ A blueprint doesn't need to worry about sequencing:
   guarantees it structurally, not by declaration order.
 - **Hierarchy and auto-group state ride along with their group.** `parents`
   and `dynamic` are *synthetic fields* on the `group` resource itself (see
-  `SYNTHETIC_FIELDS` in [`src/engine/synthetic.ts`](../src/engine/synthetic.ts)),
+  `SYNTHETIC_FIELDS` in [`src/engine/synthetic.ts`](https://github.com/eqrm/ct-cli/blob/main/src/engine/synthetic.ts)),
   not separate resources with their own tier — they're diffed and applied as
   part of that same group's create/update, once the group (and, for
   `parents`, its referenced parent groups) already exist.
@@ -212,7 +222,7 @@ beyond the `parents: [lead]` you'd write anyway.
 
 `parents` references are validated **at config-evaluation time**, before
 any plan or diff is computed (`validateReferences` in
-[`src/config/context.ts`](../src/config/context.ts), run by
+[`src/config/context.ts`](https://github.com/eqrm/ct-cli/blob/main/src/config/context.ts), run by
 `evaluateConfig`). Every key listed in a `parents` array must resolve to a
 `group` declared *somewhere in the same config* — including inside a
 blueprint function called from the top-level export. A typo, a forgotten
@@ -233,7 +243,7 @@ catch before it ever reaches `ct plan` against a live instance.
 
 ## Full example
 
-See [`examples/campus-blueprint.config.ts`](../examples/campus-blueprint.config.ts)
+See [`examples/campus-blueprint.config.ts`](https://github.com/eqrm/ct-cli/blob/main/examples/campus-blueprint.config.ts)
 for the complete, runnable config this doc describes: a `kidsArea(ct,
 campus)` blueprint instantiated over two campuses (`mainz`, `berlin`),
 each producing a lead group, three ministry-team groups (managed hierarchy
