@@ -1,0 +1,28 @@
+name: Issue intake
+
+# Every issue opened without a milestone is unsorted by definition, so it gets
+# `triage` and waits for the weekly sweep. Filing straight into an active
+# milestone is the way to skip the queue — that is the whole incentive.
+#
+# The label is removed by deciding: give it a milestone (scheduled) or leave it
+# without one (kept as an idea, browsable in the Backlog view). Nothing is
+# closed for being old.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  triage:
+    if: github.event.issue.milestone == null
+    runs-on: [self-hosted, eqrm-ci]
+    steps:
+      - name: Mark as untriaged
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: gh issue edit "$ISSUE" --repo "$REPO" --add-label triage
