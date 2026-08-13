@@ -35,7 +35,9 @@ describe("computePlan", () => {
     const plan = computePlan([desired("mainz", { name: "Mainz" })], stateOf(), new Map());
     expect(plan.items).toHaveLength(1);
     expect(plan.items[0]).toMatchObject({ action: "create", key: "mainz", id: null });
-    expect(plan.items[0]?.changes).toEqual([{ field: "name", from: undefined, to: "Mainz", source: "config" }]);
+    expect(plan.items[0]?.changes).toEqual([
+      { field: "name", from: undefined, to: "Mainz", source: "config" },
+    ]);
   });
 
   it("is a no-op when desired matches actual (id 0 handled)", () => {
@@ -79,11 +81,7 @@ describe("computePlan", () => {
     // A raw array from a programmatic caller (import command, test harness) could carry duplicates —
     // desiredByKey would collapse them while the plan loop emits both. Reject up front.
     expect(() =>
-      computePlan(
-        [desired("dup", { name: "A" }), desired("dup", { name: "B" })],
-        stateOf(),
-        new Map(),
-      ),
+      computePlan([desired("dup", { name: "A" }), desired("dup", { name: "B" })], stateOf(), new Map()),
     ).toThrow(/Duplicate desired key "dup"/);
   });
 
@@ -94,7 +92,9 @@ describe("computePlan", () => {
       actualOf({ mainz: { name: "Mainz", shortName: "MZ" } }),
     );
     expect(plan.items[0]).toMatchObject({ action: "update", id: 5 });
-    expect(plan.items[0]?.changes).toEqual([{ field: "name", from: "Mainz", to: "Mainz HQ", source: "config" }]);
+    expect(plan.items[0]?.changes).toEqual([
+      { field: "name", from: "Mainz", to: "Mainz HQ", source: "config" },
+    ]);
   });
 
   it("does not flag a mere object-key-order difference as a change", () => {
@@ -182,7 +182,7 @@ describe("computePlan", () => {
 // apart from "both happened, independently". Computed from the SAME three values already
 // available (last-known state snapshot, desired config, fetched actual) — no new fetch.
 describe("changes[].source attribution (#24)", () => {
-  it("tags a plain config change as \"config\" (ChurchTools still matches the last-known snapshot)", () => {
+  it('tags a plain config change as "config" (ChurchTools still matches the last-known snapshot)', () => {
     const plan = computePlan(
       [desired("mainz", { name: "Mainz HQ" })],
       stateOf(managed("mainz", 5, { name: "Mainz" })),
@@ -193,7 +193,7 @@ describe("changes[].source attribution (#24)", () => {
     ]);
   });
 
-  it("tags a pure manual edit as \"drift\" (config unchanged, ChurchTools moved)", () => {
+  it('tags a pure manual edit as "drift" (config unchanged, ChurchTools moved)', () => {
     const plan = computePlan(
       [desired("mainz", { name: "Mainz" })], // config still says the last-known value
       stateOf(managed("mainz", 5, { name: "Mainz" })),
@@ -205,7 +205,7 @@ describe("changes[].source attribution (#24)", () => {
     expect(plan.items[0]?.drift).toEqual([{ field: "name", from: "Mainz", to: "Changed In CT" }]);
   });
 
-  it("tags \"config+drift\" when both the config AND ChurchTools moved independently", () => {
+  it('tags "config+drift" when both the config AND ChurchTools moved independently', () => {
     const plan = computePlan(
       [desired("mainz", { name: "New Config Name" })],
       stateOf(managed("mainz", 5, { name: "Old Name" })),
@@ -216,14 +216,14 @@ describe("changes[].source attribution (#24)", () => {
     ]);
   });
 
-  it("always tags a create's changes as \"config\" (nothing to drift from yet)", () => {
+  it('always tags a create\'s changes as "config" (nothing to drift from yet)', () => {
     const plan = computePlan([desired("mainz", { name: "Mainz" })], stateOf(), new Map());
     expect(plan.items[0]?.changes).toEqual([
       { field: "name", from: undefined, to: "Mainz", source: "config" },
     ]);
   });
 
-  it("always tags a recreate's changes as \"config\"", () => {
+  it('always tags a recreate\'s changes as "config"', () => {
     const plan = computePlan(
       [desired("mainz", { name: "Mainz" })],
       stateOf(managed("mainz", 5, { name: "Mainz" })),
@@ -243,9 +243,7 @@ describe("changes[].source attribution (#24)", () => {
       stateOf(managedT("group", "team", 9, { name: "Team" })), // no campusId in the snapshot
       actualOf({ team: { name: "Team", campusId: 4 } }),
     );
-    expect(plan.items[0]?.changes).toEqual([
-      { field: "campusId", from: 4, to: 7, source: "config" },
-    ]);
+    expect(plan.items[0]?.changes).toEqual([{ field: "campusId", from: 4, to: 7, source: "config" }]);
     expect(plan.items[0]?.drift).toBeUndefined();
   });
 });

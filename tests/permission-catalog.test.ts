@@ -13,7 +13,9 @@ describe("permission catalog", () => {
     expect(e.scopeField).toBe("cdb_gruppe");
   });
   it("throws a helpful error for an unknown right", () => {
-    expect(() => resolveAuthId("churchgroup:no such right")).toThrow(/unknown permission "churchgroup:no such right"/i);
+    expect(() => resolveAuthId("churchgroup:no such right")).toThrow(
+      /unknown permission "churchgroup:no such right"/i,
+    );
   });
   it("exposes the whole catalog (187 rights)", () => {
     expect(Object.keys(CATALOG).length).toBeGreaterThanOrEqual(180);

@@ -7,9 +7,7 @@ import type { DesiredResource } from "../src/engine/types.js";
 
 /** A tiny in-memory ChurchTools: a campuses store supporting GET/POST/PUT; hierarchy is empty. */
 function fakeCt() {
-  const campuses = new Map<number, Record<string, unknown>>([
-    [0, { id: 0, name: "Mainz", shorty: "MZ" }],
-  ]);
+  const campuses = new Map<number, Record<string, unknown>>([[0, { id: 0, name: "Mainz", shorty: "MZ" }]]);
   let nextId = 1;
   return {
     get: async <T>(path: string): Promise<T> => {

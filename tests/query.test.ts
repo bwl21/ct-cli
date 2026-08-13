@@ -5,14 +5,15 @@ import { normalizeRuleset } from "../src/engine/dynamic.js";
 describe("typed query builder", () => {
   it("builds a JSONLogic tree", () => {
     const tree = q.and(q.eq("ctgroup.campusId", 1), q.eq("person.isArchived", false));
-    expect(tree).toEqual({ and: [
-      { "==": [{ var: "ctgroup.campusId" }, 1] },
-      { "==": [{ var: "person.isArchived" }, false] },
-    ] });
+    expect(tree).toEqual({
+      and: [{ "==": [{ var: "ctgroup.campusId" }, 1] }, { "==": [{ var: "person.isArchived" }, false] }],
+    });
   });
 
   it("oneof and isnull", () => {
-    expect(q.oneof("ctgroup.groupTypeId", [1, 2])).toEqual({ oneof: [{ var: "ctgroup.groupTypeId" }, [1, 2]] });
+    expect(q.oneof("ctgroup.groupTypeId", [1, 2])).toEqual({
+      oneof: [{ var: "ctgroup.groupTypeId" }, [1, 2]],
+    });
     expect(q.isnull("person.isArchived")).toEqual({ isnull: [{ var: "person.isArchived" }] });
   });
 
@@ -58,8 +59,13 @@ describe("typed query builder", () => {
   });
 
   it("a built ruleset normalizes stably (matches read-back normalization)", () => {
-    const ruleset = { description: "x", importance: 0, personIdFieldName: "id",
-      process: {}, query: churchQuery(q.eq("ctgroup.campusId", 1)) };
+    const ruleset = {
+      description: "x",
+      importance: 0,
+      personIdFieldName: "id",
+      process: {},
+      query: churchQuery(q.eq("ctgroup.campusId", 1)),
+    };
     expect(normalizeRuleset(normalizeRuleset(ruleset))).toEqual(normalizeRuleset(ruleset));
   });
 

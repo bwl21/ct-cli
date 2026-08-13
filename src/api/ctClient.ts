@@ -184,7 +184,12 @@ export class CtClient {
       const pageMeta = envelope?.meta;
       meta = pageMeta ?? meta;
       const pagination = pageMeta?.pagination;
-      if (pageItems.length === 0 || !pagination || pagination.current === undefined || pagination.lastPage === undefined) {
+      if (
+        pageItems.length === 0 ||
+        !pagination ||
+        pagination.current === undefined ||
+        pagination.lastPage === undefined
+      ) {
         break;
       }
       if (pagination.current >= pagination.lastPage) {
@@ -193,6 +198,26 @@ export class CtClient {
       page += 1;
     }
     return { data: items, meta };
+  }
+
+  /**
+   * ONE request's raw envelope — the parsed `data` alongside the `meta` that carries CT's
+   * pagination block (#100). {@link request} unwraps `data` and drops `meta`, which is exactly what
+   * makes a single-page read indistinguishable from a complete one; `ct get raw` needs both to tell
+   * "this endpoint returned everything" from "this endpoint returned CT's default first page".
+   * `data` is the envelope's `data` when present, else the whole body (CT is inconsistent about the
+   * envelope), so a single-object endpoint round-trips unchanged.
+   */
+  async getRaw<T = unknown>(path: string): Promise<{ data: T; meta?: CtMeta }> {
+    const parsed = await this.requestEnvelope("GET", path);
+    if (parsed === undefined) {
+      return { data: undefined as T };
+    }
+    if (Array.isArray(parsed)) {
+      return { data: parsed as T };
+    }
+    const envelope = parsed as { data?: T; meta?: CtMeta };
+    return { data: (envelope.data ?? envelope) as T, meta: envelope.meta };
   }
 
   /**
@@ -250,6 +275,50 @@ export class CtClient {
     }
   }
 
+  /**
+   * POST a form body to a LEGACY (non-`/api`) ChurchTools endpoint, riding the same session (#105).
+   *
+   * ChurchTools does not expose the permission master data over REST — the permission editor reads it
+   * from `index.php?q=churchauth/ajax`. This is the only door to it, so it is a narrow, deliberate
+   * escape hatch from the REST surface rather than a general-purpose method: it takes an `index.php`
+   * query name, not an arbitrary URL, and it is a read in practice (the one caller performs
+   * `getMasterData`). The CSRF header is sent because this is a POST, exactly as the browser does.
+   */
+  async legacyPostForm<T = unknown>(query: string, form: Record<string, string>): Promise<T> {
+    if (!this.cookie) {
+      throw new CtApiError("Not authenticated — run `ct auth login` first", 401, null);
+    }
+    if (!this.csrfToken) {
+      await this.refreshCsrfToken();
+    }
+    const url = `${this.config.host}/index.php?q=${encodeURIComponent(query)}`;
+    const res = await fetchWithRetry(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Cookie: this.cookie,
+          "CSRF-Token": this.csrfToken ?? "",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams(form).toString(),
+      },
+      // Not retried on 5xx: a legacy POST is not declared idempotent, and a 429 is still safe to retry.
+      { isIdempotent: false },
+    );
+    this.captureCookie(res);
+    if (!res.ok) {
+      throw new CtApiError(`POST index.php?q=${query} failed`, res.status, await safeBody(res));
+    }
+    const text = await res.text();
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new CtApiError(`POST index.php?q=${query} returned a non-JSON body`, res.status, text);
+    }
+  }
+
   private async refreshCsrfToken(): Promise<void> {
     // A plain authenticated GET: it rides the session cookie and GET skips the CSRF branch in
     // request(), so this cannot recurse — and it reuses request()'s envelope unwrap + guarded 2xx
@@ -294,7 +363,30 @@ async function safeBody(res: Response): Promise<unknown> {
 }
 
 /** Append `page`/`limit` query params, respecting any query string the caller already has. */
-function withPageParams(path: string, page: number, limit: number): string {
+export function withPageParams(path: string, page: number, limit: number): string {
   const separator = path.includes("?") ? "&" : "?";
   return `${path}${separator}page=${page}&limit=${limit}`;
+}
+
+/** True when the caller's path already carries its own `page`/`limit` — a deliberate single-page probe. */
+export function hasOwnPageParams(path: string): boolean {
+  const query = path.split("?")[1];
+  return query !== undefined && /(^|&)(page|limit)=/.test(query);
+}
+
+/**
+ * Whether a pagination envelope says MORE rows exist than the response carried (#100). Both signals
+ * are checked because CT populates them inconsistently across endpoints: `current < lastPage` is the
+ * authoritative one, and `total > count` catches an endpoint that reports a total without page
+ * numbers. No pagination block at all ⇒ the endpoint is not a paged list, so nothing is missing.
+ */
+export function hasMorePages(meta: CtMeta | undefined, received: number): boolean {
+  const p = meta?.pagination;
+  if (!p) {
+    return false;
+  }
+  if (p.current !== undefined && p.lastPage !== undefined && p.current < p.lastPage) {
+    return true;
+  }
+  return p.total !== undefined && p.total > received;
 }

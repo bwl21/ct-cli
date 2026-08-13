@@ -36,7 +36,12 @@ describe("Resolver.resolve", () => {
   });
 
   it("resolves a campus from the live catalog by slug(name)", async () => {
-    const client = fakeClient({ "/campuses": [{ id: 3, name: "Berlin", shorty: "BE" }, { id: 5, name: "Mainz" }] });
+    const client = fakeClient({
+      "/campuses": [
+        { id: 3, name: "Berlin", shorty: "BE" },
+        { id: 5, name: "Mainz" },
+      ],
+    });
     const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED });
     expect(await r.resolve(ref.campus("mainz"), "site")).toBe(5);
   });
@@ -75,7 +80,12 @@ describe("Resolver.resolve", () => {
     // /group/memberstatus IS mocked here (as a member-statuses catalog would be on a live host), to
     // prove the resolver never even looks at it for a group-status ref — group statuses have no
     // REST catalog to resolve against (a different, unrelated dimension from member statuses).
-    const client = fakeClient({ "/group/memberstatus": [{ id: 1, name: "Active" }, { id: 2, name: "Candidate" }] });
+    const client = fakeClient({
+      "/group/memberstatus": [
+        { id: 1, name: "Active" },
+        { id: 2, name: "Candidate" },
+      ],
+    });
     const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED, host: "hostA" });
     await expect(r.resolve(ref.status("candidate"), "site")).rejects.toThrow(
       /Cannot resolve group-status:candidate referenced at site on hostA/,
@@ -91,7 +101,7 @@ describe("Resolver.resolve", () => {
     // SAME message context.ts's eval-time guard uses, not the generic one.
     const client = fakeClient({});
     const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED, host: "hostA" });
-    await expect(r.resolve(ref.status("candidate"), "group \"g\".groupStatusId")).rejects.toThrow(
+    await expect(r.resolve(ref.status("candidate"), 'group "g".groupStatusId')).rejects.toThrow(
       'Cannot resolve group-status:candidate referenced at group "g".groupStatusId on hostA: group statuses ' +
         "have no REST catalog (GET /group/memberstatus is a different dimension: member statuses, string ids " +
         '— verified 2026-07-10). Declare a numeric "groupStatusId" instead (e.g. "groupStatusId: 1").',
@@ -108,9 +118,14 @@ describe("Resolver.resolve", () => {
   });
 
   it("throws listing candidates on an ambiguous catalog match", async () => {
-    const client = fakeClient({ "/campuses": [{ id: 1, name: "Mainz" }, { id: 2, name: "Mainz" }] });
+    const client = fakeClient({
+      "/campuses": [
+        { id: 1, name: "Mainz" },
+        { id: 2, name: "Mainz" },
+      ],
+    });
     const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED, host: "hostA" });
-    await expect(r.resolve(ref.campus("mainz"), "group \"g\"")).rejects.toThrow(
+    await expect(r.resolve(ref.campus("mainz"), 'group "g"')).rejects.toThrow(
       /Ambiguous campus:mainz referenced at group "g" on hostA: 2 live campuss match/,
     );
   });
@@ -118,7 +133,7 @@ describe("Resolver.resolve", () => {
   it("throws a clear error on an unknown reference (kind + key + site + host)", async () => {
     const client = fakeClient({ "/campuses": [{ id: 1, name: "Berlin" }] });
     const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED, host: "hostB" });
-    await expect(r.resolve(ref.campus("mainz"), "group \"g\".campusId")).rejects.toThrow(
+    await expect(r.resolve(ref.campus("mainz"), 'group "g".campusId')).rejects.toThrow(
       /Cannot resolve campus:mainz referenced at group "g".campusId on hostB/,
     );
   });
@@ -128,12 +143,15 @@ describe("Resolver.resolve", () => {
       kids: { type: "group", id: 42, key: "kids", fields: {}, adoptedAt: "t", updatedAt: "t" },
     });
     const client = fakeClient({
-      "/groups/42/roles": [{ id: 2882, name: "Leiter" }, { id: 2883, name: "Mitglied" }],
+      "/groups/42/roles": [
+        { id: 2882, name: "Leiter" },
+        { id: 2883, name: "Mitglied" },
+      ],
     });
     const r = new Resolver({ client, state, desired: NO_DESIRED });
     // slug("Leiter") === "leiter", so either the slug key or the exact name resolves.
-    expect(await r.resolve(ref.groupRole("kids", "leiter"), "perm \"p\"")).toBe(2882);
-    expect(await r.resolve(ref.groupRole("kids", "Mitglied"), "perm \"p\"")).toBe(2883);
+    expect(await r.resolve(ref.groupRole("kids", "leiter"), 'perm "p"')).toBe(2882);
+    expect(await r.resolve(ref.groupRole("kids", "Mitglied"), 'perm "p"')).toBe(2883);
     expect(client.calls["/groups/42/roles"]).toBe(1); // fetched once, cached across both refs
   });
 
@@ -143,7 +161,7 @@ describe("Resolver.resolve", () => {
     });
     const client = fakeClient({ "/groups/42/roles": [{ id: 2882, name: "Leiter" }] });
     const r = new Resolver({ client, state, desired: NO_DESIRED, host: "hostA" });
-    await expect(r.resolve(ref.groupRole("kids", "Ghost"), "perm \"p\"")).rejects.toThrow(
+    await expect(r.resolve(ref.groupRole("kids", "Ghost"), 'perm "p"')).rejects.toThrow(
       /group #42 has no role named "Ghost".*available: "Leiter".*pass a numeric id/is,
     );
   });
@@ -151,7 +169,7 @@ describe("Resolver.resolve", () => {
   it("errors when a group_role names a group that isn't managed", async () => {
     const client = fakeClient({});
     const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED });
-    await expect(r.resolve(ref.groupRole("ghost", "Leiter"), "perm \"p\"")).rejects.toThrow(
+    await expect(r.resolve(ref.groupRole("ghost", "Leiter"), 'perm "p"')).rejects.toThrow(
       /no managed group named "ghost".*pass a numeric id/is,
     );
   });
@@ -160,7 +178,7 @@ describe("Resolver.resolve", () => {
     const desired: DesiredResource[] = [{ type: "group", key: "kids", fields: {}, dependsOn: [] }];
     const client = fakeClient({});
     const r = new Resolver({ client, state: emptyState("h"), desired });
-    await expect(r.resolve(ref.groupRole("kids", "Leiter"), "perm \"p\"")).rejects.toThrow(
+    await expect(r.resolve(ref.groupRole("kids", "Leiter"), 'perm "p"')).rejects.toThrow(
       /declared in this config but not yet created.*Apply the group first/is,
     );
   });
@@ -189,7 +207,10 @@ describe("Resolver.resolve — group-type-role (groupTypeRoleId, #76)", () => {
     { id: 16, name: "Leiter", groupTypeId: 2 }, // SAME name as #84, different group type
     { id: 17, name: "Organisator", groupTypeId: 2 },
   ];
-  const groupTypesCatalog = [{ id: 12, name: "Local Lead" }, { id: 2, name: "Team" }];
+  const groupTypesCatalog = [
+    { id: 12, name: "Local Lead" },
+    { id: 2, name: "Team" },
+  ];
 
   it("resolves a (group-type, role) pair to its groupTypeRoleId, disambiguating same-named roles", async () => {
     const client = fakeClient({ "/group/grouptypes": groupTypesCatalog, "/group/roles": rolesCatalog });
@@ -204,7 +225,14 @@ describe("Resolver.resolve — group-type-role (groupTypeRoleId, #76)", () => {
 
   it("resolves the group-type half from managed state (no group-type catalog fetch)", async () => {
     const state = stateWith({
-      local_lead: { type: "group-type", id: 12, key: "local_lead", fields: {}, adoptedAt: "t", updatedAt: "t" },
+      local_lead: {
+        type: "group-type",
+        id: 12,
+        key: "local_lead",
+        fields: {},
+        adoptedAt: "t",
+        updatedAt: "t",
+      },
     });
     const client = fakeClient({ "/group/roles": rolesCatalog });
     const r = new Resolver({ client, state, desired: NO_DESIRED });
@@ -215,7 +243,7 @@ describe("Resolver.resolve — group-type-role (groupTypeRoleId, #76)", () => {
   it("errors clearly when no role of that name exists on the group type (lists candidates)", async () => {
     const client = fakeClient({ "/group/grouptypes": groupTypesCatalog, "/group/roles": rolesCatalog });
     const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED, host: "hostA" });
-    await expect(r.resolve(ref.groupTypeRole("team", "Ghost"), "ruleset \"r\"")).rejects.toThrow(
+    await expect(r.resolve(ref.groupTypeRole("team", "Ghost"), 'ruleset "r"')).rejects.toThrow(
       /group-type-role\(groupType=team, role=Ghost\) referenced at ruleset "r" on hostA: group type #2 has no role named "Ghost".*available: "Leiter", "Organisator".*pass a numeric id/is,
     );
   });
@@ -254,11 +282,21 @@ describe("Resolver.resolve — group-type-role (groupTypeRoleId, #76)", () => {
 
 describe("Resolver.resolveValue", () => {
   it("deep-rewrites refs to ids and fetches each catalog at most once", async () => {
-    const client = fakeClient({ "/campuses": [{ id: 5, name: "Mainz" }, { id: 6, name: "Berlin" }] });
+    const client = fakeClient({
+      "/campuses": [
+        { id: 5, name: "Mainz" },
+        { id: 6, name: "Berlin" },
+      ],
+    });
     const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED });
     const value = {
       campusId: ref.campus("mainz"),
-      query: { or: [{ "==": [{ var: "ctgroup.campusId" }, ref.campus("mainz")] }, { "==": [{ var: "ctgroup.campusId" }, ref.campus("berlin")] }] },
+      query: {
+        or: [
+          { "==": [{ var: "ctgroup.campusId" }, ref.campus("mainz")] },
+          { "==": [{ var: "ctgroup.campusId" }, ref.campus("berlin")] },
+        ],
+      },
       untouched: 42,
     };
     const out = await r.resolveValue(value, "site");
@@ -323,7 +361,7 @@ describe("catalogs are read PAGINATED (#99 review)", () => {
       ],
     });
     const r = new Resolver({ client, state, desired: NO_DESIRED });
-    expect(await r.resolve(ref.groupRole("kids", "Leiter"), "perm \"p\"")).toBe(2882);
+    expect(await r.resolve(ref.groupRole("kids", "Leiter"), 'perm "p"')).toBe(2882);
   });
 });
 
@@ -342,6 +380,9 @@ describe("reresolvePendingValue", () => {
   });
 
   it("passes non-pending values through untouched", () => {
-    expect(reresolvePendingValue({ campusId: 4, n: [1, 2] }, emptyState("h"))).toEqual({ campusId: 4, n: [1, 2] });
+    expect(reresolvePendingValue({ campusId: 4, n: [1, 2] }, emptyState("h"))).toEqual({
+      campusId: 4,
+      n: [1, 2],
+    });
   });
 });

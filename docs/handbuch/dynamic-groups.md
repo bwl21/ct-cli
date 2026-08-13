@@ -6,7 +6,7 @@ sources:
   - src/engine/dynamic.ts
   - src/engine/synthetic.ts
   - src/commands/adopt-group.ts
-sources_hash: 785c613f106cbd8a
+sources_hash: 3fe32a405c9a8b4f
 reviewed: 2026-08-10
 ---
 
@@ -120,7 +120,7 @@ no-op — it does not re-`PUT` on every apply). Two equivalent ways to author it
   Simple marker `kind`s carry a single `key` (the logical key / slug):
   `campus`, `group`, `group-type`. A **role** (`role.id`) uses the compound
   `group-type-role` marker instead — `{ "__ctRef": true, "kind":
-  "group-type-role", "groupType": "<group-type-key>", "role": "<role-name>" }` —
+"group-type-role", "groupType": "<group-type-key>", "role": "<role-name>" }` —
   because a ruleset's `role.id` is a **groupTypeRoleId** (a role scoped to a
   group type), and role names are not globally unique (see the table note
   below). See `ref` in `src/resolve/refs.ts`.
@@ -131,28 +131,29 @@ resolve against) can keep the plain number; you then own its per-environment
 correctness. This mirrors the permission scope escape hatch (#49): prefer a
 reference, fall back to a number where no managed key exists.
 
-#### Auto-rewrite on capture: `--portable-rulesets` (opt-in, #76)
+#### Auto-rewrite on capture (default since #101; was `--portable-rulesets`, #76)
 
-Rather than hand-editing markers into a freshly captured file, let adopt do it:
+Rather than hand-editing markers into a freshly captured file, adopt does it:
 
 ```sh
-ct adopt group <id> --with-dynamic --portable-rulesets
+ct adopt group <id> --with-dynamic                          # portablized (the default)
+ct adopt group <id> --with-dynamic --no-portable-rulesets   # verbatim, this host's ids
 ```
 
-With the flag, `ct adopt group --with-dynamic` runs the captured (normalized)
+`ct adopt group --with-dynamic` runs the captured (normalized)
 ruleset through `portablizeRuleset` (`src/config/query-refs.ts`) before writing
 `rulesets/<key>.json`: every numeric id sitting in a known ChurchQuery `var`
 position that maps to a **managed** logical key is rewritten to its `{ __ctRef }`
 marker; every other id is left numeric. The `var → RefKind` catalog it keys off
 (`VAR_REF_KINDS`) is:
 
-| ChurchQuery `var`      | marker `kind`      | source catalog / state          |
-| ---------------------- | ------------------ | ------------------------------- |
-| `ctgroup.id`           | `group`            | managed state (no REST catalog) |
-| `ctgroup.campusId`     | `campus`           | `/campuses`                     |
-| `person.campusId`      | `campus`           | `/campuses`                     |
-| `ctgroup.groupTypeId`  | `group-type`       | `/group/grouptypes`             |
-| `role.id`              | `group-type-role`  | `/group/roles` (by `groupTypeId` + name) |
+| ChurchQuery `var`     | marker `kind`     | source catalog / state                   |
+| --------------------- | ----------------- | ---------------------------------------- |
+| `ctgroup.id`          | `group`           | managed state (no REST catalog)          |
+| `ctgroup.campusId`    | `campus`          | `/campuses`                              |
+| `person.campusId`     | `campus`          | `/campuses`                              |
+| `ctgroup.groupTypeId` | `group-type`      | `/group/grouptypes`                      |
+| `role.id`             | `group-type-role` | `/group/roles` (by `groupTypeId` + name) |
 
 The same `group-type-role` rewrite also covers the **out-of-query** integer
 field `process.*.handleMembership.groupTypeRoleId` (the target role a
@@ -173,21 +174,55 @@ marker carries the group-type key + role name, and the resolver picks the one
 name slugs to the role. This corrects the earlier `role-def` mapping (#86),
 which was unresolvable on the real instance.
 
-The flag is **default OFF**: auto-rewriting an id you _thought_ was managed would
-silently change query semantics, so you opt in per invocation. Ids that don't map
-to a managed key (an operational group outside the scaffold, or the catalog-less
-`ctgroup.groupStatusId`, #67) stay numeric — the escape hatch — and adopt emits a
-warning naming the file:
+#### What could not be portablized is REPORTED, never swallowed (#101)
+
+Portablization only rewrites references to targets it can resolve. Anything
+pointing at an unmanaged target keeps its raw numeric id — the escape hatch —
+and that is the dangerous half, because **ChurchTools treats a ruleset as opaque
+JSON and does not validate the ids inside it.** A ruleset carrying prod's
+`ctgroup.id` applied to dev does not error: the auto-group simply collects the
+wrong people, or nobody, and `ct plan` stays green because the ruleset
+round-trips byte-identically against the host it was written for. That is
+materially worse than a wrong permission scope, because an auto-group's payload
+IS group membership — which is what carries grants.
+
+So every id left numeric is named, with its reason, **both at capture and at
+plan time**.
+
+At **capture** time (`ct adopt … --with-dynamic`) the state file and the
+`/group/roles` catalog are both in hand, so the reason is a checked fact:
 
 ```text
-! left 2 unmanaged id(s) numeric in jugend.json — operational/unmanaged refs, not portable (escape hatch)
+! rulesets/jugend.json keeps 3 host-specific id(s) — NOT portable to another host:
+    ctgroup.id: 1246 left numeric — not under management — `ct adopt group <id>` for each (then re-adopt) makes them portable
+    ctgroup.groupStatusId: 1, 2 left numeric — group statuses have no REST catalog (#67) — no logical form exists
 ```
 
-> **Interim caveat (when NOT using `--portable-rulesets`):** applying a
-> raw-id prod snapshot to a _different_ environment is mechanically fine (CT
-> accepts it; unknown ids → empty matches) but **semantically wrong** for that
-> environment's memberships. Treat it as a known, documented gap — not a silent
-> one — when rehearsing prod configs against dev.
+At **plan** time the same scan runs over every declared dynamic group, but with
+no state, no catalogs and no network — it can prove that an id sits in an entity
+position and nothing more. So it says exactly that, rather than asserting a
+reason it never checked:
+
+```text
+! dynamic group "jugend": ruleset carries 1 host-specific id(s) — not portable to another instance:
+    ctgroup.id: 1246 left numeric — host-specific id(s) frozen into a cross-host ruleset — re-adopt the group with `--with-dynamic` to rewrite them into logical references (it reports what, if anything, blocks each)
+```
+
+The capture-time reasons are distinct because the fixes are: an **unmanaged**
+target (adopt it), a **role unknown to `/group/roles`**, a role whose **group
+type is unmanaged**, or a dimension with **no logical form at all**
+(`ctgroup.groupStatusId` — group statuses have no REST catalog, #67; this one
+needs no lookup, so the plan-time scan reports it too).
+
+**`--strict-rulesets`** turns the warning into a refusal: adopt writes nothing
+if the ruleset would still contain a host-specific id. Use it in a repo that has
+decided every ruleset must be portable.
+
+> **Caveat when using `--no-portable-rulesets`:** applying a raw-id prod
+> snapshot to a _different_ environment is mechanically fine (CT accepts it;
+> unknown ids → empty matches) but **semantically wrong** for that environment's
+> memberships. Adopt says so once per file; treat it as a known, documented gap —
+> not a silent one — when rehearsing prod configs against dev.
 
 ### The `RuleSet` shape
 
@@ -324,11 +359,35 @@ actually changed in this run.
 ct apply --refresh
 ```
 
-This is deliberately **per-group only** (`refreshChangedDynamicGroups` in
-`src/commands/apply.ts`) — the all-groups `/dynamicgroups/refresh` endpoint
-has a huge blast radius and is never called from here. A change to one
-group's ruleset never triggers a recompute of every dynamic group in the
-instance.
+This is deliberately **per-group only** — the all-groups
+`/dynamicgroups/refresh` endpoint has a huge blast radius and is never called
+from here. A change to one group's ruleset never triggers a recompute of every
+dynamic group in the instance.
+
+### `ct refresh` — re-evaluate a group that did NOT change (#105)
+
+`ct apply --refresh` only covers groups changed in that run, so it cannot
+re-evaluate an existing group and does nothing at all on a no-op plan. That
+leaves no lever for the most common confusion of all: **a freshly created
+auto-group is legitimately empty after a green apply**, because ChurchTools
+materializes membership on its own schedule. `ct apply` now says so in its
+output rather than leaving you to guess whether the ruleset is wrong.
+
+```bash
+ct refresh --env prod --group jugend   # one managed dynamic group
+ct refresh --env prod --all            # every managed dynamic group
+```
+
+`--all` is required to fan out — refreshing recomputes membership, so it is
+never the default. `ct refresh` only ever touches **managed** groups, refuses a
+group that has no ruleset on this host (rather than POSTing into a 404), and
+keeps going after a per-group failure (exiting non-zero).
+
+> **The scheduler ping is NOT fired by `ct`.** ChurchTools' admin cron page hits
+> `GET https://<host>/?q=cron&standby=true`, which runs **every due scheduled
+> job on the instance** — far beyond auto-groups. It is documented in
+> [`docs/runbook-manual-surface.md`](https://github.com/eqrm/ct-cli/blob/main/docs/runbook-manual-surface.md) as a manual
+> escape hatch; `ct` deliberately never calls it.
 
 ## Full example
 

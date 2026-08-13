@@ -12,11 +12,22 @@ export default (ct) => {
   // Hierarchy is opt-in and multi-parent: `parents` are managed group keys, each declared
   // in this config. Omit it to leave a group's hierarchy unmanaged; edges to unmanaged
   // groups stay invisible. (`parent:` is unrelated — an ordering hint only, not hierarchy.)
-  ct.group({ key: "mainz_kids_lead", name: "Mainz · Kids Leitung", groupType: "ministry_team", parents: ["mainz_area"] });
+  ct.group({
+    key: "mainz_kids_lead",
+    name: "Mainz · Kids Leitung",
+    groupType: "ministry_team",
+    parents: ["mainz_area"],
+  });
   // Assign a group to a campus BY KEY: `campus: "mainz"` links to the campus above even though
   // it is created in the same apply (its id is filled in at apply time). The numeric escape
   // hatch still works — `campusId: 3` (or `campusId: null` to clear) targets an existing id.
-  ct.group({ key: "mainz_kids", name: "Mainz · Kids", groupType: "ministry_team", campus: "mainz", parents: ["mainz_kids_lead"] });
+  ct.group({
+    key: "mainz_kids",
+    name: "Mainz · Kids",
+    groupType: "ministry_team",
+    campus: "mainz",
+    parents: ["mainz_kids_lead"],
+  });
 };
 ```
 

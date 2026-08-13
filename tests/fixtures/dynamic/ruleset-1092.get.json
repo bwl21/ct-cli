@@ -7,9 +7,7 @@
     "query": {
       "method": "ChurchQuery",
       "params": {
-        "groupBy": [
-          "person.id"
-        ],
+        "groupBy": ["person.id"],
         "filter": {
           "and": [
             {
@@ -29,9 +27,7 @@
                 {
                   "dterm": [
                     {
-                      "stereotype": [
-                        "groupmembership"
-                      ],
+                      "stereotype": ["groupmembership"],
                       "title": "Mitgliedschaft in einer Gruppe"
                     },
                     {
@@ -43,9 +39,7 @@
                                 {
                                   "var": "ctgroup.groupStatusId"
                                 },
-                                [
-                                  1
-                                ]
+                                [1]
                               ]
                             },
                             {
@@ -53,10 +47,7 @@
                                 {
                                   "var": "ctgroup.id"
                                 },
-                                [
-                                  "112",
-                                  "8"
-                                ]
+                                ["112", "8"]
                               ]
                             }
                           ]
@@ -68,12 +59,7 @@
                                 {
                                   "var": "role.id"
                                 },
-                                [
-                                  "84",
-                                  "85",
-                                  "17",
-                                  "16"
-                                ]
+                                ["84", "85", "17", "16"]
                               ]
                             }
                           ]
@@ -85,9 +71,7 @@
                 {
                   "dterm": [
                     {
-                      "stereotype": [
-                        "groupmembership"
-                      ],
+                      "stereotype": ["groupmembership"],
                       "title": "Mitgliedschaft in einer Gruppe"
                     },
                     {
@@ -99,9 +83,7 @@
                                 {
                                   "var": "ctgroup.groupStatusId"
                                 },
-                                [
-                                  1
-                                ]
+                                [1]
                               ]
                             },
                             {
@@ -109,9 +91,7 @@
                                 {
                                   "var": "ctgroup.id"
                                 },
-                                [
-                                  "1246"
-                                ]
+                                ["1246"]
                               ]
                             }
                           ]
@@ -123,10 +103,7 @@
                                 {
                                   "var": "role.id"
                                 },
-                                [
-                                  "16",
-                                  "17"
-                                ]
+                                ["16", "17"]
                               ]
                             }
                           ]
@@ -140,11 +117,7 @@
           ]
         },
         "primaryEntityAlias": "person",
-        "responseFields": [
-          "person.id",
-          "person.firstName",
-          "person.lastName"
-        ]
+        "responseFields": ["person.id", "person.firstName", "person.lastName"]
       }
     },
     "process": {

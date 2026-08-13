@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { normalizeRuleset, stripCosmeticLabels, coerceScalars, normalizeDynamic, putRulesetBody } from "../src/engine/dynamic.js";
+import {
+  normalizeRuleset,
+  stripCosmeticLabels,
+  coerceScalars,
+  normalizeDynamic,
+  putRulesetBody,
+} from "../src/engine/dynamic.js";
 
 describe("stripCosmeticLabels", () => {
   it("unwraps a dterm with a string label to its expr, recursively", () => {
@@ -8,41 +14,49 @@ describe("stripCosmeticLabels", () => {
     expect(stripCosmeticLabels(input)).toEqual({ and: [{ "==": [{ var: "ctgroup.campusId" }, 1] }] });
   });
   it("unwraps a dterm with an object label (title/stereotype/i18n key)", () => {
-    const input = { dterm: [{ title: "group.x.title", stereotype: ["groupmembership"] }, { isnull: [{ var: "person.dateOfDeath" }] }] };
+    const input = {
+      dterm: [
+        { title: "group.x.title", stereotype: ["groupmembership"] },
+        { isnull: [{ var: "person.dateOfDeath" }] },
+      ],
+    };
     expect(stripCosmeticLabels(input)).toEqual({ isnull: [{ var: "person.dateOfDeath" }] });
   });
 });
 
 describe("coerceScalars", () => {
   it("coerces numeric strings to numbers so int/string drift is not spurious", () => {
-    expect(coerceScalars({ "==": [{ var: "ctgroup.campusId" }, "1"] }))
-      .toEqual({ "==": [{ var: "ctgroup.campusId" }, 1] });
+    expect(coerceScalars({ "==": [{ var: "ctgroup.campusId" }, "1"] })).toEqual({
+      "==": [{ var: "ctgroup.campusId" }, 1],
+    });
   });
   it("coerces numeric strings inside oneof arrays but leaves non-numeric strings", () => {
-    expect(coerceScalars({ oneof: [{ var: "ctgroup.id" }, ["112", "8"]] }))
-      .toEqual({ oneof: [{ var: "ctgroup.id" }, [112, 8]] });
-    expect(coerceScalars({ "==": [{ var: "groupmember.groupMemberStatus" }, "active"] }))
-      .toEqual({ "==": [{ var: "groupmember.groupMemberStatus" }, "active"] });
+    expect(coerceScalars({ oneof: [{ var: "ctgroup.id" }, ["112", "8"]] })).toEqual({
+      oneof: [{ var: "ctgroup.id" }, [112, 8]],
+    });
+    expect(coerceScalars({ "==": [{ var: "groupmember.groupMemberStatus" }, "active"] })).toEqual({
+      "==": [{ var: "groupmember.groupMemberStatus" }, "active"],
+    });
   });
   it("leaves leading-zero and >2^53 numeric strings as strings (no corruption, no precision loss)", () => {
     // A leading-zero zip code is a semantic string; parseInt would drop the zero and break the compare.
-    expect(coerceScalars({ "==": [{ var: "person.zip" }, "01067"] }))
-      .toEqual({ "==": [{ var: "person.zip" }, "01067"] });
+    expect(coerceScalars({ "==": [{ var: "person.zip" }, "01067"] })).toEqual({
+      "==": [{ var: "person.zip" }, "01067"],
+    });
     // A digit string beyond MAX_SAFE_INTEGER can't be represented exactly — must stay a string.
     const big = "90071992547409910"; // > 2^53
-    expect(coerceScalars({ "==": [{ var: "x.id" }, big] }))
-      .toEqual({ "==": [{ var: "x.id" }, big] });
+    expect(coerceScalars({ "==": [{ var: "x.id" }, big] })).toEqual({ "==": [{ var: "x.id" }, big] });
     // Canonical ints still coerce, so a 5 vs "5" int/string pair keeps diffing equal.
-    expect(coerceScalars({ "==": [{ var: "x.n" }, "5"] }))
-      .toEqual({ "==": [{ var: "x.n" }, 5] });
-    expect(coerceScalars({ "==": [{ var: "x.n" }, "0"] }))
-      .toEqual({ "==": [{ var: "x.n" }, 0] });
+    expect(coerceScalars({ "==": [{ var: "x.n" }, "5"] })).toEqual({ "==": [{ var: "x.n" }, 5] });
+    expect(coerceScalars({ "==": [{ var: "x.n" }, "0"] })).toEqual({ "==": [{ var: "x.n" }, 0] });
   });
 });
 
 describe("normalizeRuleset", () => {
   it("drops read-only timestamps and the PUT envelope, and is idempotent", () => {
-    const withEnvelope = { dynamicGroupRuleSet: { description: "x", dynamicGroupUpdateStarted: "t", process: {}, query: {} } };
+    const withEnvelope = {
+      dynamicGroupRuleSet: { description: "x", dynamicGroupUpdateStarted: "t", process: {}, query: {} },
+    };
     const once = normalizeRuleset(withEnvelope);
     expect(once).not.toHaveProperty("dynamicGroupUpdateStarted");
     expect(once).not.toHaveProperty("dynamicGroupRuleSet");
@@ -55,16 +69,25 @@ describe("normalizeRuleset", () => {
   });
 
   it("coerces filter operands but leaves numeric-looking RuleSet-level fields as strings", () => {
-    const r = { description: "2024", shorty: "007", personIdFieldName: "person.id",
-      query: { "==": [{ var: "ctgroup.id" }, "112"] }, process: {} };
+    const r = {
+      description: "2024",
+      shorty: "007",
+      personIdFieldName: "person.id",
+      query: { "==": [{ var: "ctgroup.id" }, "112"] },
+      process: {},
+    };
     const out = normalizeRuleset(r);
     expect(out.description).toBe("2024"); // stays a string, not 2024
-    expect(out.shorty).toBe("007");       // stays a string, not 7
+    expect(out.shorty).toBe("007"); // stays a string, not 7
     expect(out.query).toEqual({ "==": [{ var: "ctgroup.id" }, 112] }); // filter operand coerced
   });
 
   it("round-trips a leading-zero query leaf byte-identical (no retype on write-back)", () => {
-    const authored = { description: "Zip filter", query: { "==": [{ var: "person.zip" }, "01067"] }, process: {} };
+    const authored = {
+      description: "Zip filter",
+      query: { "==": [{ var: "person.zip" }, "01067"] },
+      process: {},
+    };
     const once = normalizeRuleset(authored);
     // The zip leaf survives normalization untouched — apply PUTs `to.ruleset`, so any retype here
     // would be written back to CT and silently break the JSONLogic string comparison.
@@ -76,8 +99,8 @@ describe("normalizeRuleset", () => {
     for (const name of ["ruleset-683", "ruleset-2022", "ruleset-1092"]) {
       const raw = JSON.parse(readFileSync(`tests/fixtures/dynamic/${name}.get.json`, "utf8")); // array shape
       const once = normalizeRuleset(raw);
-      expect(normalizeRuleset(once)).toEqual(once);                 // idempotent
-      expect(JSON.stringify(once)).not.toContain("dterm");          // cosmetic labels stripped
+      expect(normalizeRuleset(once)).toEqual(once); // idempotent
+      expect(JSON.stringify(once)).not.toContain("dterm"); // cosmetic labels stripped
     }
   });
 });

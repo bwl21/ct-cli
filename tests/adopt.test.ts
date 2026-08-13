@@ -4,10 +4,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const fakeCampus: Record<string, unknown> = { id: 0, name: "Mainz", shorty: "MZ" };
-const getMock = vi.fn(async (): Promise<Record<string, unknown>> => fakeCampus);
+const getMock = vi.fn(async (...args: [string?]): Promise<Record<string, unknown>> => {
+  void args;
+  return fakeCampus;
+});
+// The ReverseResolver reads its master-data catalogs through `getAll` (#101): a plain `get` returns
+// only CT's default first page, which silently truncated every id→key map on a real instance.
+const getAllMock = vi.fn(async (path: string): Promise<{ data: unknown[] }> => {
+  const single = await getMock(path);
+  return { data: Array.isArray(single) ? single : [single] };
+});
 
 vi.mock("../src/api/session.js", () => ({
-  authedSession: vi.fn(async () => ({ client: { get: getMock }, me: { id: 1 } })),
+  authedSession: vi.fn(async () => ({ client: { get: getMock, getAll: getAllMock }, me: { id: 1 } })),
 }));
 
 const { adoptCommand } = await import("../src/commands/adopt.js");

@@ -4,7 +4,7 @@ sources:
   - src/config/context.ts
   - src/engine/graph.ts
   - src/engine/hierarchy.ts
-sources_hash: e1bc9429a635e819
+sources_hash: 0124644b70452450
 reviewed: 2026-08-13
 ---
 
@@ -48,7 +48,7 @@ language, no generated files, just a function called twice.
 
 Link a group to a campus **by key** — `campus: "mainz"` (or, when the campus key
 is a loop variable, `campus`) — and the per-host resolver fills in the id (#20).
-When the blueprint *creates* the campus in the same apply, its id is unknown at
+When the blueprint _creates_ the campus in the same apply, its id is unknown at
 eval time, so the resolver marks the link **pending** and writes the
 freshly-created id at apply time (tier ordering creates the campus first). `ct
 plan` renders it as `campusId = <campus:mainz (created this apply)>`.
@@ -92,7 +92,7 @@ export default (ct: ConfigContext): void => {
 
 `${campus}_kids_lead`, `${campus}_kids_0_3`, `${campus}_kids_checkin`, and so
 on give every campus's copy of the structure its own non-colliding key
-namespace, while the *shape* (lead group + N ministry teams) stays defined
+namespace, while the _shape_ (lead group + N ministry teams) stays defined
 once in `kidsArea`. Add a third campus to `CAMPUSES` and the same function
 produces a third, fully independent structure — no changes to `kidsArea`
 itself.
@@ -112,7 +112,11 @@ that call), never at Mainz's tree:
 function kidsArea(ct: ConfigContext, campus: string): void {
   const lead = `${campus}_kids_lead`;
   ct.group({ key: lead, name: `${campus} · Kids Leitung`, groupTypeId: 2, parents: [] });
-  for (const [suffix, label] of [["0_3", "0–3"], ["4_6", "4–6"], ["checkin", "Check-in"]] as const) {
+  for (const [suffix, label] of [
+    ["0_3", "0–3"],
+    ["4_6", "4–6"],
+    ["checkin", "Check-in"],
+  ] as const) {
     ct.group({
       key: `${campus}_kids_${suffix}`,
       name: `${campus} · Kids ${label}`,
@@ -198,7 +202,7 @@ A blueprint doesn't need to worry about sequencing:
   `${campus}_kids_0_3`/`_4_6`/`_checkin`/`_all` — the topological sort
   guarantees it structurally, not by declaration order.
 - **Hierarchy and auto-group state ride along with their group.** `parents`
-  and `dynamic` are *synthetic fields* on the `group` resource itself (see
+  and `dynamic` are _synthetic fields_ on the `group` resource itself (see
   `SYNTHETIC_FIELDS` in [`src/engine/synthetic.ts`](https://github.com/eqrm/ct-cli/blob/main/src/engine/synthetic.ts)),
   not separate resources with their own tier — they're diffed and applied as
   part of that same group's create/update, once the group (and, for
@@ -224,7 +228,7 @@ beyond the `parents: [lead]` you'd write anyway.
 any plan or diff is computed (`validateReferences` in
 [`src/config/context.ts`](https://github.com/eqrm/ct-cli/blob/main/src/config/context.ts), run by
 `evaluateConfig`). Every key listed in a `parents` array must resolve to a
-`group` declared *somewhere in the same config* — including inside a
+`group` declared _somewhere in the same config_ — including inside a
 blueprint function called from the top-level export. A typo, a forgotten
 `kidsArea(ct, campus)` call, or a `parents` key pointing at a non-group
 resource throws immediately:

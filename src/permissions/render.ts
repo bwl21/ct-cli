@@ -13,9 +13,7 @@ import { refLabel } from "../resolve/refs.js";
  * resource pending-ref rendering (src/engine/render.ts). Its real id is filled in at apply time.
  */
 function fmtDomain(item: PermissionPlanItem): string {
-  return item.pendingDomain
-    ? `<${refLabel(item.pendingDomain)} (created this apply)>`
-    : `#${item.domainId}`;
+  return item.pendingDomain ? `<${refLabel(item.pendingDomain)} (created this apply)>` : `#${item.domainId}`;
 }
 
 function fmtTuple(t: GrantTuple): string {
@@ -29,27 +27,34 @@ function fmtTuple(t: GrantTuple): string {
 }
 
 export function renderPermissionPlan(items: PermissionPlanItem[]): string {
-  const changed = items.filter((i) => i.diff.toPut.length > 0 || i.diff.toDelete.length > 0);
+  // A `preserveUnknown` item can have an EMPTY diff and still deserve a line (#102): the whole point
+  // of the opt-in is that "I deliberately left the module grants alone" is visible, and it would not
+  // be if a role whose only interesting property is 41 preserved grants rendered as nothing at all.
+  const changed = items.filter(
+    (i) => i.diff.toPut.length > 0 || i.diff.toDelete.length > 0 || i.diff.preservedUnknown.length > 0,
+  );
 
   if (changed.length === 0) {
     const preserved = items.reduce((n, i) => n + i.diff.preserved.length, 0);
-    const suffix = preserved > 0
-      ? ` (${preserved} pre-existing deny row(s) left untouched.)`
-      : "";
+    const suffix = preserved > 0 ? ` (${preserved} pre-existing deny row(s) left untouched.)` : "";
     return pc.green(`No permission changes. Desired grants match ChurchTools.${suffix}`);
   }
 
   const lines: string[] = [];
   let totalGrant = 0;
   let totalRevoke = 0;
+  let totalPreserved = 0;
 
   for (const item of changed) {
     const grantCount = item.diff.toPut.length;
     const revokeCount = item.diff.toDelete.length;
+    const preservedCount = item.diff.preservedUnknown.length;
     totalGrant += grantCount;
     totalRevoke += revokeCount;
+    totalPreserved += preservedCount;
+    const preservedNote = preservedCount > 0 ? `, ${pc.dim(`~${preservedCount} preserved`)}` : "";
     lines.push(
-      `  ${item.domainType} ${fmtDomain(item)} (${item.key}): ${pc.green(`+${grantCount} grant(s)`)}, ${pc.red(`-${revokeCount} remove(s)`)}`,
+      `  ${item.domainType} ${fmtDomain(item)} (${item.key}): ${pc.green(`+${grantCount} grant(s)`)}, ${pc.red(`-${revokeCount} remove(s)`)}${preservedNote}`,
     );
     for (const t of item.diff.toPut) {
       lines.push(`      ${pc.green("+")} ${fmtTuple(t)}`);
@@ -57,12 +62,20 @@ export function renderPermissionPlan(items: PermissionPlanItem[]): string {
     for (const t of item.diff.toDelete) {
       lines.push(`      ${pc.red("-")} ${fmtTuple(t)}`);
     }
+    for (const t of item.diff.preservedUnknown) {
+      lines.push(`      ${pc.dim(`~ ${fmtTuple(t)} (preserved, not managed — preserveUnknown)`)}`);
+    }
     for (const t of item.diff.preserved) {
       lines.push(`      ${pc.dim(`~ ${fmtTuple(t)} (pre-existing deny — left untouched)`)}`);
     }
   }
 
   lines.push("");
-  lines.push(pc.bold(`Permission plan: ${totalGrant} to grant, ${totalRevoke} to remove.`));
+  // Preserved grants are counted separately and never folded into the change totals: they are
+  // explicitly what apply will NOT do.
+  const preservedSummary = totalPreserved > 0 ? `, ${totalPreserved} preserved (not managed)` : "";
+  lines.push(
+    pc.bold(`Permission plan: ${totalGrant} to grant, ${totalRevoke} to remove${preservedSummary}.`),
+  );
   return lines.join("\n");
 }

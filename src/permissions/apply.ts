@@ -22,7 +22,9 @@ function body(t: GrantTuple): Record<string, unknown> {
   if (t.pending) {
     // A pending tuple's dataId is unknown until it is re-resolved against post-execute state.
     // Reaching here means re-resolution was skipped — refuse rather than emit a silent GLOBAL grant.
-    throw new Error(`Grant scoped to "${t.scopeKey}" was not re-resolved before apply — refusing to write it without a dataId.`);
+    throw new Error(
+      `Grant scoped to "${t.scopeKey}" was not re-resolved before apply — refusing to write it without a dataId.`,
+    );
   }
   const b: Record<string, unknown> = { authId: t.authId, type: t.type };
   if (t.dataId.length) b.dataId = t.dataId; // omit when unscoped

@@ -9,13 +9,13 @@ dynamic groups and field definitions behave, independent of any one instance.
 These pages are published into a wider ChurchTools Handbuch, so they carry
 `sources:` frontmatter and are gated by the staleness checker (#89).
 
-| Page | About |
-| --- | --- |
-| [`handbuch/index.md`](handbuch/index.md) | Section overview |
-| [`handbuch/permissions.md`](handbuch/permissions.md) | Grant domains, `domainId` semantics, scope resolution |
-| [`handbuch/dynamic-groups.md`](handbuch/dynamic-groups.md) | Auto-groups, the ChurchQuery DSL, portable rulesets |
+| Page                                                             | About                                                         |
+| ---------------------------------------------------------------- | ------------------------------------------------------------- |
+| [`handbuch/index.md`](handbuch/index.md)                         | Section overview                                              |
+| [`handbuch/permissions.md`](handbuch/permissions.md)             | Grant domains, `domainId` semantics, scope resolution         |
+| [`handbuch/dynamic-groups.md`](handbuch/dynamic-groups.md)       | Auto-groups, the ChurchQuery DSL, portable rulesets           |
 | [`handbuch/field-definitions.md`](handbuch/field-definitions.md) | Person master data, security levels, custom-field definitions |
-| [`handbuch/blueprints.md`](handbuch/blueprints.md) | Parametrized, reusable structure |
+| [`handbuch/blueprints.md`](handbuch/blueprints.md)               | Parametrized, reusable structure                              |
 
 **A page publishes only if it lives under `handbuch/` and is reachable from
 `handbuch/mkdocs.yml`'s nav.** Everything else in `docs/` stays invisible.
@@ -48,9 +48,9 @@ A page with no code behaviour to track declares `sources: []` plus a
 
 ## Everything else — developer- and operator-facing, unpublished
 
-| Page | About |
-| --- | --- |
-| [`api-coverage.md`](api-coverage.md) | Which ChurchTools endpoints support which CRUD verbs |
-| [`group-field-decisions.md`](group-field-decisions.md) | Which group fields are managed vs. left to the CT UI, and why |
+| Page                                                     | About                                                                 |
+| -------------------------------------------------------- | --------------------------------------------------------------------- |
+| [`api-coverage.md`](api-coverage.md)                     | Which ChurchTools endpoints support which CRUD verbs                  |
+| [`group-field-decisions.md`](group-field-decisions.md)   | Which group fields are managed vs. left to the CT UI, and why         |
 | [`runbook-manual-surface.md`](runbook-manual-surface.md) | What `ct` cannot automate — API gaps and the manual steps around them |
-| `superpowers/` | Historical implementation plans; kept as a record, never published |
+| `superpowers/`                                           | Historical implementation plans; kept as a record, never published    |

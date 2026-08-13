@@ -20,11 +20,11 @@ each page marks explicitly what was **verified** and what is still an
 
 ## Where each kind of documentation lives
 
-| Layer | Repo | Example |
-| --- | --- | --- |
-| **Generic ChurchTools behaviour** | `ct-cli` `docs/handbuch/` (these pages) | "A `group_type_role` grant reaches every group of that type" |
-| **One instance's structure** | that organisation's private config repo, `docs/` | "Which Bereiche exist here and why" |
-| **Tool-specific how-tos** | the relevant tool's own Handbuch | "How to run check-in" |
+| Layer                             | Repo                                             | Example                                                      |
+| --------------------------------- | ------------------------------------------------ | ------------------------------------------------------------ |
+| **Generic ChurchTools behaviour** | `ct-cli` `docs/handbuch/` (these pages)          | "A `group_type_role` grant reaches every group of that type" |
+| **One instance's structure**      | that organisation's private config repo, `docs/` | "Which Bereiche exist here and why"                          |
+| **Tool-specific how-tos**         | the relevant tool's own Handbuch                 | "How to run check-in"                                        |
 
 ## The pages
 
@@ -36,13 +36,13 @@ each page marks explicitly what was **verified** and what is still an
   ruleset/status model, the typed ChurchQuery DSL, how membership recompute is
   triggered, and how a captured ruleset is made portable across instances.
 - **[Field definitions](field-definitions.md)** — the person master-data model,
-  security levels, and person/group custom-field *definitions*: what is readable
+  security levels, and person/group custom-field _definitions_: what is readable
   over REST, what is writable, and where the boundary to per-record values runs.
 - **[Blueprints](blueprints.md)** — describing a repeated structure (e.g. one
   campus's area scaffold) once and instantiating it per campus.
 
 !!! note "Language"
-    These pages are English while the rest of the Handbuch is German. That is a
-    known, deliberate mismatch — they are placed here first and translated (or
-    relocated) by the follow-on content work; see
-    [ct-cli#89](https://github.com/eqrm/ct-cli/issues/89).
+These pages are English while the rest of the Handbuch is German. That is a
+known, deliberate mismatch — they are placed here first and translated (or
+relocated) by the follow-on content work; see
+[ct-cli#89](https://github.com/eqrm/ct-cli/issues/89).

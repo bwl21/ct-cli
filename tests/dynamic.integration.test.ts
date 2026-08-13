@@ -111,7 +111,10 @@ describe.runIf(live && liveWrite)("dynamic ruleset round-trip pin (#36, live wri
       const changedFields = [...allFields].filter((f) => !isDeepStrictEqual(wantNorm[f], gotNorm[f]));
       if (changedFields.length > 0) {
         const detail = changedFields
-          .map((f) => `  ${f}:\n    authored: ${JSON.stringify(wantNorm[f])}\n    returned: ${JSON.stringify(gotNorm[f])}`)
+          .map(
+            (f) =>
+              `  ${f}:\n    authored: ${JSON.stringify(wantNorm[f])}\n    returned: ${JSON.stringify(gotNorm[f])}`,
+          )
           .join("\n");
         throw new Error(
           `CT rewrote ${changedFields.length} RuleSet field(s) on PUT — extend normalizeRuleset ` +
@@ -127,13 +130,15 @@ describe.runIf(live && liveWrite)("dynamic ruleset round-trip pin (#36, live wri
       // "manual" (e.g. the committed fixture at tests/fixtures/dynamic/status.get.json is "active").
       // This test only ever writes the ruleset (never a status PUT), so reading the live status here
       // isolates exactly the #36 property under test — ruleset field rewriting — from status drift.
-      const liveStatus = (
-        await client.get<{ dynamicGroupStatus?: string }>(`/dynamicgroups/${GID}/status`)
-      )?.dynamicGroupStatus ?? "none";
+      const liveStatus =
+        (await client.get<{ dynamicGroupStatus?: string }>(`/dynamicgroups/${GID}/status`))
+          ?.dynamicGroupStatus ?? "none";
       const state: State = {
         version: 1,
         host: expectedHost,
-        resources: { pin36: { type: "group", id: GID, key: "pin36", fields: {}, adoptedAt: "t", updatedAt: "t" } },
+        resources: {
+          pin36: { type: "group", id: GID, key: "pin36", fields: {}, adoptedAt: "t", updatedAt: "t" },
+        },
       };
       const actual = new Map<string, Record<string, unknown>>([["pin36", {}]]);
       const desired: DesiredResource[] = [
@@ -150,7 +155,10 @@ describe.runIf(live && liveWrite)("dynamic ruleset round-trip pin (#36, live wri
       const dynamicChange = diffFields(folded.desired[0]!.fields, actual.get("pin36")!).find(
         (c) => c.field === "dynamic",
       );
-      expect(dynamicChange, `plan is not a no-op after the PUT: ${JSON.stringify(dynamicChange)}`).toBeUndefined();
+      expect(
+        dynamicChange,
+        `plan is not a no-op after the PUT: ${JSON.stringify(dynamicChange)}`,
+      ).toBeUndefined();
     } finally {
       // Restore the prior ruleset so the dev instance isn't left mutated by this test.
       await client.request("PUT", `/dynamicgroups/${GID}/ruleset`, putRulesetBody(normalizeRuleset(before)));

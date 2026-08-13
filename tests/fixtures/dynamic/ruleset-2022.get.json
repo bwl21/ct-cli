@@ -7,9 +7,7 @@
     "query": {
       "method": "ChurchQuery",
       "params": {
-        "groupBy": [
-          "person.id"
-        ],
+        "groupBy": ["person.id"],
         "filter": {
           "and": [
             {
@@ -42,9 +40,7 @@
             {
               "dterm": [
                 {
-                  "stereotype": [
-                    "groupmembership"
-                  ],
+                  "stereotype": ["groupmembership"],
                   "title": "Mitgliedschaft in einer Gruppe"
                 },
                 {
@@ -56,9 +52,7 @@
                             {
                               "var": "ctgroup.groupStatusId"
                             },
-                            [
-                              1
-                            ]
+                            [1]
                           ]
                         },
                         {
@@ -87,9 +81,7 @@
                                         {
                                           "var": "ctgroup.id"
                                         },
-                                        [
-                                          "1869"
-                                        ]
+                                        ["1869"]
                                       ]
                                     }
                                   ]
@@ -115,12 +107,7 @@
                             {
                               "var": "role.id"
                             },
-                            [
-                              "8",
-                              "9",
-                              "10",
-                              "92"
-                            ]
+                            ["8", "9", "10", "92"]
                           ]
                         },
                         {
@@ -140,11 +127,7 @@
           ]
         },
         "primaryEntityAlias": "person",
-        "responseFields": [
-          "person.id",
-          "person.firstName",
-          "person.lastName"
-        ]
+        "responseFields": ["person.id", "person.firstName", "person.lastName"]
       }
     },
     "process": {

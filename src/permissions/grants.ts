@@ -49,8 +49,12 @@ export interface GrantTuple {
   pending?: boolean;
 }
 export interface RawPermission {
-  authId: number; dataId: number | null; type: "grant" | "revoke"; domainId: number;
-  isInherited?: boolean; meta?: { modifiedPid?: number };
+  authId: number;
+  dataId: number | null;
+  type: "grant" | "revoke";
+  domainId: number;
+  isInherited?: boolean;
+  meta?: { modifiedPid?: number };
 }
 
 /**
@@ -59,8 +63,15 @@ export interface RawPermission {
  * and guarantees it can never collide with an actual row (actuals never carry a scopeKey), so it
  * always lands in `toPut`.
  */
-export function tupleKey(t: { authId: number; dataId: number[]; type: string; scopeKey?: string; pending?: boolean }): string {
-  const scope = t.pending && t.scopeKey != null ? `pending:${t.scopeKey}` : [...t.dataId].sort((a, b) => a - b).join(",");
+export function tupleKey(t: {
+  authId: number;
+  dataId: number[];
+  type: string;
+  scopeKey?: string;
+  pending?: boolean;
+}): string {
+  const scope =
+    t.pending && t.scopeKey != null ? `pending:${t.scopeKey}` : [...t.dataId].sort((a, b) => a - b).join(",");
   return `${t.type}:${t.authId}:${scope}`;
 }
 
@@ -68,7 +79,7 @@ export function normalizeActual(rows: RawPermission[]): GrantTuple[] {
   const out: GrantTuple[] = [];
   for (const r of rows) {
     if (r.meta?.modifiedPid === -1) continue; // system baseline — invisible to reconciliation
-    if (r.isInherited) continue;              // inherited — not directly owned here
+    if (r.isInherited) continue; // inherited — not directly owned here
     // dataId is [] or a single element (CT reads scoped grants back one row per dataId), so there is
     // nothing to sort here — and tupleKey sorts defensively anyway when it builds the identity key.
     out.push({ authId: r.authId, dataId: r.dataId == null ? [] : [r.dataId], type: r.type });
@@ -76,9 +87,31 @@ export function normalizeActual(rows: RawPermission[]): GrantTuple[] {
   return out;
 }
 
-export interface GrantDiff { toPut: GrantTuple[]; toDelete: GrantTuple[]; preserved: GrantTuple[] }
+export interface GrantDiff {
+  toPut: GrantTuple[];
+  toDelete: GrantTuple[];
+  preserved: GrantTuple[];
+  /**
+   * Live grants that WOULD have been revoked but were kept, because the declaration opted into
+   * `preserveUnknown` for their scope dimension (#102). Separate from {@link preserved} (pre-existing
+   * deny rows, which reconciliation never owned in the first place): these are grants this
+   * declaration COULD have owned and deliberately does not. Rendered explicitly — "I forgot one" and
+   * "I deliberately left the module grants alone" must never look alike in a plan.
+   */
+  preservedUnknown: GrantTuple[];
+}
 
-export function diffGrants(desired: GrantTuple[], actual: GrantTuple[]): GrantDiff {
+/**
+ * Decide whether a live grant absent from the declaration should be KEPT rather than revoked (#102).
+ * Built from a declaration's `preserveUnknown`; `undefined` means the strict default (revoke).
+ */
+export type PreservePredicate = (t: GrantTuple) => boolean;
+
+export function diffGrants(
+  desired: GrantTuple[],
+  actual: GrantTuple[],
+  preserveUnknown?: PreservePredicate,
+): GrantDiff {
   // Reconciliation owns only user-authored GRANT rows. `desiredTuples` only ever emits
   // `type: "grant"`, so an explicit deny row (`type: "revoke"`) has no desired counterpart and
   // would land in `toDelete` — silently removing an admin's deny. Treat non-grant rows as
@@ -88,6 +121,12 @@ export function diffGrants(desired: GrantTuple[], actual: GrantTuple[]): GrantDi
   const desiredKeys = new Map(desired.map((t) => [tupleKey(t), t]));
   const actualKeys = new Map(managedActual.map((t) => [tupleKey(t), t]));
   const toPut = [...desiredKeys].filter(([k]) => !actualKeys.has(k)).map(([, t]) => t);
-  const toDelete = [...actualKeys].filter(([k]) => !desiredKeys.has(k)).map(([, t]) => t);
-  return { toPut, toDelete, preserved };
+  const undeclared = [...actualKeys].filter(([k]) => !desiredKeys.has(k)).map(([, t]) => t);
+  // Opt-in partial ownership (#102). Without it, ONE live grant on a dimension this tool has no
+  // business managing (a wiki category, an HTML template) makes the whole role instance undeclarable,
+  // because a partial declaration turns a clean no-op into a destructive plan. The split happens here
+  // rather than upstream so `toDelete` keeps its exact meaning — "apply will revoke this".
+  const toDelete = preserveUnknown ? undeclared.filter((t) => !preserveUnknown(t)) : undeclared;
+  const preservedUnknown = preserveUnknown ? undeclared.filter((t) => preserveUnknown(t)) : [];
+  return { toPut, toDelete, preserved, preservedUnknown };
 }

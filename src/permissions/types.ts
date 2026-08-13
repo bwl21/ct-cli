@@ -14,10 +14,7 @@ import type { Ref } from "../resolve/refs.js";
  * (see `normalizeScopeEntry` in src/permissions/scope.ts), so `ref.campus("koblenz")` is identical.
  */
 export type ScopeSugar =
-  | { group: string }
-  | { campus: string }
-  | { groupType: string }
-  | { department: string };
+  { group: string } | { campus: string } | { groupType: string } | { department: string };
 
 /**
  * One entry of a scoped grant's `scope`:
@@ -33,6 +30,22 @@ export type ScopeEntry = string | number | Ref | ScopeSugar;
 
 export type Grant = string | { right: string; scope: ScopeEntry[] };
 
+/**
+ * Opt-in partial grant ownership (#102). A declaration normally OWNS its domain outright: every live
+ * grant absent from `grants` is revoked. That is the right default and stays the default — but it also
+ * means one unmanageable grant makes a whole role instance undeclarable, and on a real instance the
+ * blocker is usually module data (calendar categories, HTML templates, wiki categories) sitting next
+ * to perfectly expressible structural grants.
+ *
+ *  - `true`       — keep every live grant this declaration does not mention.
+ *  - `string[]`   — keep them only on these scope dimensions (`scopeField`s). The narrow form, and the
+ *                   one worth reaching for: an unexpected new grant on a dimension you DO manage still
+ *                   shows up as drift instead of being swallowed.
+ *
+ * Preserved grants are never invisible — the plan renders each one (see `renderPermissionPlan`).
+ */
+export type PreserveUnknown = boolean | string[];
+
 export interface DesiredPermission {
   key: string;
   domainType: DomainType;
@@ -43,4 +56,6 @@ export interface DesiredPermission {
    */
   domainId: number | Ref;
   grants: Grant[];
+  /** Opt-in escape from whole-domain ownership (#102). Omitted ⇒ strict: undeclared grant → revoke. */
+  preserveUnknown?: PreserveUnknown;
 }

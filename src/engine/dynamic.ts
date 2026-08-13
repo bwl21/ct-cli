@@ -61,7 +61,7 @@ function dropReadOnly(rule: Record<string, unknown>): Record<string, unknown> {
 /** Canonicalise a ruleset for diffing: unwrap array/PUT envelope, drop timestamps; strip labels + coerce scalars WITHIN the query subtree only. */
 export function normalizeRuleset(rule: unknown): Record<string, unknown> {
   let r: unknown = rule ?? {};
-  if (Array.isArray(r)) r = r[0] ?? {};                       // GET returns a single-element [RuleSet]
+  if (Array.isArray(r)) r = r[0] ?? {}; // GET returns a single-element [RuleSet]
   let obj = (r ?? {}) as Record<string, unknown>;
   if (obj.dynamicGroupRuleSet && typeof obj.dynamicGroupRuleSet === "object") {
     // Defensive: tolerate the `{ dynamicGroupRuleSet: ... }` wrapper if one is ever fed through
@@ -91,13 +91,16 @@ export function normalizeRuleset(rule: unknown): Record<string, unknown> {
  * The single source of truth for the PUT envelope — every writer (apply path, live-gated tests)
  * must go through this so the envelope can't drift out of sync again.
  */
-export function putRulesetBody(
-  ruleset: Record<string, unknown>,
-): { dynamicGroupRuleSet: [Record<string, unknown>] } {
+export function putRulesetBody(ruleset: Record<string, unknown>): {
+  dynamicGroupRuleSet: [Record<string, unknown>];
+} {
   return { dynamicGroupRuleSet: [ruleset] };
 }
 
-export interface NormalizedDynamic { status: DynamicStatus; ruleset: Record<string, unknown> }
+export interface NormalizedDynamic {
+  status: DynamicStatus;
+  ruleset: Record<string, unknown>;
+}
 
 export function normalizeDynamic(spec: { status: DynamicStatus; ruleset: unknown }): NormalizedDynamic {
   return { status: spec.status, ruleset: normalizeRuleset(spec.ruleset) };
@@ -109,7 +112,11 @@ export function normalizeDynamic(spec: { status: DynamicStatus; ruleset: unknown
  * so a config is portable regardless of where `ct` is invoked. Missing/unreadable/invalid-JSON
  * ref files raise a clear error naming the group and the resolved path instead of a raw ENOENT.
  */
-export function resolveRulesetRef(ruleset: unknown, baseDir: string = process.cwd(), groupKey?: string): unknown {
+export function resolveRulesetRef(
+  ruleset: unknown,
+  baseDir: string = process.cwd(),
+  groupKey?: string,
+): unknown {
   if (ruleset && typeof ruleset === "object" && typeof (ruleset as { ref?: unknown }).ref === "string") {
     const ref = (ruleset as { ref: string }).ref;
     const p = resolve(baseDir, ref);
@@ -118,12 +125,16 @@ export function resolveRulesetRef(ruleset: unknown, baseDir: string = process.cw
     try {
       raw = readFileSync(p, "utf8");
     } catch (err) {
-      throw new Error(`${where}: cannot read ruleset ref "${ref}" (resolved to ${p}): ${(err as Error).message}`);
+      throw new Error(
+        `${where}: cannot read ruleset ref "${ref}" (resolved to ${p}): ${(err as Error).message}`,
+      );
     }
     try {
       return JSON.parse(raw);
     } catch (err) {
-      throw new Error(`${where}: ruleset ref "${ref}" (resolved to ${p}) is not valid JSON: ${(err as Error).message}`);
+      throw new Error(
+        `${where}: ruleset ref "${ref}" (resolved to ${p}) is not valid JSON: ${(err as Error).message}`,
+      );
     }
   }
   return ruleset;

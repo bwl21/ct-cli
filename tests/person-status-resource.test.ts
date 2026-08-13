@@ -43,16 +43,31 @@ describe("the person-status registry entry", () => {
     // declare no required fields at all). The executor sends the declared bag as a full-replace PUT,
     // so anything left unmanaged here would be dropped from the body — a 400, or a silent blanking.
     expect([...knownFields("person-status")].sort()).toEqual([
-      "isMember", "isSearchable", "name", "securityLevelId", "shorty", "sortKey",
+      "isMember",
+      "isSearchable",
+      "name",
+      "securityLevelId",
+      "shorty",
+      "sortKey",
     ]);
     expect(
       RESOURCES["person-status"]?.managedFields({
-        id: 3, name: "3 - Group Active", shorty: "GA", isMember: true,
-        isSearchable: false, sortKey: 30, securityLevelId: 1, extra: 1,
+        id: 3,
+        name: "3 - Group Active",
+        shorty: "GA",
+        isMember: true,
+        isSearchable: false,
+        sortKey: 30,
+        securityLevelId: 1,
+        extra: 1,
       }),
     ).toEqual({
-      name: "3 - Group Active", shorty: "GA", isMember: true,
-      isSearchable: false, sortKey: 30, securityLevelId: 1,
+      name: "3 - Group Active",
+      shorty: "GA",
+      isMember: true,
+      isSearchable: false,
+      sortKey: 30,
+      securityLevelId: 1,
     });
   });
 
@@ -90,7 +105,9 @@ describe("ct.personStatus in the config DSL", () => {
     try {
       const { ct, resources } = createContext();
       ct.personStatus({ key: "s", name: "3 - Group Active", nameTranslated: "Group Active" });
-      expect(String(spy.mock.calls[0]![0])).toContain('person-status "s": unknown field "nameTranslated" (ignored)');
+      expect(String(spy.mock.calls[0]![0])).toContain(
+        'person-status "s": unknown field "nameTranslated" (ignored)',
+      );
       expect(resources[0]?.fields).toHaveProperty("nameTranslated", "Group Active"); // still passed through
     } finally {
       spy.mockRestore();
@@ -102,9 +119,20 @@ describe("resolving a personStatus reference", () => {
   const client = { get: vi.fn(async () => [{ id: 3, name: "3 - Group Active" }]) };
 
   it("prefers a MANAGED status in state over the live /statuses catalog", async () => {
-    const state: State = { version: 1, host: HOST, resources: {
-      group_active: { type: "person-status", id: 8, key: "group_active", fields: {}, adoptedAt: "t", updatedAt: "t" },
-    }};
+    const state: State = {
+      version: 1,
+      host: HOST,
+      resources: {
+        group_active: {
+          type: "person-status",
+          id: 8,
+          key: "group_active",
+          fields: {},
+          adoptedAt: "t",
+          updatedAt: "t",
+        },
+      },
+    };
     const resolver = new Resolver({ client: client as never, state, desired: [] });
     expect(await resolver.resolve(ref.personStatus("group_active"), "site")).toBe(8);
   });
@@ -153,8 +181,15 @@ describe("declare a status AND grants on it, in one config (the #96 trap)", () =
     const { items } = await buildPermissionPlan(client, state, [perm], desired);
 
     const createStatus: Plan = {
-      items: [{ type: "person-status", key: "group_active", id: null, action: "create",
-        changes: [{ field: "name", from: undefined, to: "3 - Group Active" }] }],
+      items: [
+        {
+          type: "person-status",
+          key: "group_active",
+          id: null,
+          action: "create",
+          changes: [{ field: "name", from: undefined, to: "3 - Group Active" }],
+        },
+      ],
     };
     await executePlan(createStatus, { client, state, statePath: "unused", save: async () => {} });
     expect(state.resources.group_active?.id).toBe(9);

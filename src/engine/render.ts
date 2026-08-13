@@ -88,7 +88,9 @@ export function renderPlan(plan: Plan): string {
 
   if (fetchFailed.length > 0) {
     lines.push("");
-    lines.push(pc.yellow("Fetch failed (could not read from ChurchTools — diff unavailable, left untouched):"));
+    lines.push(
+      pc.yellow("Fetch failed (could not read from ChurchTools — diff unavailable, left untouched):"),
+    );
     for (const item of fetchFailed) {
       lines.push(`  ? ${item.type}.${item.key} (#${item.id}) — fetch failed (${item.detail ?? "error"})`);
     }

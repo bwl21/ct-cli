@@ -13,6 +13,7 @@ import { writeBackup } from "../engine/backup.js";
 import { renderPlan } from "../engine/render.js";
 import { summarize } from "../engine/types.js";
 import { buildPermissionPlan } from "../permissions/plan.js";
+import { loadHostCatalog } from "../permissions/catalog-store.js";
 import { renderPermissionPlan } from "../permissions/render.js";
 import { applyPermissionPlan } from "../permissions/apply.js";
 import { confirm, confirmEnv } from "../ui/prompt.js";
@@ -44,10 +45,7 @@ export function applyCommand(): Command {
     .option("-c, --config <path>", "config file (or set CT_CONFIG)")
     .option("-s, --state <path>", "state file (or set CT_STATE)")
     .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
-    .option(
-      "--confirm-env <name>",
-      "confirm a protected env non-interactively (must match --env exactly)",
-    )
+    .option("--confirm-env <name>", "confirm a protected env non-interactively (must match --env exactly)")
     .option("--backup-dir <path>", "directory for the pre-apply backup (or set CT_BACKUP_DIR)")
     .option("-y, --auto-approve", "skip the confirmation prompt")
     .option(
@@ -59,6 +57,11 @@ export function applyCommand(): Command {
       const config = await resolveConfig();
       const configPath = resolveConfigPath(opts.config);
       const statePath = cmdEnv.statePath;
+      // A per-instance permission catalog this repo committed for THIS host wins over the bundled
+      // one (#105) — same precedence AND same ordering as `ct plan`, so the two never disagree about
+      // what a right is (config evaluation validates scope dimensions against the active catalog).
+      const hostCatalog = await loadHostCatalog(config.host);
+      if (hostCatalog) info(`permission catalog: ${hostCatalog}`);
       const { resources: desired, permissions, configDir } = await loadConfig(configPath);
       const state = await loadState(statePath, config.host);
 
@@ -67,11 +70,13 @@ export function applyCommand(): Command {
       const resolver = new Resolver({ client, state, desired, host: config.host });
       // Independent fetches: the resource plan and the permission plan (whose instance-wide
       // /permissions/<domainType> reads are slow) run concurrently rather than back-to-back.
-      const [{ plan, actual, fetchErrors }, { items: permItems, fetchErrors: permFetchErrors, warnings: permWarnings }] =
-        await Promise.all([
-          buildPlan(client, state, desired, { configDir, resolver }),
-          buildPermissionPlan(client, state, permissions, desired, resolver, client.version ?? undefined),
-        ]);
+      const [
+        { plan, actual, fetchErrors },
+        { items: permItems, fetchErrors: permFetchErrors, warnings: permWarnings },
+      ] = await Promise.all([
+        buildPlan(client, state, desired, { configDir, resolver }),
+        buildPermissionPlan(client, state, permissions, desired, resolver, client.version ?? undefined),
+      ]);
 
       // Permission catalog warnings (#25): stale-version / unknown-authId (untouched, never revoked).
       for (const w of permWarnings) warn(w);
@@ -99,10 +104,7 @@ export function applyCommand(): Command {
       }
 
       const s = summarize(plan);
-      const permChangeCount = permItems.reduce(
-        (n, i) => n + i.diff.toPut.length + i.diff.toDelete.length,
-        0,
-      );
+      const permChangeCount = permItems.reduce((n, i) => n + i.diff.toPut.length + i.diff.toDelete.length, 0);
       const changeCount = s.create + s.update + permChangeCount;
       if (changeCount === 0) {
         success("No changes to apply.");
@@ -125,11 +127,7 @@ export function applyCommand(): Command {
         return;
       }
 
-      const backupPath = await writeBackup(
-        resolveBackupDir(opts.backupDir, statePath),
-        config.host,
-        actual,
-      );
+      const backupPath = await writeBackup(resolveBackupDir(opts.backupDir, statePath), config.host, actual);
       info(`Backup written: ${backupPath}`);
 
       const result = await executePlan(plan, { client, state, statePath, save: saveState });
@@ -155,7 +153,9 @@ export function applyCommand(): Command {
           `${permResult.failed.length} permission write(s) failed — re-run to resume (grant reconciliation is idempotent):`,
         );
         for (const f of permResult.failed) {
-          info(`    ${f.method} ${f.path} (authId ${f.authId}${f.dataId.length ? ` dataId ${f.dataId.join(",")}` : ""}): ${f.message}`);
+          info(
+            `    ${f.method} ${f.path} (authId ${f.authId}${f.dataId.length ? ` dataId ${f.dataId.join(",")}` : ""}): ${f.message}`,
+          );
         }
         process.exitCode = 1;
         return;
@@ -163,6 +163,24 @@ export function applyCommand(): Command {
 
       if (opts.refresh) {
         await runPostApplyHooks(plan, state, client);
+      } else {
+        // The auto-group model is the single most surprising thing about a green apply (#105): the
+        // ruleset is written and activated, but ChurchTools computes membership on its own schedule,
+        // so a freshly created auto-group is legitimately EMPTY right now. Saying so costs one line
+        // and removes the "did it work?" that otherwise follows every first apply.
+        const dynamicKeys = plan.items
+          .filter(
+            (i) =>
+              i.action !== "no-op" && i.action !== "delete" && i.changes.some((c) => c.field === "dynamic"),
+          )
+          .map((i) => i.key);
+        if (dynamicKeys.length > 0) {
+          info(
+            `${dynamicKeys.length} dynamic group(s) written and activated — ChurchTools materializes their ` +
+              `membership on its own schedule, so they may be empty for now. Force it with ` +
+              `\`ct refresh --group ${dynamicKeys[0]}\` (or re-run apply with --refresh).`,
+          );
+        }
       }
     });
 }

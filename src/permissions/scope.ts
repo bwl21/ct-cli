@@ -2,7 +2,16 @@ import type { State } from "../state/state.js";
 import type { GrantTuple } from "./grants.js";
 import type { DesiredPermission, ScopeEntry } from "./types.js";
 import type { Resolver } from "../resolve/resolver.js";
-import { isPendingRef, isRef, ref, refKey, refLabel, type Ref, type RefKind, type SimpleRef } from "../resolve/refs.js";
+import {
+  isPendingRef,
+  isRef,
+  ref,
+  refKey,
+  refLabel,
+  type Ref,
+  type RefKind,
+  type SimpleRef,
+} from "../resolve/refs.js";
 import { resolveAuthId } from "./catalog.js";
 
 /**
@@ -14,7 +23,12 @@ import { resolveAuthId } from "./catalog.js";
  * unchanged when it has no `scopeKey`). `type` is the MANAGED RESOURCE TYPE behind `key` (#98):
  * "group" for the historical group dimension, "campus"/"group-type" for a typed logical scope ref.
  */
-export interface ScopeResolution { key: string; id: number | null; numeric?: boolean; type?: string }
+export interface ScopeResolution {
+  key: string;
+  id: number | null;
+  numeric?: boolean;
+  type?: string;
+}
 
 /**
  * ChurchTools' "every value of this dimension" dataId. CT both accepts it on write and reads it back
@@ -117,7 +131,11 @@ export function normalizeScopeEntry(entry: unknown, where: string): string | num
  * state-backed identity to re-resolve at apply time. A ref that resolved through a live master-data
  * catalog carries neither: its id is already final and host-correct.
  */
-export interface ScopeRefResolution { id: number | null; managedKey?: string; managedType?: string }
+export interface ScopeRefResolution {
+  id: number | null;
+  managedKey?: string;
+  managedType?: string;
+}
 
 /** Typed scope refs resolved for this host, keyed by {@link refKey}. */
 export type ScopeRefMap = ReadonlyMap<string, ScopeRefResolution>;

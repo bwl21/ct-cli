@@ -94,7 +94,10 @@ function snapshotFromChanges(base: Record<string, unknown>, changes: FieldChange
 }
 
 async function applySyntheticFields(
-  client: Pick<CtClient, "request">, state: State, id: number, changes: FieldChange[],
+  client: Pick<CtClient, "request">,
+  state: State,
+  id: number,
+  changes: FieldChange[],
 ): Promise<void> {
   for (const c of changes) {
     const f = syntheticField(c.field);
@@ -207,7 +210,12 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
       // #75: a group create that hit CT's same-name guard without opting in gets actionable
       // guidance appended — most often this is an unmanaged existing group that should be
       // adopted, not an intentional duplicate.
-      if (item.action === "create" && item.type === "group" && !item.allowDuplicateName && isDuplicateGroupNameError(err)) {
+      if (
+        item.action === "create" &&
+        item.type === "group" &&
+        !item.allowDuplicateName &&
+        isDuplicateGroupNameError(err)
+      ) {
         message = withDuplicateGroupGuidance(message, item);
       }
       return {

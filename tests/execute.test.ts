@@ -81,7 +81,13 @@ describe("executePlan", () => {
         },
       ],
     };
-    const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    const result = await executePlan(plan, {
+      client,
+      state,
+      statePath: "s.json",
+      save: noSave,
+      now: fixedNow,
+    });
     expect(result.failed).toBeUndefined();
     // POST body = declared fields ∪ deterministic create-defaults (declared values win).
     expect(calls[0]).toEqual({
@@ -287,12 +293,23 @@ describe("executePlan", () => {
         },
       ],
     };
-    const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    const result = await executePlan(plan, {
+      client,
+      state,
+      statePath: "s.json",
+      save: noSave,
+      now: fixedNow,
+    });
     expect(result.updated).toEqual(["team"]);
     // CT reads campus at information.campusId but accepts a top-level campusId on PATCH — mirroring
     // how groupTypeId/groupStatusId are written. PATCH carries only the changed field.
     expect(calls[0]).toEqual({ method: "PATCH", path: "/groups/9", body: { campusId: 4 } });
-    expect(state.resources.team!.fields).toEqual({ name: "Team", groupTypeId: 2, groupStatusId: 1, campusId: 4 });
+    expect(state.resources.team!.fields).toEqual({
+      name: "Team",
+      groupTypeId: 2,
+      groupStatusId: 1,
+      campusId: 4,
+    });
   });
 
   it("does NOT revert a field that drifted in CT when a sibling field is updated (#27)", async () => {
@@ -399,7 +416,13 @@ describe("executePlan", () => {
         },
       ],
     };
-    const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    const result = await executePlan(plan, {
+      client,
+      state,
+      statePath: "s.json",
+      save: noSave,
+      now: fixedNow,
+    });
     expect(result.failed).toBeUndefined();
     expect(result.created).toEqual(["parent", "child"]);
     // The edge PUT resolves the parent's freshly-assigned id (1) against the child's (2).
@@ -443,9 +466,7 @@ describe("executePlan", () => {
     // A note-less no-op whose config now sets preventDestroy — the flag alone is never a diffed field,
     // so this is the only chance to persist it to state.
     const plan: Plan = {
-      items: [
-        { type: "campus", key: "mainz", id: 0, action: "no-op", changes: [], preventDestroy: true },
-      ],
+      items: [{ type: "campus", key: "mainz", id: 0, action: "no-op", changes: [], preventDestroy: true }],
     };
     await executePlan(plan, { client, state, statePath: "s.json", save, now: fixedNow });
     expect(state.resources.mainz!.preventDestroy).toBe(true);
@@ -516,7 +537,9 @@ describe("executePlan", () => {
     const state = emptyState("h");
     const client = {
       request: async <T>(): Promise<T> => {
-        throw new CtApiError("POST /group/grouptypes failed", 403, { message: "no permission to create group types" });
+        throw new CtApiError("POST /group/grouptypes failed", 403, {
+          message: "no permission to create group types",
+        });
       },
     };
     const plan: Plan = {
@@ -561,7 +584,13 @@ describe("executePlan", () => {
           },
         ],
       };
-      const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+      const result = await executePlan(plan, {
+        client,
+        state,
+        statePath: "s.json",
+        save: noSave,
+        now: fixedNow,
+      });
       expect(result.failed).toBeUndefined();
       expect(calls[0]).toEqual({
         method: "POST",
@@ -649,7 +678,13 @@ describe("executePlan", () => {
           },
         ],
       };
-      const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+      const result = await executePlan(plan, {
+        client,
+        state,
+        statePath: "s.json",
+        save: noSave,
+        now: fixedNow,
+      });
       expect(result.failed?.key).toBe("kids_2026_b");
       // The shared formatter's output is preserved verbatim (HTTP status + body)...
       expect(result.failed?.message).toContain("HTTP 400");
@@ -671,10 +706,22 @@ describe("executePlan", () => {
       };
       const plan: Plan = {
         items: [
-          { type: "group", key: "kids_2026_b", id: null, action: "create", changes: [{ field: "name", from: undefined, to: "K" }] },
+          {
+            type: "group",
+            key: "kids_2026_b",
+            id: null,
+            action: "create",
+            changes: [{ field: "name", from: undefined, to: "K" }],
+          },
         ],
       };
-      const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+      const result = await executePlan(plan, {
+        client,
+        state,
+        statePath: "s.json",
+        save: noSave,
+        now: fixedNow,
+      });
       expect(result.failed?.message).toContain("allowDuplicateName: true");
     });
 
@@ -700,7 +747,13 @@ describe("executePlan", () => {
           },
         ],
       };
-      const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+      const result = await executePlan(plan, {
+        client,
+        state,
+        statePath: "s.json",
+        save: noSave,
+        now: fixedNow,
+      });
       expect(result.failed?.message).not.toContain("Guidance:");
     });
 
@@ -713,10 +766,22 @@ describe("executePlan", () => {
       };
       const plan: Plan = {
         items: [
-          { type: "group", key: "kids", id: null, action: "create", changes: [{ field: "name", from: undefined, to: "" }] },
+          {
+            type: "group",
+            key: "kids",
+            id: null,
+            action: "create",
+            changes: [{ field: "name", from: undefined, to: "" }],
+          },
         ],
       };
-      const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+      const result = await executePlan(plan, {
+        client,
+        state,
+        statePath: "s.json",
+        save: noSave,
+        now: fixedNow,
+      });
       expect(result.failed?.message).not.toContain("Guidance:");
     });
   });

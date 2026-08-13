@@ -22,9 +22,16 @@ The instance is a **write-safe dev box**, so round-trip integration tests may ge
 - **Permission catalog** (`GET /permissions/global`): `module → { "right name": true | number[] }`. `true` = global right; `number[]` = the scoped `dataId`s the right is granted for.
 - **Raw assignment tuple** (`GET /permissions/group_role`, `/permissions/group_type_role`) confirmed:
   ```json
-  { "domainType": "group_role", "domainId": 2787, "authId": 113, "dataId": 3,
-    "isInherited": false, "type": "grant", "reason": null,
-    "meta": { "modifiedDate": "2026-04-21T11:50:57Z", "modifiedPid": 1 } }
+  {
+    "domainType": "group_role",
+    "domainId": 2787,
+    "authId": 113,
+    "dataId": 3,
+    "isInherited": false,
+    "type": "grant",
+    "reason": null,
+    "meta": { "modifiedDate": "2026-04-21T11:50:57Z", "modifiedPid": 1 }
+  }
   ```
   - `group_type_role` rows carry `authId: 10101` (> 10000). **This falsifies issue #13's claim that `authId < 10000` for `group_type_role`.** Domain rules will be derived empirically, not from the issue text.
   - `meta.modifiedPid: -1` = system-authored baseline grant (seen live on `group_type_role` domainId 8). These re-add themselves.
@@ -41,15 +48,15 @@ The instance is a **write-safe dev box**, so round-trip integration tests may ge
 
 ## Architecture — synthetic sub-resource fields
 
-The engine already has the pattern both features need: the opt-in `parents` set-field (`src/engine/hierarchy.ts`). `parents` is a *pseudo-field* — not a real API column — folded into the diff on both the desired and actual sides in `build.ts`, then routed at apply time to a dedicated endpoint (`PUT/DELETE /groups/{id}/parents/{pid}`) instead of the resource body (`execute.ts` `applyParentEdges`).
+The engine already has the pattern both features need: the opt-in `parents` set-field (`src/engine/hierarchy.ts`). `parents` is a _pseudo-field_ — not a real API column — folded into the diff on both the desired and actual sides in `build.ts`, then routed at apply time to a dedicated endpoint (`PUT/DELETE /groups/{id}/parents/{pid}`) instead of the resource body (`execute.ts` `applyParentEdges`).
 
 Both new features are the same shape:
 
-| Feature | Attaches to | Field kind | Actual source | Write routing |
-|---|---|---|---|---|
-| `parents` (exists) | group | set of keys | `GET /groups/hierarchies` | `PUT/DELETE /groups/{id}/parents/{pid}` |
-| **grants** (#13) | group-role / group-type-role | set of tuples | `GET /permissions/{domainType}` | `PUT/DELETE /permissions/{domainType}/{domainId}` |
-| **dynamic** (#14) | group | object (ruleset + status) | `GET /dynamicgroups/{id}/ruleset` + `/status` | `PUT …/ruleset` then `PUT …/status` |
+| Feature            | Attaches to                  | Field kind                | Actual source                                 | Write routing                                     |
+| ------------------ | ---------------------------- | ------------------------- | --------------------------------------------- | ------------------------------------------------- |
+| `parents` (exists) | group                        | set of keys               | `GET /groups/hierarchies`                     | `PUT/DELETE /groups/{id}/parents/{pid}`           |
+| **grants** (#13)   | group-role / group-type-role | set of tuples             | `GET /permissions/{domainType}`               | `PUT/DELETE /permissions/{domainType}/{domainId}` |
+| **dynamic** (#14)  | group                        | object (ruleset + status) | `GET /dynamicgroups/{id}/ruleset` + `/status` | `PUT …/ruleset` then `PUT …/status`               |
 
 ### The refactor
 
@@ -69,14 +76,20 @@ The `assertNotPeople` guard extends to every new write path.
 ### DSL
 
 ```ts
-ct.group({ key: "all_mainz", name: "Alle Mainz", groupTypeId: 1,
+ct.group({
+  key: "all_mainz",
+  name: "Alle Mainz",
+  groupTypeId: 1,
   dynamic: {
-    status: "active",                       // "active" | "manual" | "inactive" | "none" (=demote)
-    ruleset: q.and(                         // typed builder → JSONLogic (Phase 2)
-      q.eq("ctgroup.campusId", campus("mainz")),   // name→id resolution for var values
-      q.eq("person.isArchived", false)),
+    status: "active", // "active" | "manual" | "inactive" | "none" (=demote)
+    ruleset: q.and(
+      // typed builder → JSONLogic (Phase 2)
+      q.eq("ctgroup.campusId", campus("mainz")), // name→id resolution for var values
+      q.eq("person.isArchived", false),
+    ),
     // …or an opaque blob, or { ref: "./rulesets/all_mainz.json" } (Phase 1) — interchangeable
-  }})
+  },
+});
 ```
 
 - `dynamic` is an **object-field** on a group, opt-in like `parents`: `undefined` = not managed as a dynamic group; present = managed. It carries the full `RuleSet` (`{ description, shorty, personIdFieldName, importance, query, process }`) plus `status`.
@@ -109,10 +122,16 @@ Both the typed builder and an opaque blob compile to the **same normalized JSONL
 ### DSL
 
 ```ts
-ct.groupRole({ key: "kids_lead", id: 51,
-  grants: ["churchgroup:view group", "churchgroup:edit group members"] });
-ct.groupTypeRole({ key: "leiter_tpl", id: 8,
-  grants: [{ right: "churchdb:view group", scope: ["kids_area"] }] });   // scope keys → dataId[]
+ct.groupRole({
+  key: "kids_lead",
+  id: 51,
+  grants: ["churchgroup:view group", "churchgroup:edit group members"],
+});
+ct.groupTypeRole({
+  key: "leiter_tpl",
+  id: 8,
+  grants: [{ right: "churchdb:view group", scope: ["kids_area"] }],
+}); // scope keys → dataId[]
 ```
 
 - `grants` is a **set-field** on a role domain object. A grant is either a bare `"module:right"` string (global) or `{ right, scope: [key…] }` (scoped; scope keys resolve to `dataId[]`).
@@ -147,7 +166,10 @@ const kidsArea = (campus: string) => {
   ct.group({ key: `${campus}_kids_0_3`, name: `${campus} · Kids 0–3`, parents: [`${campus}_kids_lead`] });
   // …
 };
-for (const c of ["mainz", "berlin", "koblenz"]) { ct.campus({ key: c, name: `Campus ${c}` }); kidsArea(c); }
+for (const c of ["mainz", "berlin", "koblenz"]) {
+  ct.campus({ key: c, name: `Campus ${c}` });
+  kidsArea(c);
+}
 ```
 
 Deliverables (mostly non-code):

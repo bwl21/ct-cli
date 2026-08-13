@@ -110,7 +110,12 @@ describe("ct plan --detailed-exitcode", () => {
         key: "team",
         domainType: "group_role",
         domainId: 1,
-        diff: { toPut: [{ authId: 5, dataId: [], type: "grant" }], toDelete: [], preserved: [] },
+        diff: {
+          toPut: [{ authId: 5, dataId: [], type: "grant" }],
+          toDelete: [],
+          preserved: [],
+          preservedUnknown: [],
+        },
       },
     ];
     await runPlan(["--detailed-exitcode"]);

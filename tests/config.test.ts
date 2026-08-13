@@ -12,7 +12,10 @@ describe("normalizeHost", () => {
 
 describe("resolveConfig", () => {
   it("prefers CT_HOST env over the stored host", async () => {
-    const config = await resolveConfig({ CT_HOST: "https://env.church.tools" }, async () => "https://stored.church.tools");
+    const config = await resolveConfig(
+      { CT_HOST: "https://env.church.tools" },
+      async () => "https://stored.church.tools",
+    );
     expect(config.host).toBe("https://env.church.tools");
   });
 

@@ -18,7 +18,10 @@ describe("CtClient", () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
-        jsonResponse({ data: { id: 7, firstName: "Ada" } }, { setCookie: "ChurchTools_ct_mychurch=abc; Path=/" }),
+        jsonResponse(
+          { data: { id: 7, firstName: "Ada" } },
+          { setCookie: "ChurchTools_ct_mychurch=abc; Path=/" },
+        ),
       )
       .mockResolvedValueOnce(jsonResponse({ data: "csrf-123" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -55,7 +58,10 @@ describe("CtClient", () => {
     expect(headers.get("Cookie")).toContain("s=1");
   });
 
-  async function authedClient(): Promise<{ client: CtClient; fetchMock: ReturnType<typeof vi.fn<typeof fetch>> }> {
+  async function authedClient(): Promise<{
+    client: CtClient;
+    fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
+  }> {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({ data: { id: 1 } }, { setCookie: "s=1; Path=/" }))

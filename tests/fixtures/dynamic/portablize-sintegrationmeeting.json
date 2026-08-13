@@ -6,9 +6,7 @@
   "query": {
     "method": "ChurchQuery",
     "params": {
-      "groupBy": [
-        "person.id"
-      ],
+      "groupBy": ["person.id"],
       "filter": {
         "and": [
           {
@@ -32,9 +30,7 @@
                 "dterm": [
                   {
                     "title": "nur LEITER",
-                    "stereotype": [
-                      "groupmembership"
-                    ]
+                    "stereotype": ["groupmembership"]
                   },
                   {
                     "and": [
@@ -45,11 +41,7 @@
                               {
                                 "var": "ctgroup.groupStatusId"
                               },
-                              [
-                                1,
-                                2,
-                                4
-                              ]
+                              [1, 2, 4]
                             ]
                           },
                           {
@@ -57,15 +49,7 @@
                               {
                                 "var": "ctgroup.id"
                               },
-                              [
-                                "148",
-                                "1228",
-                                "32",
-                                "1237",
-                                "1243",
-                                "27",
-                                "119"
-                              ]
+                              ["148", "1228", "32", "1237", "1243", "27", "119"]
                             ]
                           }
                         ]
@@ -77,14 +61,7 @@
                               {
                                 "var": "role.id"
                               },
-                              [
-                                "16",
-                                "84",
-                                "85",
-                                "17",
-                                "90",
-                                "91"
-                              ]
+                              ["16", "84", "85", "17", "90", "91"]
                             ]
                           }
                         ]
@@ -97,9 +74,7 @@
                 "dterm": [
                   {
                     "title": "ALLE",
-                    "stereotype": [
-                      "groupmembership"
-                    ]
+                    "stereotype": ["groupmembership"]
                   },
                   {
                     "and": [
@@ -110,11 +85,7 @@
                               {
                                 "var": "ctgroup.groupStatusId"
                               },
-                              [
-                                1,
-                                2,
-                                4
-                              ]
+                              [1, 2, 4]
                             ]
                           },
                           {
@@ -122,9 +93,7 @@
                               {
                                 "var": "ctgroup.id"
                               },
-                              [
-                                "1974"
-                              ]
+                              ["1974"]
                             ]
                           }
                         ]
@@ -136,11 +105,7 @@
                               {
                                 "var": "role.id"
                               },
-                              [
-                                "15",
-                                "16",
-                                "17"
-                              ]
+                              ["15", "16", "17"]
                             ]
                           }
                         ]
@@ -154,11 +119,7 @@
         ]
       },
       "primaryEntityAlias": "person",
-      "responseFields": [
-        "person.id",
-        "person.firstName",
-        "person.lastName"
-      ]
+      "responseFields": ["person.id", "person.firstName", "person.lastName"]
     }
   },
   "process": {

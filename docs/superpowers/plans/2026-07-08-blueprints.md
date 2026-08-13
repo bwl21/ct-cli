@@ -9,6 +9,7 @@
 **Tech Stack:** TypeScript (NodeNext ESM, `.js` specifiers), Vitest.
 
 ## Global Constraints
+
 - Node ≥ 20; ESM NodeNext — all relative imports use `.js` specifiers.
 - Add no new runtime dependency.
 - People are never managed.
@@ -16,6 +17,7 @@
 - The example is verified by config-LOAD only (no live `plan`/`apply`; the machine is on production).
 
 ## Context from #14 / #13 (already merged on this branch)
+
 - `dynamic: { status, ruleset }` block on a group; `q`/`churchQuery` typed query builder re-exported from `src/config/context.js`.
 - `ct.groupTypeRole({ key, id, grants })` with `module:right` grant names; `ct.groupRole({ key, id, grants })`.
 - `parents: [groupKey]` opt-in hierarchy; `evaluateConfig(mod) → { resources, permissions }`; `orderKeys(resources)` (`src/engine/graph.ts`) topologically orders by tier then declaration order.
@@ -25,9 +27,11 @@
 ## Task 1: Example campus blueprint config
 
 **Files:**
+
 - Create: `examples/campus-blueprint.config.ts`
 
 **Interfaces:**
+
 - Produces: a default-exported `(ct) => void` config that defines a `kidsArea(campus)` blueprint and instantiates it across two campuses. Consumed by Task 2's test and by users as a reference.
 
 - [ ] **Step 1: Write the blueprint example**
@@ -47,7 +51,11 @@ const CAMPUSES = ["mainz", "berlin"] as const;
 function kidsArea(ct: ConfigContext, campus: string): void {
   const lead = `${campus}_kids_lead`;
   ct.group({ key: lead, name: `${campus} · Kids Leitung`, groupTypeId: 2, parents: [] });
-  for (const [suffix, label] of [["0_3", "0–3"], ["4_6", "4–6"], ["checkin", "Check-in"]] as const) {
+  for (const [suffix, label] of [
+    ["0_3", "0–3"],
+    ["4_6", "4–6"],
+    ["checkin", "Check-in"],
+  ] as const) {
     ct.group({
       key: `${campus}_kids_${suffix}`,
       name: `${campus} · Kids ${label}`,
@@ -80,16 +88,22 @@ export default (ct: ConfigContext): void => {
     kidsArea(ct, campus);
   }
   // A permission grant (#13) on a shared group-type-role template — id is an illustrative placeholder.
-  ct.groupTypeRole({ key: "kids_lead_tpl", id: 2, grants: ["churchgroup:view group", "churchgroup:edit group members"] });
+  ct.groupTypeRole({
+    key: "kids_lead_tpl",
+    id: 2,
+    grants: ["churchgroup:view group", "churchgroup:edit group members"],
+  });
 };
 ```
 
 - [ ] **Step 2: Verify it loads (config-load only — NO live plan/apply)**
 
 Run:
+
 ```bash
 npx tsx -e "import('./src/config/load.js').then(m=>m.loadConfig('examples/campus-blueprint.config.ts')).then(r=>console.log('resources',r.resources.length,'permissions',r.permissions.length)).catch(e=>{console.error(e.message);process.exit(1)})"
 ```
+
 Expected: `resources 12 permissions 1` (2 campuses + 2×5 groups [lead + 3 teams + 1 dynamic] = 12 resources; 1 permission). No load/validation error. Do NOT run `ct plan`/`ct apply` (production login).
 
 - [ ] **Step 3: Commit**
@@ -104,9 +118,11 @@ git commit -m "feat(blueprints): example parametrized campus blueprint (kids are
 ## Task 2: Ordered-plan test (the DoD lock)
 
 **Files:**
+
 - Create: `tests/blueprint.test.ts`
 
 **Interfaces:**
+
 - Consumes: `evaluateConfig` (`src/config/context.js`), `orderKeys` (`src/engine/graph.js`), and the Task 1 blueprint pattern (the test defines its own inline blueprint so it does not depend on the example file's exact ids).
 
 - [ ] **Step 1: Write the test**
@@ -137,7 +153,7 @@ describe("campus blueprint", () => {
     const order = orderKeys(resources);
     const pos = (k: string) => order.indexOf(k);
     for (const c of ["mainz", "berlin"]) {
-      expect(pos(c)).toBeLessThan(pos(`${c}_lead`));       // campus (tier 0) before its groups (tier 1)
+      expect(pos(c)).toBeLessThan(pos(`${c}_lead`)); // campus (tier 0) before its groups (tier 1)
       expect(pos(`${c}_lead`)).toBeLessThan(pos(`${c}_team`)); // parent before child (intra-tier dependency)
     }
   });
@@ -168,6 +184,7 @@ git commit -m "test(blueprints): lock ordered-plan guarantee for a blueprint acr
 ## Task 3: Docs + README
 
 **Files:**
+
 - Create: `docs/blueprints.md`
 - Modify: `README.md`
 
@@ -191,6 +208,7 @@ git commit -m "docs(blueprints): parametrized campus blueprint guide; Phase 5 co
 ## Self-Review
 
 **Spec coverage (#7 design + DoD):**
+
 - Blueprint abstraction (TS function parametrized by campus) → Task 1 (`kidsArea`), Task 2 (inline blueprint). ✓
 - Reusable building blocks shared across blueprints → the `kidsArea` function + shared group type/status ids; no new abstraction needed (YAGNI). ✓
 - Auto-groups inside a blueprint → Task 1 (`dynamic` block in `kidsArea`). ✓ (dynamic reconciliation idempotency is covered by #14's tests + normalizer.)

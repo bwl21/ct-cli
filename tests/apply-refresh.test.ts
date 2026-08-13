@@ -80,8 +80,16 @@ describe("runPostApplyHooks (dynamic refresh)", () => {
 
     const refreshCalls = calls.filter((c) => c.path.startsWith("/dynamicgroups/"));
     expect(refreshCalls).toHaveLength(2);
-    expect(refreshCalls).toContainEqual({ method: "POST", path: "/dynamicgroups/42/refresh", body: undefined });
-    expect(refreshCalls).toContainEqual({ method: "POST", path: "/dynamicgroups/43/refresh", body: undefined });
+    expect(refreshCalls).toContainEqual({
+      method: "POST",
+      path: "/dynamicgroups/42/refresh",
+      body: undefined,
+    });
+    expect(refreshCalls).toContainEqual({
+      method: "POST",
+      path: "/dynamicgroups/43/refresh",
+      body: undefined,
+    });
   });
 
   it("never calls the all-groups /dynamicgroups/refresh endpoint", async () => {
@@ -129,7 +137,13 @@ describe("runPostApplyHooks (dynamic refresh)", () => {
           key: "dyn_a",
           id: 42,
           action: "update",
-          changes: [{ field: "dynamic", from: { status: "active", ruleset: {} }, to: { status: "none", ruleset: {} } }],
+          changes: [
+            {
+              field: "dynamic",
+              from: { status: "active", ruleset: {} },
+              to: { status: "none", ruleset: {} },
+            },
+          ],
         },
         {
           type: "group",
@@ -179,8 +193,16 @@ describe("runPostApplyHooks (dynamic refresh)", () => {
     await expect(runPostApplyHooks(plan, state, client)).resolves.toBeUndefined();
     const refreshCalls = calls.filter((c) => c.path.startsWith("/dynamicgroups/"));
     expect(refreshCalls).toHaveLength(2);
-    expect(refreshCalls).toContainEqual({ method: "POST", path: "/dynamicgroups/42/refresh", body: undefined });
-    expect(refreshCalls).toContainEqual({ method: "POST", path: "/dynamicgroups/43/refresh", body: undefined });
+    expect(refreshCalls).toContainEqual({
+      method: "POST",
+      path: "/dynamicgroups/42/refresh",
+      body: undefined,
+    });
+    expect(refreshCalls).toContainEqual({
+      method: "POST",
+      path: "/dynamicgroups/43/refresh",
+      body: undefined,
+    });
   });
 
   it("skips a changed-dynamic item whose id is not yet resolvable in state (explicit undefined check, not truthiness)", async () => {
@@ -204,7 +226,9 @@ describe("runPostApplyHooks (dynamic refresh)", () => {
         },
       ],
     };
-    const { client, calls } = recorder({ "POST /dynamicgroups/0/refresh": [{ created: 0, updated: 0, deleted: 0 }] });
+    const { client, calls } = recorder({
+      "POST /dynamicgroups/0/refresh": [{ created: 0, updated: 0, deleted: 0 }],
+    });
     await runPostApplyHooks(plan, state, client);
     expect(calls).toEqual([{ method: "POST", path: "/dynamicgroups/0/refresh", body: undefined }]);
   });

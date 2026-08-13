@@ -25,8 +25,20 @@ export default (ct: ConfigContext): void => {
 
   // Group type + campus by name — no numeric ids. `groupType: "ministry_team"` resolves against
   // the live /group/grouptypes catalog on whichever host you apply to.
-  ct.group({ key: "mainz_kids_lead", name: "Mainz · Kids Leitung", groupType: "ministry_team", campus: "mainz", parents: [] });
-  ct.group({ key: "mainz_kids_team", name: "Mainz · Kids Team", groupType: "ministry_team", campus: "mainz", parents: ["mainz_kids_lead"] });
+  ct.group({
+    key: "mainz_kids_lead",
+    name: "Mainz · Kids Leitung",
+    groupType: "ministry_team",
+    campus: "mainz",
+    parents: [],
+  });
+  ct.group({
+    key: "mainz_kids_team",
+    name: "Mainz · Kids Team",
+    groupType: "ministry_team",
+    campus: "mainz",
+    parents: ["mainz_kids_lead"],
+  });
 
   // A dynamic auto-group whose ruleset filters by campus — again by reference, not id.
   ct.group({

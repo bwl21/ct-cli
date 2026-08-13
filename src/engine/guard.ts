@@ -15,8 +15,6 @@ const FORBIDDEN: RegExp[] = [
 
 export function assertNotPeople(path: string): void {
   if (FORBIDDEN.some((re) => re.test(path))) {
-    throw new Error(
-      `Refusing to write to "${path}": people/memberships are never managed by this tool.`,
-    );
+    throw new Error(`Refusing to write to "${path}": people/memberships are never managed by this tool.`);
   }
 }

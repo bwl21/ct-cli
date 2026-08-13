@@ -63,11 +63,70 @@ const ROLE_VAR = "role.id";
  */
 const ROLE_FIELD_NAME = "groupTypeRoleId";
 
-/** An id left numeric because no managed logical key mapped to it — collected, not thrown (escape hatch). */
+/**
+ * Why an id could not be portablized (#101). ChurchTools treats a ruleset as opaque JSON and does
+ * not validate the ids inside it, so a ruleset carrying prod's `ctgroup.id` applied to dev does not
+ * error — the auto-group simply collects the wrong people, and `ct plan` stays green because the
+ * ruleset round-trips byte-identically against the host it was written for. Naming the reason is what
+ * turns that silent wrongness into a known risk.
+ */
+export type PortablizeReason =
+  /** The dimension HAS a logical form, but no managed resource / catalog row carries this id. */
+  | "unmanaged"
+  /** A `role.id`/`groupTypeRoleId` whose row is absent from the `/group/roles` catalog. */
+  | "role-unknown"
+  /** A role resolved, but the group TYPE it belongs to is not managed, so no portable pair exists. */
+  | "role-group-type-unmanaged"
+  /** The dimension has no logical reference form at all (e.g. group statuses — no REST catalog). */
+  | "no-ref-kind"
+  /**
+   * Reported by {@link scanUnportablized} only: the id sits in an entity position and is therefore
+   * not portable, and that is ALL that was checked. The rewrite reasons above each assert a fact
+   * about the host (this group is unmanaged / no such role row exists) that a positional scan with no
+   * state, no catalogs and no network never established — claiming one of them here would print a
+   * confident falsehood, and a remedy that fails, for an id whose group IS adopted.
+   */
+  | "left-numeric";
+
+/** An id left numeric — collected, not thrown (the escape hatch), and reported with its reason (#101). */
 export interface PortablizeWarning {
   var: string;
   id: number;
+  reason: PortablizeReason;
+  /** Human-readable explanation, ready to print. Never a bare restatement of {@link reason}. */
+  detail: string;
 }
+
+/**
+ * Entity-bearing ChurchQuery vars with NO logical reference form, and why (#101). These are reported
+ * as left-numeric so a cross-host ruleset's real risk surface is complete — without them, adoption
+ * would claim "everything portablized" while a `groupStatusId` sat frozen at prod's value.
+ *
+ * Deliberately a closed list rather than "every var we don't recognise": a `person.age > 18` operand
+ * is a literal, not an id, and reporting it would bury the real findings in noise.
+ */
+const UNPORTABLE_ENTITY_VARS: Readonly<Record<string, string>> = {
+  "ctgroup.groupStatusId": "group statuses have no REST catalog (#67) — no logical form exists",
+};
+
+/**
+ * The reason text for an id no logical key mapped to, per kind.
+ *
+ * Deliberately ID-FREE: {@link formatPortablizeWarnings} merges every id sharing a (var, reason) into
+ * ONE line and prints the ids itself, so a detail naming one specific id would be stamped across all
+ * of them — "12, 34, 56 left numeric — group #12 is not under management" reads as if the remedy for
+ * #12 covers the other two.
+ */
+function unmanagedDetail(kind: RefKind): string {
+  return kind === "group"
+    ? "not under management — `ct adopt group <id>` for each (then re-adopt) makes them portable"
+    : `no managed ${kind} on this host carries these ids`;
+}
+
+/** The scan-mode detail: says only what a positional scan can actually know. See "left-numeric". */
+const LEFT_NUMERIC_DETAIL =
+  "host-specific id(s) frozen into a cross-host ruleset — re-adopt the group with " +
+  "`--with-dynamic` to rewrite them into logical references (it reports what, if anything, blocks each)";
 
 export interface PortablizeOptions {
   /** Per-kind numeric-id → logical-key maps, supplied by the caller (from state/catalogs). Deterministic. */
@@ -82,6 +141,12 @@ export interface PortablizeOptions {
    * key. A role whose group type is unmanaged (no key) is left numeric with a warning (escape hatch).
    */
   groupTypeIdToKey?: Map<number, string>;
+  /**
+   * Report-only mode ({@link scanUnportablized}): no maps are supplied, so every reason degrades to
+   * the neutral `left-numeric` rather than asserting an unchecked one. Internal — callers that
+   * actually rewrite never set it.
+   */
+  scanOnly?: boolean;
 }
 
 export interface PortablizeResult {
@@ -114,17 +179,29 @@ function varNameOf(node: unknown): string | undefined {
  */
 export function portablizeRuleset(
   ruleset: Record<string, unknown>,
-  { idToKeyByKind, roleCatalog, groupTypeIdToKey }: PortablizeOptions,
+  { idToKeyByKind, roleCatalog, groupTypeIdToKey, scanOnly }: PortablizeOptions,
 ): PortablizeResult {
   const warnings: PortablizeWarning[] = [];
 
-  const marker = (kind: RefKind, key: string): SimpleRef => ({ __ctRef: true, kind, key } as SimpleRef);
+  /** Push either the checked reason, or — in scan mode — the only one a positional scan earned. */
+  const warnLeftNumeric = (
+    varName: string,
+    id: number,
+    checked: () => Omit<PortablizeWarning, "var" | "id">,
+  ) =>
+    warnings.push({
+      var: varName,
+      id,
+      ...(scanOnly ? { reason: "left-numeric" as const, detail: LEFT_NUMERIC_DETAIL } : checked()),
+    });
+
+  const marker = (kind: RefKind, key: string): SimpleRef => ({ __ctRef: true, kind, key }) as SimpleRef;
 
   const mapScalar = (value: unknown, kind: RefKind, varName: string): unknown => {
     if (typeof value !== "number") return value; // booleans/strings/nulls are literals, never entity ids
     const key = idToKeyByKind[kind]?.get(value);
     if (key !== undefined) return marker(kind, key);
-    warnings.push({ var: varName, id: value });
+    warnLeftNumeric(varName, value, () => ({ reason: "unmanaged", detail: unmanagedDetail(kind) }));
     return value;
   };
 
@@ -143,7 +220,22 @@ export function portablizeRuleset(
         role: entry.name,
       } as GroupTypeRoleRef;
     }
-    warnings.push({ var: varName, id: value });
+    // Two genuinely different failures, kept apart: the role is unknown to `/group/roles` at all, or
+    // it resolved but its group type is unmanaged. They need different fixes, so they get different
+    // reasons rather than one "could not portablize".
+    warnLeftNumeric(varName, value, () =>
+      entry
+        ? {
+            reason: "role-group-type-unmanaged",
+            detail:
+              "the role's group type is not managed — adopt that group type to make the " +
+              "(group-type, role) pair portable",
+          }
+        : {
+            reason: "role-unknown",
+            detail: "no /group/roles row on this host carries these groupTypeRoleIds",
+          },
+    );
     return value;
   };
 
@@ -166,6 +258,19 @@ export function portablizeRuleset(
           // Group-type-scoped role var (#76): rewrite siblings through the role catalog, not VAR_REF_KINDS.
           return node.map((el, i) => (i === varIdx ? el : mapOperand(el, (v) => mapRoleScalar(v, ROLE_VAR))));
         }
+        const unportable = UNPORTABLE_ENTITY_VARS[varName];
+        if (unportable !== undefined) {
+          // A known ENTITY var with no logical form: nothing to rewrite, but it is still a
+          // host-specific id frozen into a cross-host file, so it is reported rather than swallowed.
+          node.forEach((el, i) => {
+            if (i === varIdx) return;
+            for (const v of Array.isArray(el) ? el : [el]) {
+              if (typeof v === "number") {
+                warnings.push({ var: varName, id: v, reason: "no-ref-kind", detail: unportable });
+              }
+            }
+          });
+        }
         // Unknown var (escape hatch) — recurse structurally, leaving its numeric ids untouched.
       }
       return node.map(walk);
@@ -175,10 +280,7 @@ export function portablizeRuleset(
       for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
         // `handleMembership.groupTypeRoleId` sits outside the query, so it has no `{ var }` leaf to key
         // off — rewrite it by object-key match, through the same role catalog as the `role.id` operand.
-        out[k] =
-          k === ROLE_FIELD_NAME && typeof v === "number"
-            ? mapRoleScalar(v, ROLE_FIELD_NAME)
-            : walk(v);
+        out[k] = k === ROLE_FIELD_NAME && typeof v === "number" ? mapRoleScalar(v, ROLE_FIELD_NAME) : walk(v);
       }
       return out;
     }
@@ -186,4 +288,57 @@ export function portablizeRuleset(
   };
 
   return { ruleset: walk(ruleset) as Record<string, unknown>, warnings };
+}
+
+/**
+ * Find every host-specific numeric id still sitting in an entity position of a ruleset (#101).
+ *
+ * This is {@link portablizeRuleset}'s reporting half without the rewrite: it takes a ruleset as
+ * AUTHORED (logical `{ __ctRef }` markers still un-resolved, plain numbers still plain) and returns
+ * what would not survive a move to another host. `ct plan` runs it over every declared dynamic group
+ * so an un-portablized ruleset is a visible, recurring risk rather than a green plan that quietly
+ * collects the wrong people on the wrong instance — the payload of an auto-group is group
+ * membership, which in this domain is exactly what carries permission grants.
+ *
+ * It reports by POSITION, not by lookup: any number left in a known entity var's operand is
+ * unportable by construction, because a portablized one would be a `{ __ctRef }` marker instead. So
+ * it needs no catalogs, no state and no network, and is safe to run on every plan.
+ */
+export function scanUnportablized(ruleset: unknown): PortablizeWarning[] {
+  const { warnings } = portablizeRuleset((ruleset ?? {}) as Record<string, unknown>, {
+    // No id→key maps and no role catalog: every numeric entity id therefore fails to map and is
+    // reported, while an already-portable `{ __ctRef }` marker is not a number and is never flagged.
+    idToKeyByKind: {},
+    // …which also means the "unmanaged" / "role-unknown" verdicts the rewrite path computes were
+    // never actually checked here — `scanOnly` degrades them to `left-numeric` so this scan states
+    // only what position proves. Without it, `ct plan` tells someone whose group IS adopted that it
+    // is not under management, and hands them a `ct adopt` that fails.
+    scanOnly: true,
+  });
+  return warnings;
+}
+
+/**
+ * One line per (var, reason), naming the ids — the shape both `ct adopt --with-dynamic` and
+ * `ct plan` print (#101). Grouped so a ruleset with 30 unmanaged group ids is one readable line, not
+ * thirty; ids are sorted so the output is stable across runs and diffable in CI logs.
+ *
+ * The `detail` is part of the grouping key, not just the reason: merging ids under ONE detail is only
+ * honest while that detail holds for all of them, so a detail that ever names a specific id splits
+ * into its own line instead of being stamped across the group (details are kept id-free above).
+ */
+export function formatPortablizeWarnings(warnings: readonly PortablizeWarning[]): string[] {
+  const grouped = new Map<string, { var: string; detail: string; ids: number[] }>();
+  for (const w of warnings) {
+    const k = `${w.var} ${w.reason} ${w.detail}`;
+    const hit = grouped.get(k);
+    if (hit) {
+      if (!hit.ids.includes(w.id)) hit.ids.push(w.id);
+    } else {
+      grouped.set(k, { var: w.var, detail: w.detail, ids: [w.id] });
+    }
+  }
+  return [...grouped.values()].map(
+    (g) => `${g.var}: ${g.ids.sort((a, b) => a - b).join(", ")} left numeric — ${g.detail}`,
+  );
 }

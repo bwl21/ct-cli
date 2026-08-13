@@ -91,7 +91,9 @@ async function fetchParentEdges(
     }
     return edges;
   } catch (err) {
-    warn(`Failed to fetch group hierarchies for destroy ordering: ${formatError(err)}. Falling back to tier-only order.`);
+    warn(
+      `Failed to fetch group hierarchies for destroy ordering: ${formatError(err)}. Falling back to tier-only order.`,
+    );
     return new Map();
   }
 }
@@ -119,10 +121,7 @@ export function destroyCommand(): Command {
     .requiredOption("--target <keys...>", "logical key(s) to destroy (repeatable or comma-separated)")
     .option("-s, --state <path>", "state file (or set CT_STATE)")
     .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
-    .option(
-      "--confirm-env <name>",
-      "confirm a protected env non-interactively (must match --env exactly)",
-    )
+    .option("--confirm-env <name>", "confirm a protected env non-interactively (must match --env exactly)")
     .option("--backup-dir <path>", "directory for the pre-destroy backup (or set CT_BACKUP_DIR)")
     .option(
       "--force",
@@ -166,7 +165,10 @@ export function destroyCommand(): Command {
       // Backup: fetch each target's current actual values via the same fetchActual as plan/apply
       // (404 → skip: already gone in CT, nothing to back up). A non-404 failure must ABORT before
       // any DELETE — proceeding would irreversibly delete a target with no backup of its state.
-      const { actual, fetchErrors } = await fetchActual(client, ordered.map((k) => state.resources[k]!));
+      const { actual, fetchErrors } = await fetchActual(
+        client,
+        ordered.map((k) => state.resources[k]!),
+      );
       if (fetchErrors.length > 0) {
         error(
           `Backup fetch failed for: ${fetchErrors.join("; ")}. ` +
@@ -243,7 +245,9 @@ export async function runDeleteLoop(ctx: DeleteLoopCtx): Promise<void> {
       if (err instanceof CtApiError && err.status === 404) {
         delete state.resources[key];
         await save(statePath, state);
-        success(`${managed.type}.${key} (#${managed.id}) already deleted in ChurchTools — removed from state`);
+        success(
+          `${managed.type}.${key} (#${managed.id}) already deleted in ChurchTools — removed from state`,
+        );
         continue;
       }
       // Same formatter the top-level handler uses (#50) so a non-404 CtApiError's HTTP status +

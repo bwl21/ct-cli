@@ -418,7 +418,8 @@ export function reresolvePendingValue(value: unknown, state: State): unknown {
   if (Array.isArray(value)) return value.map((v) => reresolvePendingValue(v, state));
   if (value !== null && typeof value === "object") {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = reresolvePendingValue(v, state);
+    for (const [k, v] of Object.entries(value as Record<string, unknown>))
+      out[k] = reresolvePendingValue(v, state);
     return out;
   }
   return value;

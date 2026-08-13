@@ -36,11 +36,11 @@ alone do not bypass that guardrail.
 
 Terraform-style. With the flag, `ct plan` exits:
 
-| Exit code | Meaning |
-|---|---|
-| `0` | no changes — desired state already matches ChurchTools (resources AND permissions) |
-| `1` | error — the plan is INCOMPLETE (a resource or permission fetch failed), or the command failed outright |
-| `2` | changes are pending — at least one resource item is not a no-op, OR at least one permission item has a grant/revoke to apply |
+| Exit code | Meaning                                                                                                                      |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `0`       | no changes — desired state already matches ChurchTools (resources AND permissions)                                           |
+| `1`       | error — the plan is INCOMPLETE (a resource or permission fetch failed), or the command failed outright                       |
+| `2`       | changes are pending — at least one resource item is not a no-op, OR at least one permission item has a grant/revoke to apply |
 
 Without the flag, behaviour is byte-identical to before: `ct plan` exits `1`
 only on an INCOMPLETE plan/error, `0` otherwise — so existing scripts that just
@@ -56,7 +56,7 @@ esac
 ```
 
 **Drift alone never sets exit `2`.** `--detailed-exitcode` mirrors what `ct
-apply` would actually *do* — an item can carry drift (ChurchTools changed
+apply` would actually _do_ — an item can carry drift (ChurchTools changed
 since the last apply) while its `action` stays `no-op` (the drifted field
 isn't managed by the current config, or happens to already match it), and
 `apply` would write nothing for it. Drift is always visible in the human
@@ -81,23 +81,24 @@ Shape:
   "plan": {
     "items": [
       {
-        "type": "group", "key": "kids", "id": 7, "action": "update",
-        "changes": [
-          { "field": "name", "from": "Kid's", "to": "Kids", "source": "config" }
-        ],
-        "drift": [
-          { "field": "campusId", "from": 4, "to": 9 }
-        ]
-      }
-    ]
+        "type": "group",
+        "key": "kids",
+        "id": 7,
+        "action": "update",
+        "changes": [{ "field": "name", "from": "Kid's", "to": "Kids", "source": "config" }],
+        "drift": [{ "field": "campusId", "from": 4, "to": 9 }],
+      },
+    ],
   },
-  "permissions": [ /* PermissionPlanItem[]: { key, domainType, domainId, pendingDomain?, diff: { toPut, toDelete, preserved } } */ ],
+  "permissions": [
+    /* PermissionPlanItem[]: { key, domainType, domainId, pendingDomain?, diff: { toPut, toDelete, preserved } } */
+  ],
   "summary": {
     "resources": { "create": 0, "update": 1, "delete": 0, "no-op": 3 },
     "drifted": 1,
     "permissions": { "toPut": 0, "toDelete": 0, "preserved": 0 },
-    "hasChanges": true
-  }
+    "hasChanges": true,
+  },
 }
 ```
 
@@ -124,7 +125,7 @@ Per resource item:
   manages that field — a **superset** of what `changes[].source` narrows
   down to only the fields `apply` will actually touch.
 - **Permission items carry no `source`.** The state file snapshots managed
-  *resource* fields only, not granted permissions, so there is no
+  _resource_ fields only, not granted permissions, so there is no
   last-known baseline to attribute a permission diff to config-vs-drift.
   `diff.toPut`/`diff.toDelete` is honestly just desired-vs-actual — this is
   the one place the tool cannot make the distinction, so it doesn't

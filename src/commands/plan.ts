@@ -9,6 +9,7 @@ import { Resolver } from "../resolve/resolver.js";
 import { renderPlan } from "../engine/render.js";
 import { summarize } from "../engine/types.js";
 import { buildPermissionPlan } from "../permissions/plan.js";
+import { loadHostCatalog } from "../permissions/catalog-store.js";
 import { renderPermissionPlan } from "../permissions/render.js";
 import { info, warn, out } from "../ui.js";
 
@@ -36,6 +37,12 @@ export function planCommand(): Command {
       const cmdEnv = await prepareEnv(opts);
       const config = await resolveConfig();
       const configPath = resolveConfigPath(opts.config);
+      // A per-instance permission catalog this repo committed for THIS host wins over the one bundled
+      // with the release (#105). Loaded BEFORE loadConfig, not just before the plan: config evaluation
+      // validates `preserveUnknown` dimensions against the active catalog's KNOWN_SCOPE_FIELDS, so
+      // loading it later would validate against the bundled catalog and plan against the captured one.
+      const hostCatalog = await loadHostCatalog(config.host);
+      if (hostCatalog) info(`permission catalog: ${hostCatalog}`);
       const { resources: desired, permissions, configDir } = await loadConfig(configPath);
       // loadState already refuses a host mismatch (state.ts) — no second guard needed here.
       const state = await loadState(cmdEnv.statePath, config.host);
@@ -45,11 +52,13 @@ export function planCommand(): Command {
       // instance means each master-data catalog is fetched at most once (cache is Promise-keyed).
       const resolver = new Resolver({ client, state, desired, host: config.host });
       // Independent fetches run concurrently (see commands/apply.ts).
-      const [{ plan, fetchErrors }, { items: permItems, fetchErrors: permFetchErrors, warnings: permWarnings }] =
-        await Promise.all([
-          buildPlan(client, state, desired, { configDir, resolver }),
-          buildPermissionPlan(client, state, permissions, desired, resolver, client.version ?? undefined),
-        ]);
+      const [
+        { plan, fetchErrors },
+        { items: permItems, fetchErrors: permFetchErrors, warnings: permWarnings },
+      ] = await Promise.all([
+        buildPlan(client, state, desired, { configDir, resolver }),
+        buildPermissionPlan(client, state, permissions, desired, resolver, client.version ?? undefined),
+      ]);
       // "Changes present" for --detailed-exitcode / the JSON summary: anything `ct apply` would
       // actually act on — a resource item whose action isn't a no-op, OR a permission item with a
       // grant/revoke to write. Drift by itself does NOT count: an item can carry `drift` while

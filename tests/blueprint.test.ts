@@ -23,7 +23,7 @@ describe("campus blueprint", () => {
     const order = orderKeys(resources);
     const pos = (k: string) => order.indexOf(k);
     for (const c of ["mainz", "berlin"]) {
-      expect(pos(c)).toBeLessThan(pos(`${c}_lead`));       // campus (tier 0) before its groups (tier 1)
+      expect(pos(c)).toBeLessThan(pos(`${c}_lead`)); // campus (tier 0) before its groups (tier 1)
       expect(pos(`${c}_lead`)).toBeLessThan(pos(`${c}_team`)); // parent before child (intra-tier dependency)
     }
   });
