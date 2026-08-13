@@ -99,6 +99,20 @@ describe("loadHostCatalog", () => {
     const dir = tempCatalogDir([]);
     await expect(loadHostCatalog(HOST, dir)).rejects.toThrow(/expected a JSON object/);
   });
+
+  // "It parsed as an object" is not enough for a file that decides what a permission NAME means: an
+  // entry with no authId resolves truthily, matches no actual, and reaches `ct apply` as a PUT
+  // carrying `authId: undefined`. It has to fail here, not three layers downstream on a write.
+  it("rejects an entry with no numeric authId rather than PUTting `authId: undefined` later", async () => {
+    const dir = tempCatalogDir({ "churchdb:view": { scopeField: null, revocable: false, desc: "" } });
+    await expect(loadHostCatalog(HOST, dir)).rejects.toThrow(/right "churchdb:view" has no numeric authId/);
+    expect(CATALOG_IS_PER_INSTANCE).toBe(false);
+  });
+
+  it("rejects an entry whose scopeField is neither a string nor null", async () => {
+    const dir = tempCatalogDir({ "churchdb:view": { authId: 1, scopeField: 7, revocable: false, desc: "" } });
+    await expect(loadHostCatalog(HOST, dir)).rejects.toThrow(/scopeField that is neither a string nor null/);
+  });
 });
 
 describe("capturePermissionCatalog", () => {

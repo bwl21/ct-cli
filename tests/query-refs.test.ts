@@ -88,7 +88,7 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
         var: "ctgroup.id",
         id: 999,
         reason: "unmanaged",
-        detail: "group #999 is not under management — `ct adopt group 999` (then re-adopt) makes it portable",
+        detail: "not under management — `ct adopt group <id>` for each (then re-adopt) makes them portable",
       },
     ]);
   });
@@ -156,7 +156,7 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
           var: "role.id",
           id: 999,
           reason: "role-unknown",
-          detail: "no /group/roles row carries groupTypeRoleId 999 on this host",
+          detail: "no /group/roles row on this host carries these groupTypeRoleIds",
         },
       ]);
     });
@@ -174,7 +174,7 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
           id: 84,
           reason: "role-group-type-unmanaged",
           detail:
-            'role "Leiter" belongs to group type #12, which is not managed — ' +
+            "the role's group type is not managed — " +
             "adopt that group type to make the (group-type, role) pair portable",
         },
       ]);
@@ -190,7 +190,7 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
           var: "role.id",
           id: 84,
           reason: "role-unknown",
-          detail: "no /group/roles row carries groupTypeRoleId 84 on this host",
+          detail: "no /group/roles row on this host carries these groupTypeRoleIds",
         },
       ]);
     });
@@ -243,7 +243,7 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
           var: "groupTypeRoleId",
           id: 4242,
           reason: "role-unknown",
-          detail: "no /group/roles row carries groupTypeRoleId 4242 on this host",
+          detail: "no /group/roles row on this host carries these groupTypeRoleIds",
         },
       ]);
     });
@@ -333,8 +333,7 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
         var: "ctgroup.id",
         id: 1246,
         reason: "unmanaged",
-        detail:
-          "group #1246 is not under management — `ct adopt group 1246` (then re-adopt) makes it portable",
+        detail: "not under management — `ct adopt group <id>` for each (then re-adopt) makes them portable",
       });
       // groupStatusId is never REWRITTEN (no catalog exists) but is still a host-specific id in a
       // cross-host file, so #101 reports it rather than letting the capture look fully portable.
@@ -353,6 +352,21 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
       expect(formatPortablizeWarnings(left).some((l) => l.startsWith("ctgroup.id: 1246 left numeric"))).toBe(
         true,
       );
+    });
+
+    // The scan has no state, no catalogs and no network, so it can prove POSITION and nothing else.
+    // Reporting "unmanaged" from here told someone whose group IS adopted that it is not under
+    // management — on every plan — and handed them a `ct adopt` that fails because it already is.
+    it("reports only what position proves — never an unchecked 'unmanaged'/'role-unknown' verdict", () => {
+      const left = scanUnportablized(normalized);
+      expect(left.some((w) => w.var === "ctgroup.id")).toBe(true);
+      expect(left.filter((w) => w.var === "ctgroup.id").every((w) => w.reason === "left-numeric")).toBe(true);
+      expect(left.filter((w) => w.var === "role.id").every((w) => w.reason === "left-numeric")).toBe(true);
+      expect(left.some((w) => /is not under management|no \/group\/roles row/.test(w.detail))).toBe(false);
+      // The catalog-less dimension keeps its own reason: that one IS derivable without any lookup.
+      expect(
+        left.filter((w) => w.var === "ctgroup.groupStatusId").every((w) => w.reason === "no-ref-kind"),
+      ).toBe(true);
     });
   });
 });

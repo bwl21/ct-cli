@@ -37,13 +37,15 @@ export function planCommand(): Command {
       const cmdEnv = await prepareEnv(opts);
       const config = await resolveConfig();
       const configPath = resolveConfigPath(opts.config);
+      // A per-instance permission catalog this repo committed for THIS host wins over the one bundled
+      // with the release (#105). Loaded BEFORE loadConfig, not just before the plan: config evaluation
+      // validates `preserveUnknown` dimensions against the active catalog's KNOWN_SCOPE_FIELDS, so
+      // loading it later would validate against the bundled catalog and plan against the captured one.
+      const hostCatalog = await loadHostCatalog(config.host);
+      if (hostCatalog) info(`permission catalog: ${hostCatalog}`);
       const { resources: desired, permissions, configDir } = await loadConfig(configPath);
       // loadState already refuses a host mismatch (state.ts) — no second guard needed here.
       const state = await loadState(cmdEnv.statePath, config.host);
-      // A per-instance permission catalog this repo committed for THIS host wins over the one bundled
-      // with the release (#105). Loaded before the plan is built so every right resolves against it.
-      const hostCatalog = await loadHostCatalog(config.host);
-      if (hostCatalog) info(`permission catalog: ${hostCatalog}`);
 
       const { client } = await authedSession();
       // One shared resolver (#20): buildPlan and buildPermissionPlan run concurrently, so a single

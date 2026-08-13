@@ -1,8 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { desiredTuples, buildPermissionPlan } from "../src/permissions/plan.js";
-import { CATALOG_META } from "../src/permissions/catalog.js";
+import { CATALOG, CATALOG_META, useCatalog, useBundledCatalog } from "../src/permissions/catalog.js";
 import { ref } from "../src/resolve/refs.js";
 import type { State } from "../src/state/state.js";
+
+/** The bundled rights, snapshotted before any test swaps the catalog (CATALOG is a live binding). */
+const bundledForTest = { ...CATALOG };
 
 const state: State = {
   version: 1,
@@ -414,6 +417,52 @@ describe("buildPermissionPlan", () => {
       CATALOG_META!.ctVersion,
     );
     expect(warnings).toEqual([]);
+  });
+
+  // A per-instance capture is authoritative for its host AT CAPTURE TIME — not forever. The instance
+  // gets upgraded while the committed file does not, which is exactly when a moved authId silently
+  // changes what a declared right grants, so the comparison must still run (#105 review).
+  it("still warns on version skew under a PER-INSTANCE catalog, naming --refresh as the remedy", async () => {
+    const client = { get: vi.fn(async () => []) };
+    useCatalog(
+      { ...bundledForTest, $meta: { ...CATALOG_META, ctVersion: "3.135.0" } },
+      { perInstance: true },
+    );
+    try {
+      const { warnings } = await buildPermissionPlan(
+        client as never,
+        state,
+        [{ key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchgroup:administer groups"] }],
+        [],
+        undefined,
+        "3.150.0",
+      );
+      expect(warnings.some((w) => /captured against ChurchTools 3\.135\.0/.test(w))).toBe(true);
+      expect(warnings.some((w) => /ct permissions catalog --refresh/.test(w))).toBe(true);
+    } finally {
+      useBundledCatalog();
+    }
+  });
+
+  it("stays quiet under a per-instance catalog captured against the version the host still runs", async () => {
+    const client = { get: vi.fn(async () => []) };
+    useCatalog(
+      { ...bundledForTest, $meta: { ...CATALOG_META, ctVersion: "3.135.0" } },
+      { perInstance: true },
+    );
+    try {
+      const { warnings } = await buildPermissionPlan(
+        client as never,
+        state,
+        [{ key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchgroup:administer groups"] }],
+        [],
+        undefined,
+        "3.135.0",
+      );
+      expect(warnings).toEqual([]);
+    } finally {
+      useBundledCatalog();
+    }
   });
   // The PERSON-status domain end to end (#90): a `personStatus` ref resolves against /statuses, the
   // planner bulk-fetches /permissions/status, and the live `dataId: -1` ALL sentinel round-trips to

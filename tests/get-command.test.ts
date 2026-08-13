@@ -225,4 +225,13 @@ describe("ct get raw pagination (#100)", () => {
   it("rejects a nonsense --page instead of silently probing page 1", async () => {
     await expect(runGet(["raw", "/groups", "--page", "0"])).rejects.toThrow(/Invalid --page/);
   });
+
+  // Both spellings are explicit, so neither may be silently dropped. Appending anyway produced
+  // `?limit=50&page=2&limit=100` — a duplicated param whose winner is the server's parsing rule.
+  it("rejects --page combined with page/limit already in the path", async () => {
+    await expect(runGet(["raw", "/groups?limit=50", "--page", "2"])).rejects.toThrow(
+      /--page 2 conflicts with the page\/limit already in the path/,
+    );
+    expect(getRawMock).not.toHaveBeenCalled();
+  });
 });

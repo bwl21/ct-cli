@@ -396,7 +396,9 @@ describe("ct adopt group --with-dynamic --portable-rulesets (#76 Stage 3)", () =
     // The whole point of #101: not "left N ids numeric", but WHICH dimension, WHICH ids, and WHY.
     expect(warned).toContain("rulesets/portable_dynamic.json keeps");
     expect(warned).toContain("NOT portable to another host");
-    expect(warned).toMatch(/ctgroup\.id: 999 left numeric — group #999 is not under management/);
+    // Detail is id-free: formatPortablizeWarnings prints the ids once, ahead of it, so a detail
+    // naming one id would be stamped across every id merged into the line.
+    expect(warned).toMatch(/ctgroup\.id: 999 left numeric — not under management/);
     expect(warned).toMatch(/ctgroup\.groupStatusId: 1, 2 left numeric — group statuses have no REST catalog/);
   });
 

@@ -187,23 +187,32 @@ materially worse than a wrong permission scope, because an auto-group's payload
 IS group membership — which is what carries grants.
 
 So every id left numeric is named, with its reason, **both at capture and at
-plan time**:
+plan time**.
+
+At **capture** time (`ct adopt … --with-dynamic`) the state file and the
+`/group/roles` catalog are both in hand, so the reason is a checked fact:
 
 ```text
 ! rulesets/jugend.json keeps 3 host-specific id(s) — NOT portable to another host:
-    ctgroup.id: 1246 left numeric — group #1246 is not under management — `ct adopt group 1246` (then re-adopt) makes it portable
+    ctgroup.id: 1246 left numeric — not under management — `ct adopt group <id>` for each (then re-adopt) makes them portable
     ctgroup.groupStatusId: 1, 2 left numeric — group statuses have no REST catalog (#67) — no logical form exists
 ```
 
+At **plan** time the same scan runs over every declared dynamic group, but with
+no state, no catalogs and no network — it can prove that an id sits in an entity
+position and nothing more. So it says exactly that, rather than asserting a
+reason it never checked:
+
 ```text
 ! dynamic group "jugend": ruleset carries 1 host-specific id(s) — not portable to another instance:
-    ctgroup.id: 1246 left numeric — group #1246 is not under management — …
+    ctgroup.id: 1246 left numeric — host-specific id(s) frozen into a cross-host ruleset — re-adopt the group with `--with-dynamic` to rewrite them into logical references (it reports what, if anything, blocks each)
 ```
 
-The reasons are distinct because the fixes are: an **unmanaged** target (adopt
-it), a **role unknown to `/group/roles`**, a role whose **group type is
-unmanaged**, or a dimension with **no logical form at all**
-(`ctgroup.groupStatusId` — group statuses have no REST catalog, #67).
+The capture-time reasons are distinct because the fixes are: an **unmanaged**
+target (adopt it), a **role unknown to `/group/roles`**, a role whose **group
+type is unmanaged**, or a dimension with **no logical form at all**
+(`ctgroup.groupStatusId` — group statuses have no REST catalog, #67; this one
+needs no lookup, so the plan-time scan reports it too).
 
 **`--strict-rulesets`** turns the warning into a refusal: adopt writes nothing
 if the ruleset would still contain a host-specific id. Use it in a repo that has

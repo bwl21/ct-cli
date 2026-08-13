@@ -109,11 +109,13 @@ ct permissions catalog --refresh --env prod   # → .ct/permission-catalog.<host
 ct permissions catalog --env prod             # show which catalog is active, and where it came from
 ```
 
-**Commit that file.** Every subsequent `ct plan` / `ct apply` against that host
-loads it in preference to the catalog bundled with the `ct` release, and says so
-in its header (`permission catalog: .ct/permission-catalog.<host>.json`). A repo
-that never runs the refresh is unaffected — the bundled catalog stays the
-fallback.
+**Commit that file.** Every subsequent command that needs to know what a right
+_is_ — `ct plan`, `ct apply`, `ct coverage`, `ct adopt grants` — loads it in
+preference to the catalog bundled with the `ct` release, and says so in its
+header (`permission catalog: .ct/permission-catalog.<host>.json`). They all load
+it, and all load it before evaluating your config, so no two of them can disagree
+about the same right on the same host. A repo that never runs the refresh is
+unaffected — the bundled catalog stays the fallback.
 
 This exists because the bundled catalog is a snapshot of **one** instance's
 ChurchTools version, and the staleness warning below used to tell you to run a
@@ -137,11 +139,10 @@ records the version the catalog was captured from. On every `plan`/`apply`:
 
 - If the live instance's CT version differs from `$meta.ctVersion`, `ct plan`
   prints a warning — right names/authIds/scopeFields may have drifted; capture
-  one for this instance to be sure. **This warning is suppressed once a
-  per-instance catalog is loaded** (#105): a capture taken from the host you are
-  planning against is authoritative for it, and a warning that fires on every
-  single plan is one nobody reads — including on the plan where a moved authId
-  would actually matter.
+  one for this instance to be sure. A per-instance capture is authoritative for
+  its host **at capture time, not forever**: the instance gets upgraded while the
+  committed file does not, so the comparison still runs against a capture, and
+  the warning then asks you to _re-capture_ rather than to capture.
 - If a **live grant carries an `authId` the catalog cannot name** (a stale or
   foreign right), `ct plan` names the `authId` + domain and **leaves the grant
   untouched** — it is deliberately kept _out_ of the diff so `ct apply` never
@@ -149,7 +150,7 @@ records the version the catalog was captured from. On every `plan`/`apply`:
   is excluded every run, so it neither churns nor silently disappears.
 
 Both are warnings, not errors: the plan still runs and the exit code stays
-success. Regenerating the catalog (above) is the fix for both.
+success. `ct permissions catalog --refresh` is the fix for both.
 
 ## `domainId` semantics
 

@@ -19,7 +19,8 @@ import {
   renderRoleInstances,
   type CoverageReport,
 } from "../coverage/report.js";
-import type { RawPermission } from "../permissions/grants.js";
+import { fetchPermissionRows, type PermissionReader } from "../permissions/fetch.js";
+import { loadHostCatalog } from "../permissions/catalog-store.js";
 import { slug } from "../resources/registry.js";
 import { loadState, type State } from "../state/state.js";
 import { info, out } from "../ui.js";
@@ -53,6 +54,12 @@ export function coverageCommand(): Command {
       const cmdEnv = await prepareEnv(opts);
       const config = await resolveConfig();
       const state = await loadState(cmdEnv.statePath, config.host);
+      // The declarability verdict is computed from the catalog's authIds and scope dimensions, so it
+      // must read the SAME catalog `ct plan` does for this host (#105) — otherwise a right the
+      // committed capture can name is reported here as "blocked by authId N" (failing a `--json` CI
+      // gate) while `ct plan` manages it without complaint.
+      const hostCatalog = await loadHostCatalog(config.host);
+      if (hostCatalog) info(`permission catalog: ${hostCatalog}`);
       const { client } = await authedSession();
 
       const report = await collectCoverage(client, config.host, state);
@@ -92,7 +99,7 @@ export function coverageCommand(): Command {
 
 /** Fetch everything the report needs. Split out from the action so it is reusable and mockable. */
 export async function collectCoverage(
-  client: Pick<CtClient, "get" | "getAll">,
+  client: PermissionReader & Pick<CtClient, "getAll">,
   host: string,
   state: State,
 ): Promise<CoverageReport> {
@@ -102,9 +109,9 @@ export async function collectCoverage(
     client.getAll<Record<string, unknown>>("/dynamicgroups"),
     client.getAll<Record<string, unknown>>("/group/roles"),
   ]);
-  // `/permissions/group_role` is a single instance-wide blob, not a paged list — same read the
-  // planner performs.
-  const groupRolePermissions = await client.get<RawPermission[]>("/permissions/group_role");
+  // Same guarded read the planner performs: one request while the endpoint stays un-paged, and a
+  // proper paging pass if it ever does paginate — never a silent first page (see permissions/fetch.ts).
+  const groupRolePermissions = await fetchPermissionRows(client, "/permissions/group_role");
 
   const groupTypeNames = new Map<number, string>();
   for (const row of groupTypeRows.data) {

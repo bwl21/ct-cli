@@ -57,12 +57,13 @@ export function applyCommand(): Command {
       const config = await resolveConfig();
       const configPath = resolveConfigPath(opts.config);
       const statePath = cmdEnv.statePath;
-      const { resources: desired, permissions, configDir } = await loadConfig(configPath);
-      const state = await loadState(statePath, config.host);
       // A per-instance permission catalog this repo committed for THIS host wins over the bundled
-      // one (#105) — same precedence as `ct plan`, so the two never disagree about what a right is.
+      // one (#105) — same precedence AND same ordering as `ct plan`, so the two never disagree about
+      // what a right is (config evaluation validates scope dimensions against the active catalog).
       const hostCatalog = await loadHostCatalog(config.host);
       if (hostCatalog) info(`permission catalog: ${hostCatalog}`);
+      const { resources: desired, permissions, configDir } = await loadConfig(configPath);
+      const state = await loadState(statePath, config.host);
 
       const { client } = await authedSession();
       // One shared resolver (#20) across both concurrent plans — see commands/plan.ts.

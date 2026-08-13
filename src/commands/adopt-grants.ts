@@ -7,6 +7,8 @@ import { prepareEnv } from "../env/context.js";
 import { assertNotPeople } from "../engine/guard.js";
 import { buildAdoptedGrants, type AdoptedGrantsBlock } from "../permissions/adopt.js";
 import type { DomainType, RawPermission } from "../permissions/grants.js";
+import { fetchPermissionRows, type PermissionReader } from "../permissions/fetch.js";
+import { loadHostCatalog } from "../permissions/catalog-store.js";
 import { declarability, decodeGroupsWithRoles, type RoleInstance } from "../coverage/report.js";
 import { slug } from "../resources/registry.js";
 import { loadState, type State } from "../state/state.js";
@@ -91,6 +93,12 @@ export function adoptGrantsCommand(): Command {
         const config = await resolveConfig();
         const statePath = cmdEnv.statePath;
         const state = await loadState(statePath, config.host);
+        // Bulk selection runs the same declarability verdict as `ct coverage`, so it needs this
+        // host's catalog for the same reason (#105): under the bundled one, `--all-declarable`
+        // silently SKIPS role instances `ct plan` would manage, filed under an authId the active
+        // catalog can name perfectly well.
+        const hostCatalog = await loadHostCatalog(config.host);
+        if (hostCatalog) info(`permission catalog: ${hostCatalog}`);
         const { client } = await authedSession();
 
         const emitted = bulk
@@ -119,7 +127,7 @@ export function adoptGrantsCommand(): Command {
 
 /** The original single-domain form: `ct adopt grants <domainType> <domainId>`. */
 async function emitSingle(
-  client: Pick<CtClient, "get">,
+  client: PermissionReader,
   state: State,
   rawType: string | undefined,
   rawId: string | undefined,
@@ -136,7 +144,7 @@ async function emitSingle(
   const domainId = Number.parseInt(rawId, 10);
   const path = `/permissions/${domainType}/${domainId}`;
   assertNotPeople(path); // belt-and-suspenders: the domain-type guard already excludes people
-  const rows = await client.get<RawPermission[]>(path);
+  const rows = await fetchPermissionRows(client, path);
   return buildAdoptedGrants({ domainType, domainId, rows, state });
 }
 
@@ -147,7 +155,7 @@ async function emitSingle(
  * per-block WARNING header stops being a safeguard and becomes noise the reader scrolls past.
  */
 async function emitBulk(
-  client: Pick<CtClient, "get" | "getAll">,
+  client: PermissionReader & Pick<CtClient, "getAll">,
   state: State,
   opts: AdoptGrantsOptions,
 ): Promise<AdoptedGrantsBlock[]> {
@@ -162,9 +170,11 @@ async function emitBulk(
     if (Number.isFinite(id) && typeof r.name === "string") roleNamesById.set(id, r.name);
   }
   const groups = decodeGroupsWithRoles(groupRows.data, roleNamesById);
-  const permissions = await client.get<RawPermission[]>("/permissions/group_role");
+  // Guarded read (see permissions/fetch.ts): a silent first page here would drop most role instances
+  // into the "no authored grants" bucket, which reads identically to a correct run.
+  const permissions = await fetchPermissionRows(client, "/permissions/group_role");
   const rowsByDomainId = new Map<number, RawPermission[]>();
-  for (const row of Array.isArray(permissions) ? permissions : []) {
+  for (const row of permissions) {
     const list = rowsByDomainId.get(row.domainId);
     if (list) list.push(row);
     else rowsByDomainId.set(row.domainId, [row]);

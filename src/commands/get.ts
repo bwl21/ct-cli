@@ -152,8 +152,16 @@ export async function getRaw(
     }
     page = Number.parseInt(String(opts.page), 10);
   }
-  // A path that already carries page/limit is the caller hand-rolling their own paging: honour it
-  // verbatim rather than appending a second, conflicting pair.
+  // A path that already carries page/limit is the caller hand-rolling their own paging. Combining it
+  // with --page produced `?limit=50&page=2&limit=100` — a duplicated param whose winner is the
+  // server's parsing rule, so the returned window's size was not predictable from what was typed.
+  // Rejected rather than silently picking one: both spellings are explicit, so neither may be dropped.
+  if (page !== undefined && hasOwnPageParams(target)) {
+    throw new Error(
+      `--page ${page} conflicts with the page/limit already in the path — ` +
+        `keep the query string's own paging, or drop it and use --page.`,
+    );
+  }
   const single = opts.paginate === false || page !== undefined || hasOwnPageParams(target);
 
   if (single) {

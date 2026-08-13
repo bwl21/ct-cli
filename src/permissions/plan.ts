@@ -4,8 +4,8 @@
  * (the managed-guard — unmanaged domainIds are never surfaced or touched),
  * and diff. Mirrors `src/engine/build.ts`'s fetch-error handling.
  */
-import type { CtClient } from "../api/ctClient.js";
 import { CtApiError } from "../api/ctClient.js";
+import { fetchPermissionRows, type PermissionReader } from "./fetch.js";
 import type { State } from "../state/state.js";
 import type { DesiredResource } from "../engine/types.js";
 import {
@@ -197,7 +197,7 @@ async function resolveDomainIds(
 }
 
 export async function buildPermissionPlan(
-  client: Pick<CtClient, "get">,
+  client: PermissionReader,
   state: State,
   permissions: DesiredPermission[],
   desired: DesiredResource[] = [],
@@ -211,22 +211,26 @@ export async function buildPermissionPlan(
   // live instance reports a different version, right names/authIds/scopeFields may have drifted —
   // warn (never fail) so the diff is trusted-but-verified.
   //
-  // Two narrowings since #105, both aimed at the same failure: a warning that fires on every plan is
-  // a warning nobody reads, including on the plan where a moved authId would actually matter.
-  //  1. A catalog captured FROM THIS HOST is authoritative for it, so a version delta against the
-  //     BUNDLED catalog is the only thing worth mentioning.
-  //  2. The remediation now names a command a consumer repo can actually run.
+  // The remediation now names a command a consumer repo can actually run (#105) — the old text
+  // pointed at a script that only exists in this repo, so the warning was unactionable where printed.
+  //
+  // A per-instance capture is authoritative for its host AT CAPTURE TIME, not forever: the instance
+  // gets upgraded while the committed file does not. So the version is compared either way; only the
+  // wording differs, because "re-capture" and "capture one" are different asks.
   if (
     permissions.length > 0 &&
     instanceVersion &&
     CATALOG_META &&
-    !CATALOG_IS_PER_INSTANCE &&
     compareVersions(instanceVersion, CATALOG_META.ctVersion) !== 0
   ) {
     warnings.push(
-      `Permission catalog was captured from ChurchTools ${CATALOG_META.ctVersion} but this instance ` +
-        `runs ${instanceVersion}. Right names/authIds may be stale — capture one for this instance ` +
-        `with \`ct permissions catalog --refresh\` (see docs/handbuch/permissions.md).`,
+      CATALOG_IS_PER_INSTANCE
+        ? `Permission catalog for this host was captured against ChurchTools ${CATALOG_META.ctVersion} ` +
+            `but the instance now runs ${instanceVersion}. Right names/authIds may have drifted since — ` +
+            `re-capture with \`ct permissions catalog --refresh\` (see docs/handbuch/permissions.md).`
+        : `Permission catalog was captured from ChurchTools ${CATALOG_META.ctVersion} but this instance ` +
+            `runs ${instanceVersion}. Right names/authIds may be stale — capture one for this instance ` +
+            `with \`ct permissions catalog --refresh\` (see docs/handbuch/permissions.md).`,
     );
   }
   // Resolve logical domainIds (#20) up front. Shares the command layer's resolver so master-data
@@ -244,7 +248,7 @@ export async function buildPermissionPlan(
   const byType = new Map<DomainType, RawPermission[] | null>();
   for (const dt of new Set(resolved.filter((p) => p.pendingDomain === undefined).map((p) => p.domainType))) {
     try {
-      byType.set(dt, await client.get<RawPermission[]>(`/permissions/${dt}`));
+      byType.set(dt, await fetchPermissionRows(client, `/permissions/${dt}`));
     } catch (err) {
       const message = err instanceof CtApiError ? `${err.status}` : (err as Error).message;
       fetchErrors.push(`permissions ${dt}: ${message}`);
@@ -299,8 +303,8 @@ export async function buildPermissionPlan(
     for (const authId of [...unknownAuthIds].sort((a, b) => a - b)) {
       warnings.push(
         `${p.domainType} #${p.domainId} ("${p.key}"): a live grant carries authId ${authId}, which is ` +
-          `not in the permission catalog — left untouched (never revoked). Regenerate the catalog ` +
-          `(\`npm run regenerate:permission-catalog\`) if this right should be manageable.`,
+          `not in the permission catalog — left untouched (never revoked). Capture this instance's own ` +
+          `catalog (\`ct permissions catalog --refresh\`) if this right should be manageable.`,
       );
     }
     items.push({

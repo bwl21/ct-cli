@@ -63,8 +63,35 @@ export async function loadHostCatalog(host: string, dir: string = CATALOG_DIR): 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error(`Malformed permission catalog ${path}: expected a JSON object at the top level.`);
   }
+  assertCatalogShape(parsed as Record<string, unknown>, path);
   useCatalog(parsed, { perInstance: true });
   return path;
+}
+
+/**
+ * Check every right entry, not just the top level. "It parsed as an object" is far too weak a gate
+ * for a file that decides what a permission NAME means: an entry missing its `authId` still resolves
+ * truthily, so `resolveAuthId` hands back `{ authId: undefined }`, the tuple matches no actual, and
+ * `ct apply` PUTs a permission row with `authId: undefined`. A hand-edited, half-merged or
+ * future-shaped capture must fail here, loudly, rather than three layers downstream on a write.
+ */
+function assertCatalogShape(parsed: Record<string, unknown>, path: string): void {
+  for (const [name, value] of Object.entries(parsed)) {
+    if (name === "$meta") continue; // reserved provenance key — not a right (see catalog.ts)
+    const bad = (why: string): never => {
+      throw new Error(`Malformed permission catalog ${path}: right "${name}" ${why}.`);
+    };
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      bad("is not an object");
+    }
+    const entry = value as Record<string, unknown>;
+    if (typeof entry.authId !== "number" || !Number.isFinite(entry.authId)) {
+      bad("has no numeric authId");
+    }
+    if (entry.scopeField !== null && typeof entry.scopeField !== "string") {
+      bad("has a scopeField that is neither a string nor null");
+    }
+  }
 }
 
 /** The legacy master-data shape (`auth_table[module][right]`) — see `capturePermissionCatalog`. */
