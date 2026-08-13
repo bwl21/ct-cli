@@ -74,8 +74,6 @@ export async function confirmEnv(
     return false;
   }
   const ask = opts.ask ?? realAsk;
-  const answer = await ask(
-    `Protected environment "${envName}". Type the environment name to confirm: `,
-  );
+  const answer = await ask(`Protected environment "${envName}". Type the environment name to confirm: `);
   return answer.trim() === envName;
 }

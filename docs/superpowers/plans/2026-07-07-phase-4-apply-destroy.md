@@ -42,11 +42,13 @@
 ## Task 1: `preventDestroy` lifecycle flag
 
 **Files:**
+
 - Modify: `src/engine/types.ts`
 - Modify: `src/config/context.ts`
 - Test: `tests/context.test.ts`
 
 **Interfaces:**
+
 - Produces: `DesiredResource.preventDestroy?: boolean`; `ResourceInput.preventDestroy?: boolean`. The flag is extracted before building `fields`, so it is never diffed or sent to the API.
 
 - [ ] **Step 1: Write the failing test** — append to `tests/context.test.ts`:
@@ -125,10 +127,12 @@ git commit -m "feat(config): preventDestroy lifecycle flag"
 ## Task 2: Registry write specs + new writable types
 
 **Files:**
+
 - Modify: `src/resources/registry.ts`
 - Test: `tests/registry.test.ts`
 
 **Interfaces:**
+
 - Produces: `AdoptableResource` gains `collectionPath: string` and `updateMethod: "PUT" | "PATCH"`. `itemPath(id)` still returns `\`${collectionPath}/${id}\``. New entries: `age-group`, `target-group`, `relationship-type`, `group-role`.
 
 - [ ] **Step 1: Write the failing test** — append to `tests/registry.test.ts`:
@@ -259,10 +263,12 @@ git commit -m "feat(registry): write specs (collectionPath, updateMethod) + new 
 ## Task 3: People-boundary guard
 
 **Files:**
+
 - Create: `src/engine/guard.ts`
 - Test: `tests/guard.test.ts`
 
 **Interfaces:**
+
 - Produces: `assertNotPeople(path: string): void` — throws for any people/membership write path; returns silently for structural paths (including `/groups/{id}/parents/{id}`).
 
 - [ ] **Step 1: Write the failing test** — create `tests/guard.test.ts`:
@@ -325,9 +331,7 @@ const FORBIDDEN: RegExp[] = [
 
 export function assertNotPeople(path: string): void {
   if (FORBIDDEN.some((re) => re.test(path))) {
-    throw new Error(
-      `Refusing to write to "${path}": people/memberships are never managed by this tool.`,
-    );
+    throw new Error(`Refusing to write to "${path}": people/memberships are never managed by this tool.`);
   }
 }
 ```
@@ -349,10 +353,12 @@ git commit -m "feat(engine): assertNotPeople hard boundary guard"
 ## Task 4: Backup writer
 
 **Files:**
+
 - Create: `src/engine/backup.ts`
 - Test: `tests/backup.test.ts`
 
 **Interfaces:**
+
 - Produces: `writeBackup(dir: string, host: string, actual: Map<string, Record<string, unknown>>, now?: Date): Promise<string>` — returns the written file path. Creates `dir` if missing. Filename `ct-backup-<ISO with ':'→'-'>.json`. Content: `{ host, capturedAt, resources }`.
 
 - [ ] **Step 1: Write the failing test** — create `tests/backup.test.ts`:
@@ -447,10 +453,12 @@ git commit -m "feat(engine): pre-write backup writer"
 ## Task 5: Confirmation prompts
 
 **Files:**
+
 - Create: `src/ui/prompt.ts`
 - Test: `tests/prompt.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `confirm(message: string, opts?: PromptOptions & { assumeYes?: boolean }): Promise<boolean>`
   - `confirmTyped(expected: string, opts?: PromptOptions & { force?: boolean }): Promise<boolean>`
@@ -578,11 +586,13 @@ git commit -m "feat(ui): confirm + confirmTyped prompts"
 ## Task 6: Shared plan building (`buildPlan`)
 
 **Files:**
+
 - Create: `src/engine/build.ts`
 - Modify: `src/commands/plan.ts`
 - Test: `tests/build.test.ts`
 
 **Interfaces:**
+
 - Produces: `buildPlan(client, state, desired): Promise<BuildResult>` where
   - `client: Pick<CtClient, "get">`
   - `interface BuildResult { plan: Plan; actual: Map<string, Record<string, unknown>>; fetchErrors: string[] }`
@@ -795,10 +805,12 @@ git commit -m "refactor(engine): extract buildPlan; plan command reuses it"
 ## Task 7: The executor (`executePlan`)
 
 **Files:**
+
 - Create: `src/engine/execute.ts`
 - Test: `tests/execute.test.ts`
 
 **Interfaces:**
+
 - Consumes: `RESOURCES` (Task 2), `assertNotPeople` (Task 3), `upsert`/`saveState` from `state.ts`, `Plan`/`PlanItem`/`FieldChange` from `types.ts`.
 - Produces:
   - `interface ExecuteDeps { client: Pick<CtClient, "request">; state: State; statePath: string; now?: () => string; save?: (path: string, state: State) => Promise<void> }`
@@ -853,35 +865,93 @@ describe("executePlan", () => {
         },
       ],
     };
-    const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    const result = await executePlan(plan, {
+      client,
+      state,
+      statePath: "s.json",
+      save: noSave,
+      now: fixedNow,
+    });
     expect(result.created).toEqual(["zurich"]);
-    expect(calls[0]).toEqual({ method: "POST", path: "/campuses", body: { name: "Zürich", shortName: "ZH" } });
-    expect(state.resources.zurich).toMatchObject({ type: "campus", id: 5, key: "zurich", fields: { name: "Zürich", shortName: "ZH" } });
+    expect(calls[0]).toEqual({
+      method: "POST",
+      path: "/campuses",
+      body: { name: "Zürich", shortName: "ZH" },
+    });
+    expect(state.resources.zurich).toMatchObject({
+      type: "campus",
+      id: 5,
+      key: "zurich",
+      fields: { name: "Zürich", shortName: "ZH" },
+    });
   });
 
   it("updates a group via PATCH with the full managed snapshot", async () => {
     const state = emptyState("h");
-    state.resources.team = { type: "group", id: 9, key: "team", fields: { name: "Team", groupTypeId: 2, groupStatusId: 1 }, adoptedAt: "t", updatedAt: "t" };
+    state.resources.team = {
+      type: "group",
+      id: 9,
+      key: "team",
+      fields: { name: "Team", groupTypeId: 2, groupStatusId: 1 },
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
     const { client, calls } = recorder();
     const plan: Plan = {
       items: [
-        { type: "group", key: "team", id: 9, action: "update", changes: [{ field: "name", from: "Team", to: "Team A" }] },
+        {
+          type: "group",
+          key: "team",
+          id: 9,
+          action: "update",
+          changes: [{ field: "name", from: "Team", to: "Team A" }],
+        },
       ],
     };
-    const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    const result = await executePlan(plan, {
+      client,
+      state,
+      statePath: "s.json",
+      save: noSave,
+      now: fixedNow,
+    });
     expect(result.updated).toEqual(["team"]);
-    expect(calls[0]).toEqual({ method: "PATCH", path: "/groups/9", body: { name: "Team A", groupTypeId: 2, groupStatusId: 1 } });
+    expect(calls[0]).toEqual({
+      method: "PATCH",
+      path: "/groups/9",
+      body: { name: "Team A", groupTypeId: 2, groupStatusId: 1 },
+    });
     expect(state.resources.team!.fields).toEqual({ name: "Team A", groupTypeId: 2, groupStatusId: 1 });
   });
 
   it("reconciles hierarchy edges via PUT/DELETE and never stores parents in state", async () => {
     const state = emptyState("h");
-    state.resources.parent = { type: "group", id: 1, key: "parent", fields: { name: "P" }, adoptedAt: "t", updatedAt: "t" };
-    state.resources.child = { type: "group", id: 2, key: "child", fields: { name: "C" }, adoptedAt: "t", updatedAt: "t" };
+    state.resources.parent = {
+      type: "group",
+      id: 1,
+      key: "parent",
+      fields: { name: "P" },
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
+    state.resources.child = {
+      type: "group",
+      id: 2,
+      key: "child",
+      fields: { name: "C" },
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
     const { client, calls } = recorder();
     const plan: Plan = {
       items: [
-        { type: "group", key: "child", id: 2, action: "update", changes: [{ field: "parents", from: [], to: ["parent"] }] },
+        {
+          type: "group",
+          key: "child",
+          id: 2,
+          action: "update",
+          changes: [{ field: "parents", from: [], to: ["parent"] }],
+        },
       ],
     };
     await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
@@ -894,7 +964,13 @@ describe("executePlan", () => {
     state.resources.old = { type: "campus", id: 3, key: "old", fields: {}, adoptedAt: "t", updatedAt: "t" };
     const { client, calls } = recorder();
     const plan: Plan = { items: [{ type: "campus", key: "old", id: 3, action: "delete", changes: [] }] };
-    const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    const result = await executePlan(plan, {
+      client,
+      state,
+      statePath: "s.json",
+      save: noSave,
+      now: fixedNow,
+    });
     expect(result.skippedDeletes).toEqual(["old"]);
     expect(calls).toEqual([]);
     expect(state.resources.old).toBeDefined();
@@ -908,9 +984,23 @@ describe("executePlan", () => {
       },
     };
     const plan: Plan = {
-      items: [{ type: "campus", key: "zurich", id: null, action: "create", changes: [{ field: "name", from: undefined, to: "Z" }] }],
+      items: [
+        {
+          type: "campus",
+          key: "zurich",
+          id: null,
+          action: "create",
+          changes: [{ field: "name", from: undefined, to: "Z" }],
+        },
+      ],
     };
-    const result = await executePlan(plan, { client, state, statePath: "s.json", save: noSave, now: fixedNow });
+    const result = await executePlan(plan, {
+      client,
+      state,
+      statePath: "s.json",
+      save: noSave,
+      now: fixedNow,
+    });
     expect(result.failed).toEqual({ key: "zurich", message: "boom" });
     expect(result.created).toEqual([]);
   });
@@ -1026,7 +1116,12 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
     }
     const spec = RESOURCES[item.type];
     if (!spec) {
-      return { created, updated, skippedDeletes, failed: { key: item.key, message: `No write spec for type "${item.type}".` } };
+      return {
+        created,
+        updated,
+        skippedDeletes,
+        failed: { key: item.key, message: `No write spec for type "${item.type}".` },
+      };
     }
 
     try {
@@ -1060,7 +1155,12 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         updated.push(item.key);
       }
     } catch (err) {
-      return { created, updated, skippedDeletes, failed: { key: item.key, message: err instanceof Error ? err.message : String(err) } };
+      return {
+        created,
+        updated,
+        skippedDeletes,
+        failed: { key: item.key, message: err instanceof Error ? err.message : String(err) },
+      };
     }
   }
 
@@ -1085,10 +1185,12 @@ git commit -m "feat(engine): executePlan — idempotent create/update + hierarch
 ## Task 8: `ct apply` command
 
 **Files:**
+
 - Create: `src/commands/apply.ts`
 - Test: `tests/apply.test.ts` (backup-dir resolution unit)
 
 **Interfaces:**
+
 - Consumes: `buildPlan` (Task 6), `executePlan` (Task 7), `writeBackup` (Task 4), `confirm` (Task 5), `renderPlan`, `summarize`.
 - Produces: `applyCommand(): Command`; exported helper `resolveBackupDir(explicit, statePath, env?): string` for testing.
 
@@ -1167,7 +1269,9 @@ export function applyCommand(): Command {
       const { plan, actual, fetchErrors } = await buildPlan(client, state, desired);
 
       if (fetchErrors.length > 0) {
-        error(`Aborting: ${fetchErrors.length} resource(s) could not be fetched — the plan is incomplete. Re-run when resolved.`);
+        error(
+          `Aborting: ${fetchErrors.length} resource(s) could not be fetched — the plan is incomplete. Re-run when resolved.`,
+        );
         process.exitCode = 1;
         return;
       }
@@ -1202,7 +1306,9 @@ export function applyCommand(): Command {
       const result = await executePlan(plan, { client, state, statePath, save: saveState });
       success(`Applied: ${result.created.length} created, ${result.updated.length} updated.`);
       if (result.failed) {
-        error(`Stopped at ${result.failed.key}: ${result.failed.message}. State saved up to this point — re-run to resume.`);
+        error(
+          `Stopped at ${result.failed.key}: ${result.failed.message}. State saved up to this point — re-run to resume.`,
+        );
         process.exitCode = 1;
       }
     });
@@ -1226,10 +1332,12 @@ git commit -m "feat(cli): ct apply — plan, confirm, backup, execute"
 ## Task 9: `ct destroy` command
 
 **Files:**
+
 - Create: `src/commands/destroy.ts`
 - Test: `tests/destroy.test.ts` (target parsing + reverse ordering + preventDestroy set)
 
 **Interfaces:**
+
 - Consumes: `RESOURCES`, `assertNotPeople`, `confirmTyped`, `writeBackup`, `tierOf` from `engine/graph.js`, `saveState`.
 - Produces: `destroyCommand(): Command`; exported helpers `parseTargets(raw: string[]): string[]` and `orderDestroy(state, keys): string[]`.
 
@@ -1249,7 +1357,14 @@ describe("parseTargets", () => {
 describe("orderDestroy", () => {
   it("orders higher tiers first (reverse of apply): groups before campuses", () => {
     const state = emptyState("h");
-    state.resources.mainz = { type: "campus", id: 0, key: "mainz", fields: {}, adoptedAt: "t", updatedAt: "t" };
+    state.resources.mainz = {
+      type: "campus",
+      id: 0,
+      key: "mainz",
+      fields: {},
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
     state.resources.team = { type: "group", id: 1, key: "team", fields: {}, adoptedAt: "t", updatedAt: "t" };
     expect(orderDestroy(state, ["mainz", "team"])).toEqual(["team", "mainz"]);
   });
@@ -1404,11 +1519,13 @@ git commit -m "feat(cli): ct destroy — explicit, protected, reverse-order dele
 ## Task 10: Wire commands + integration test + cleanup
 
 **Files:**
+
 - Modify: `src/index.ts`
 - Modify: `src/commands/placeholders.ts`
 - Test: `tests/cli.test.ts`, `tests/integration.test.ts`
 
 **Interfaces:**
+
 - Consumes: `applyCommand`, `destroyCommand`.
 - Produces: `apply`/`destroy` registered on the program; `placeholders.ts` no longer lists them.
 
@@ -1479,7 +1596,14 @@ describe("apply → re-plan shows no drift", () => {
     const client = fakeCt();
     const state = emptyState("h");
     // adopt the existing Mainz campus
-    state.resources.mz = { type: "campus", id: 0, key: "mz", fields: { name: "Mainz", shortName: "MZ" }, adoptedAt: "t", updatedAt: "t" };
+    state.resources.mz = {
+      type: "campus",
+      id: 0,
+      key: "mz",
+      fields: { name: "Mainz", shortName: "MZ" },
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
 
     const desired: DesiredResource[] = [
       { type: "campus", key: "mz", fields: { name: "Mainz City", shortName: "MZ" }, dependsOn: [] },
@@ -1521,8 +1645,8 @@ import { destroyCommand } from "./commands/destroy.js";
 and, after `program.addCommand(planCommand());`:
 
 ```ts
-  program.addCommand(applyCommand());
-  program.addCommand(destroyCommand());
+program.addCommand(applyCommand());
+program.addCommand(destroyCommand());
 ```
 
 (The `for (const cmd of plannedCommands())` loop stays — it just adds nothing now.)
@@ -1544,6 +1668,7 @@ git commit -m "feat(cli): wire apply/destroy; drop placeholders; DoD integration
 ## Task 11: Docs, live-verify field sets, lint/typecheck/build
 
 **Files:**
+
 - Modify: `README.md`
 - Modify: `src/resources/registry.ts` (only if live-verify shows different fields)
 
@@ -1574,5 +1699,5 @@ git commit -m "docs(phase-4): README apply/destroy; live-verified field sets"
 
 - **Spec coverage:** apply (T6–T8), destroy + preventDestroy (T1, T9), backup (T4, T8, T9), people boundary (T3, used in T7/T9), rate-limit/retry (existing — noted, no task), state-after-each (T7 saves; T9 saves), confirmation (T5, T8, T9), all writable types (T2), DoD integration (T10), live-verify (T11). No gaps.
 - **Type consistency:** `ExecuteDeps`/`ExecuteResult`/`BuildResult`/`PromptOptions` names are used identically across tasks. `snapshotFromChanges` is the single field-merge helper. `resolveBackupDir` defined in T8, reused by T9.
-- **Placeholder scan:** none — every code step is complete. The only deferred item is the *provisional field sets*, which are explicitly a live-verify step (T11) with a concrete verification command, not a plan gap.
+- **Placeholder scan:** none — every code step is complete. The only deferred item is the _provisional field sets_, which are explicitly a live-verify step (T11) with a concrete verification command, not a plan gap.
 - **Known limitation (documented):** `orderDestroy` uses reverse-tier order only (state doesn't store hierarchy edges), so deleting a parent group before its child within the same tier isn't auto-ordered; acceptable for Phase 4 and noted.

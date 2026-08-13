@@ -3,30 +3,30 @@ title: Field definitions & security levels
 sources:
   - src/commands/get.ts
   - src/api/ctClient.ts
-sources_hash: 50d1537fe9c47a10
+sources_hash: e22ccc069dc6b95a
 reviewed: 2026-08-13
 ---
 
 # Field definitions & security levels (#47, #48)
 
-`ct` can **read** the structural *schema* that defines what data a person or a
+`ct` can **read** the structural _schema_ that defines what data a person or a
 group carries: the person master-data model, the security-level enumeration, and
 the data-field definitions ("Datenfelder") for both persons and groups.
 
 ## Hard boundary — schema in scope, people never
 
-| In scope (schema / DEFINITIONS)                                              | **Never** (people / records)                                          |
-| --------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| What fields a person/group *has* (field definitions, types, field groups)   | The **value** of any field on an actual person or group record        |
-| The security-level model (levels + what visibility they gate)               | Which persons exist, their memberships, their master-data values      |
-| The person master-data model (sexes, titles, statuses, campuses, …)         | Assigning/reading a person's status, sex, campus, etc.                |
+| In scope (schema / DEFINITIONS)                                           | **Never** (people / records)                                     |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| What fields a person/group _has_ (field definitions, types, field groups) | The **value** of any field on an actual person or group record   |
+| The security-level model (levels + what visibility they gate)             | Which persons exist, their memberships, their master-data values |
+| The person master-data model (sexes, titles, statuses, campuses, …)       | Assigning/reading a person's status, sex, campus, etc.           |
 
 > **Exception — person statuses are managed, not just read (#96).** The status
-> *enumeration* ("0 - First", "3 - Group Active", …) is a declarable resource:
+> _enumeration_ ("0 - First", "3 - Group Active", …) is a declarable resource:
 > `ct.personStatus({ key, name, shorty })`, adoptable with
 > `ct adopt person-status <id>` and listable with `ct get statuses`
 > (`/statuses`, full CRUD). That is what lets a config declare permission grants
-> on a status (`ct.status`) and still stand up on a fresh host. Which *person*
+> on a status (`ct.status`) and still stand up on a fresh host. Which _person_
 > carries which status remains permanently out of scope, like every other
 > per-record value. Campuses are likewise managed (`ct.campus`); the rest of the
 > master-data model — sexes, titles, the security-level enumeration — stays
@@ -34,7 +34,7 @@ the data-field definitions ("Datenfelder") for both persons and groups.
 
 This mirrors the tool's permanent people boundary (README "People are never
 managed"; `assertNotPeople` in `src/engine/guard.ts`). The commands below read
-*definitions only*; none of them read or write a per-record field value.
+_definitions only_; none of them read or write a per-record field value.
 
 ## Read commands
 
@@ -102,11 +102,11 @@ the row out of the read-only section here and in the runbook.
 
 ## Endpoint reference
 
-| Purpose                                  | Path                    | Methods (this CT)        | `ct` surface                |
-| ---------------------------------------- | ----------------------- | ------------------------ | --------------------------- |
-| Person master-data model + security levels | `/person/masterdata`    | GET (read-only)          | `ct get person-masterdata`  |
-| Data-field definitions (person + group)  | `/dbfields`, `/dbfields/{id}` | GET (read-only)    | `ct get data-fields`        |
-| Field-definition **mutation**            | legacy `churchdb` AJAX (`db_insertfields`/`db_updatefields`/`db_deletefields`) | non-REST | **not managed — manual** |
+| Purpose                                    | Path                                                                           | Methods (this CT) | `ct` surface               |
+| ------------------------------------------ | ------------------------------------------------------------------------------ | ----------------- | -------------------------- |
+| Person master-data model + security levels | `/person/masterdata`                                                           | GET (read-only)   | `ct get person-masterdata` |
+| Data-field definitions (person + group)    | `/dbfields`, `/dbfields/{id}`                                                  | GET (read-only)   | `ct get data-fields`       |
+| Field-definition **mutation**              | legacy `churchdb` AJAX (`db_insertfields`/`db_updatefields`/`db_deletefields`) | non-REST          | **not managed — manual**   |
 
 All paths verified against public CT client libraries + CT Academy docs, **not**
 against this repo's (git-ignored, ungenerated) `src/api/schema.d.ts`.

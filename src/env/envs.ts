@@ -87,9 +87,7 @@ async function loadEnvsFile(path: string): Promise<Record<string, RawProfile>> {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new Error(
-      `Malformed environments file ${path}: not valid JSON (${(err as Error).message}).`,
-    );
+    throw new Error(`Malformed environments file ${path}: not valid JSON (${(err as Error).message}).`);
   }
   return validateEnvsFile(parsed, path);
 }

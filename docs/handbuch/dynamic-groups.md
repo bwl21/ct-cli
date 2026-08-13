@@ -6,7 +6,7 @@ sources:
   - src/engine/dynamic.ts
   - src/engine/synthetic.ts
   - src/commands/adopt-group.ts
-sources_hash: e78e72e535b895ae
+sources_hash: a1fd81d6d76bba76
 reviewed: 2026-08-10
 ---
 
@@ -120,7 +120,7 @@ no-op — it does not re-`PUT` on every apply). Two equivalent ways to author it
   Simple marker `kind`s carry a single `key` (the logical key / slug):
   `campus`, `group`, `group-type`. A **role** (`role.id`) uses the compound
   `group-type-role` marker instead — `{ "__ctRef": true, "kind":
-  "group-type-role", "groupType": "<group-type-key>", "role": "<role-name>" }` —
+"group-type-role", "groupType": "<group-type-key>", "role": "<role-name>" }` —
   because a ruleset's `role.id` is a **groupTypeRoleId** (a role scoped to a
   group type), and role names are not globally unique (see the table note
   below). See `ref` in `src/resolve/refs.ts`.
@@ -147,13 +147,13 @@ position that maps to a **managed** logical key is rewritten to its `{ __ctRef }
 marker; every other id is left numeric. The `var → RefKind` catalog it keys off
 (`VAR_REF_KINDS`) is:
 
-| ChurchQuery `var`      | marker `kind`      | source catalog / state          |
-| ---------------------- | ------------------ | ------------------------------- |
-| `ctgroup.id`           | `group`            | managed state (no REST catalog) |
-| `ctgroup.campusId`     | `campus`           | `/campuses`                     |
-| `person.campusId`      | `campus`           | `/campuses`                     |
-| `ctgroup.groupTypeId`  | `group-type`       | `/group/grouptypes`             |
-| `role.id`              | `group-type-role`  | `/group/roles` (by `groupTypeId` + name) |
+| ChurchQuery `var`     | marker `kind`     | source catalog / state                   |
+| --------------------- | ----------------- | ---------------------------------------- |
+| `ctgroup.id`          | `group`           | managed state (no REST catalog)          |
+| `ctgroup.campusId`    | `campus`          | `/campuses`                              |
+| `person.campusId`     | `campus`          | `/campuses`                              |
+| `ctgroup.groupTypeId` | `group-type`      | `/group/grouptypes`                      |
+| `role.id`             | `group-type-role` | `/group/roles` (by `groupTypeId` + name) |
 
 The same `group-type-role` rewrite also covers the **out-of-query** integer
 field `process.*.handleMembership.groupTypeRoleId` (the target role a

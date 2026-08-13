@@ -21,9 +21,24 @@ changes materially.
 
 ```json
 {
-  "$meta": { "capturedFrom": "eqrm.church.tools", "ctVersion": "3.134.0", "capturedAt": "2026-07-08", "rightCount": 187 },
-  "churchgroup:view group": { "authId": 1104, "scopeField": "cdb_gruppe", "revocable": false, "desc": "View group incl. its group members" },
-  "churchcore:administer settings": { "authId": 1, "scopeField": null, "revocable": false, "desc": "Edit system settings" }
+  "$meta": {
+    "capturedFrom": "eqrm.church.tools",
+    "ctVersion": "3.134.0",
+    "capturedAt": "2026-07-08",
+    "rightCount": 187
+  },
+  "churchgroup:view group": {
+    "authId": 1104,
+    "scopeField": "cdb_gruppe",
+    "revocable": false,
+    "desc": "View group incl. its group members"
+  },
+  "churchcore:administer settings": {
+    "authId": 1,
+    "scopeField": null,
+    "revocable": false,
+    "desc": "Edit system settings"
+  }
 }
 ```
 

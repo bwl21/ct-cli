@@ -19,26 +19,24 @@ const PROD = "https://mychurch.church.tools";
 
 /** Model a keychain as account → stored blob; wire the `security` CLI mock to read/write it. */
 function mockKeychain(store: Map<string, string>): void {
-  execFileMock.mockImplementation(
-    (_cmd: string, args: string[], cb: (e: unknown, v: unknown) => void) => {
-      const sub = args[0];
-      const account = args[args.indexOf("-a") + 1]!;
-      if (sub === "find-generic-password") {
-        const val = store.get(account);
-        if (val === undefined) return cb(new Error("not found"), null);
-        return cb(null, { stdout: val, stderr: "" });
-      }
-      if (sub === "add-generic-password") {
-        store.set(account, args[args.indexOf("-w") + 1]!);
-        return cb(null, { stdout: "", stderr: "" });
-      }
-      if (sub === "delete-generic-password") {
-        store.delete(account);
-        return cb(null, { stdout: "", stderr: "" });
-      }
-      return cb(new Error(`unexpected security subcommand ${sub}`), null);
-    },
-  );
+  execFileMock.mockImplementation((_cmd: string, args: string[], cb: (e: unknown, v: unknown) => void) => {
+    const sub = args[0];
+    const account = args[args.indexOf("-a") + 1]!;
+    if (sub === "find-generic-password") {
+      const val = store.get(account);
+      if (val === undefined) return cb(new Error("not found"), null);
+      return cb(null, { stdout: val, stderr: "" });
+    }
+    if (sub === "add-generic-password") {
+      store.set(account, args[args.indexOf("-w") + 1]!);
+      return cb(null, { stdout: "", stderr: "" });
+    }
+    if (sub === "delete-generic-password") {
+      store.delete(account);
+      return cb(null, { stdout: "", stderr: "" });
+    }
+    return cb(new Error(`unexpected security subcommand ${sub}`), null);
+  });
 }
 
 beforeEach(() => {

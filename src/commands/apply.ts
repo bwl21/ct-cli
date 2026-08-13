@@ -45,10 +45,7 @@ export function applyCommand(): Command {
     .option("-c, --config <path>", "config file (or set CT_CONFIG)")
     .option("-s, --state <path>", "state file (or set CT_STATE)")
     .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
-    .option(
-      "--confirm-env <name>",
-      "confirm a protected env non-interactively (must match --env exactly)",
-    )
+    .option("--confirm-env <name>", "confirm a protected env non-interactively (must match --env exactly)")
     .option("--backup-dir <path>", "directory for the pre-apply backup (or set CT_BACKUP_DIR)")
     .option("-y, --auto-approve", "skip the confirmation prompt")
     .option(
@@ -72,11 +69,13 @@ export function applyCommand(): Command {
       const resolver = new Resolver({ client, state, desired, host: config.host });
       // Independent fetches: the resource plan and the permission plan (whose instance-wide
       // /permissions/<domainType> reads are slow) run concurrently rather than back-to-back.
-      const [{ plan, actual, fetchErrors }, { items: permItems, fetchErrors: permFetchErrors, warnings: permWarnings }] =
-        await Promise.all([
-          buildPlan(client, state, desired, { configDir, resolver }),
-          buildPermissionPlan(client, state, permissions, desired, resolver, client.version ?? undefined),
-        ]);
+      const [
+        { plan, actual, fetchErrors },
+        { items: permItems, fetchErrors: permFetchErrors, warnings: permWarnings },
+      ] = await Promise.all([
+        buildPlan(client, state, desired, { configDir, resolver }),
+        buildPermissionPlan(client, state, permissions, desired, resolver, client.version ?? undefined),
+      ]);
 
       // Permission catalog warnings (#25): stale-version / unknown-authId (untouched, never revoked).
       for (const w of permWarnings) warn(w);
@@ -104,10 +103,7 @@ export function applyCommand(): Command {
       }
 
       const s = summarize(plan);
-      const permChangeCount = permItems.reduce(
-        (n, i) => n + i.diff.toPut.length + i.diff.toDelete.length,
-        0,
-      );
+      const permChangeCount = permItems.reduce((n, i) => n + i.diff.toPut.length + i.diff.toDelete.length, 0);
       const changeCount = s.create + s.update + permChangeCount;
       if (changeCount === 0) {
         success("No changes to apply.");
@@ -130,11 +126,7 @@ export function applyCommand(): Command {
         return;
       }
 
-      const backupPath = await writeBackup(
-        resolveBackupDir(opts.backupDir, statePath),
-        config.host,
-        actual,
-      );
+      const backupPath = await writeBackup(resolveBackupDir(opts.backupDir, statePath), config.host, actual);
       info(`Backup written: ${backupPath}`);
 
       const result = await executePlan(plan, { client, state, statePath, save: saveState });
@@ -160,7 +152,9 @@ export function applyCommand(): Command {
           `${permResult.failed.length} permission write(s) failed — re-run to resume (grant reconciliation is idempotent):`,
         );
         for (const f of permResult.failed) {
-          info(`    ${f.method} ${f.path} (authId ${f.authId}${f.dataId.length ? ` dataId ${f.dataId.join(",")}` : ""}): ${f.message}`);
+          info(
+            `    ${f.method} ${f.path} (authId ${f.authId}${f.dataId.length ? ` dataId ${f.dataId.join(",")}` : ""}): ${f.message}`,
+          );
         }
         process.exitCode = 1;
         return;
@@ -174,7 +168,10 @@ export function applyCommand(): Command {
         // so a freshly created auto-group is legitimately EMPTY right now. Saying so costs one line
         // and removes the "did it work?" that otherwise follows every first apply.
         const dynamicKeys = plan.items
-          .filter((i) => i.action !== "no-op" && i.action !== "delete" && i.changes.some((c) => c.field === "dynamic"))
+          .filter(
+            (i) =>
+              i.action !== "no-op" && i.action !== "delete" && i.changes.some((c) => c.field === "dynamic"),
+          )
           .map((i) => i.key);
         if (dynamicKeys.length > 0) {
           info(

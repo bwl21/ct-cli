@@ -5,7 +5,7 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: 755e1575996e49dc
+sources_hash: 2fe2c8ac3f4e7c00
 reviewed: 2026-08-13
 ---
 
@@ -20,25 +20,25 @@ person-status rights — as code, and reconcile them idempotently with the same
 ```ts
 export default (ct) => {
   ct.groupTypeRole({
-    key: "leiter_tpl",             // logical key (unique across the whole config)
-    groupType: "ministry_team",    // domain BY NAME — resolved to the domainId per host (#20)
+    key: "leiter_tpl", // logical key (unique across the whole config)
+    groupType: "ministry_team", // domain BY NAME — resolved to the domainId per host (#20)
     grants: [
-      "churchgroup:view group",                                    // unscoped
-      { right: "churchgroup:view group", scope: ["kids_area"] },   // scoped
+      "churchgroup:view group", // unscoped
+      { right: "churchgroup:view group", scope: ["kids_area"] }, // scoped
     ],
   });
 
   ct.groupRole({
     key: "kids_lead_grant",
-    group: "kids_area",      // domain BY (group, role) — resolved to the pairing domainId per host (#25)
-    role: "Leiter",          // (or keep the numeric escape hatch: `id: 2882`)
+    group: "kids_area", // domain BY (group, role) — resolved to the pairing domainId per host (#25)
+    role: "Leiter", // (or keep the numeric escape hatch: `id: 2882`)
     // "edit group memberships of group" is a scoped right, so it takes a `scope: [...]`.
     grants: [{ right: "churchgroup:edit group memberships of group", scope: ["kids_area"] }],
   });
 
   ct.status({
     key: "core_external_login",
-    personStatus: "5 - Core",  // domain BY PERSON-STATUS NAME — resolved against /statuses (#90)
+    personStatus: "5 - Core", // domain BY PERSON-STATUS NAME — resolved against /statuses (#90)
     // -1 is ChurchTools' "all values of this dimension" sentinel (here: every external system).
     grants: [{ right: "churchcore:login to external system", scope: [-1] }],
   });
@@ -91,7 +91,7 @@ Each line shows the name, its numeric `authId`, and whether it's `scoped`
 **plan/apply time** — inside `desiredTuples` (`src/permissions/plan.ts`),
 when grants are resolved to tuples against the catalog, after the authed
 fetch — with a "did you mean" hint drawn from same-module names. (Config
-evaluation only checks a grant's *shape*: `module:right` string or
+evaluation only checks a grant's _shape_: `module:right` string or
 `{ right, scope }`; it does not resolve the name against the catalog.)
 
 ## Catalog lifecycle & staleness (#25)
@@ -144,7 +144,7 @@ records the version the catalog was captured from. On every `plan`/`apply`:
   would actually matter.
 - If a **live grant carries an `authId` the catalog cannot name** (a stale or
   foreign right), `ct plan` names the `authId` + domain and **leaves the grant
-  untouched** — it is deliberately kept *out* of the diff so `ct apply` never
+  untouched** — it is deliberately kept _out_ of the diff so `ct apply` never
   revokes a right it cannot even describe. This is idempotent: the unknown row
   is excluded every run, so it neither churns nor silently disappears.
 
@@ -162,7 +162,7 @@ The two DSL functions manage two different ChurchTools "domain types," and
   `groupType: "<name>"` (resolved per host, #20) or directly as `id: <domainId>`.
 - **`group_role`** (`ct.groupRole`) — the domain is the **internal
   (group, role) pairing's own id** — a ChurchTools-internal id for one
-  specific group's specific role, *not* the group's id and *not* the role's
+  specific group's specific role, _not_ the group's id and _not_ the role's
   id. Declare it portably as `group: "<key>", role: "<name>"` (resolved per
   host, #25) or directly as `id: <domainId>`.
 - **`status`** (`ct.status`) — the domain is a **person status's own id**
@@ -197,7 +197,7 @@ The two DSL functions manage two different ChurchTools "domain types," and
   match it.
 
   > **Teardown caveat.** A person status is the one managed type whose deletion
-  > reaches person *records*: dropping the declaration and running `ct destroy`
+  > reaches person _records_: dropping the declaration and running `ct destroy`
   > deletes the status, and ChurchTools re-stamps every person carrying it.
   > `assertNotPeople` cannot catch this (`/statuses/{id}` is not a people path),
   > so `ct destroy` warns explicitly for this type and `--force` does **not**
@@ -207,8 +207,8 @@ The two DSL functions manage two different ChurchTools "domain types," and
   That is what makes a config using the `status` domain self-sufficient across
   hosts. Before it, `personStatus: "…"` could only resolve against statuses that
   already existed on the target instance, so a config that planned to a clean
-  no-op on prod died on dev with *"no managed resource and no live person-status
-  at /statuses matches key …"* — whose own advice ("Declare/adopt it") was not
+  no-op on prod died on dev with _"no managed resource and no live person-status
+  at /statuses matches key …"_ — whose own advice ("Declare/adopt it") was not
   actually possible. A status declared in the same config resolves to a pending
   domain and converges in one `ct apply`, exactly like a same-run group type.
 
@@ -256,7 +256,7 @@ handled as a **pending domain** rather than aborting the plan:
 
 **`group_role` is deliberately NOT symmetric here.** A `group_role` domain id is
 the (group, role) **pairing** id, which only exists on
-`GET /groups/{groupId}/roles` — re-resolving it needs a *live fetch* after the
+`GET /groups/{groupId}/roles` — re-resolving it needs a _live fetch_ after the
 group exists, not just a post-execute state lookup. So a `group_role` domain
 referencing a same-run-created **group** still fails fast with its own
 actionable message ("apply the group first, or pass a numeric id"). Its harder
@@ -268,16 +268,16 @@ scenario).
 A scoped grant's `scope: [...]` is a list where each entry is one of three
 forms (`src/permissions/scope.ts`):
 
-| Form | Example | Dimension |
-| --- | --- | --- |
-| **Logical group key** (string) | `scope: ["kids_area"]` | groups (`cdb_gruppe`) only |
-| **Typed logical reference** (#98) | `scope: [{ campus: "koblenz" }]` | campuses, group types — see below |
-| **Raw numeric `dataId`** (escape hatch, #49) | `scope: [1, 2, 3]` | any dimension |
+| Form                                         | Example                          | Dimension                         |
+| -------------------------------------------- | -------------------------------- | --------------------------------- |
+| **Logical group key** (string)               | `scope: ["kids_area"]`           | groups (`cdb_gruppe`) only        |
+| **Typed logical reference** (#98)            | `scope: [{ campus: "koblenz" }]` | campuses, group types — see below |
+| **Raw numeric `dataId`** (escape hatch, #49) | `scope: [1, 2, 3]`               | any dimension                     |
 
 String entries are resolved against **desired ∪ state**:
 
 - A key already in state resolves to that group's `dataId`.
-- A key **declared in this config but not yet created** resolves to a *pending*
+- A key **declared in this config but not yet created** resolves to a _pending_
   target: the plan renders it as `scope=[<key> (created this apply)]`, and its
   real `dataId` is filled in at apply time — so a config can declare a group AND
   a grant scoped to it and still plan/apply in one run (no bootstrap deadlock).
@@ -296,14 +296,14 @@ silently orphan a grant's scope.
 **Re-resolution at apply time.** Every scoped tuple resolved from a logical
 group key retains its symbolic scope key. Immediately before grants are
 written (after the resource tier has run), each key is re-resolved against the
-post-execute state. This means a group *created* or *recreated* in the same
+post-execute state. This means a group _created_ or _recreated_ in the same
 apply always gets its grant written with its fresh `dataId`, never a pending
 placeholder or a stale, dangling id.
 
 ### Typed logical scope references (#98)
 
 Not every scoped right scopes **by group**, and some of the other dimensions are
-resources this tool *can* name portably. Those take a typed reference:
+resources this tool _can_ name portably. Those take a typed reference:
 
 ```ts
 ct.groupRole({
@@ -320,22 +320,22 @@ ct.groupRole({
 `{ campus: "koblenz" }` is sugar for `ref.campus("koblenz")` — the same `Ref`
 the rest of the DSL uses — so both spellings are interchangeable.
 
-| `scopeField` | Reference form | Resolved against |
-| --- | --- | --- |
-| `cdb_gruppe` | `{ group: "<key>" }` (or the bare string) | managed groups |
-| `cdb_station` | `{ campus: "<key>" }` | managed campuses, then `GET /campuses` |
-| `cdb_gruppentyp` | `{ groupType: "<key>" }` | managed group types, then `GET /group/grouptypes` |
-| `cdb_bereich` | `{ department: "<name-slug>" }` | `GET /departments` **only** — read-only, see below |
+| `scopeField`     | Reference form                            | Resolved against                                   |
+| ---------------- | ----------------------------------------- | -------------------------------------------------- |
+| `cdb_gruppe`     | `{ group: "<key>" }` (or the bare string) | managed groups                                     |
+| `cdb_station`    | `{ campus: "<key>" }`                     | managed campuses, then `GET /campuses`             |
+| `cdb_gruppentyp` | `{ groupType: "<key>" }`                  | managed group types, then `GET /group/grouptypes`  |
+| `cdb_bereich`    | `{ department: "<name-slug>" }`           | `GET /departments` **only** — read-only, see below |
 
 **Why this matters:** campus ids are host-specific — Mainz is `0` on eqrm prod
 and `6` on eqrm dev. A campus-scoped grant written as a numeric literal is
 therefore a cross-environment misgrant, and because declaring a domain makes
-`ct` *own* it, the wrong-scope grant also revokes whatever is really there on
+`ct` _own_ it, the wrong-scope grant also revokes whatever is really there on
 the other host. The typed reference makes one config plan clean on both.
 
 Resolution mirrors the domain-reference rules: managed state first, the live
 master-data catalog second, and a target **declared in this same config**
-resolves to a *pending* scope re-resolved at apply time. A reference resolved
+resolves to a _pending_ scope re-resolved at apply time. A reference resolved
 through the catalog (not under management) carries an already-final id and is
 not re-resolved. Catalogs are read **paginated** — ChurchTools returns only a
 first page (10 rows) for a plain list read, so an instance with more campuses,
@@ -388,7 +388,7 @@ e.g.:
 
 - `churchdb:view comments` → `scopeField: "cdb_comment_viewer"`
 - `churchdb:security level view own data` / `edit own data` → `scopeField:
-  "cc_securitylevel"`
+"cc_securitylevel"`
 
 For these, a `dataId` like `1`, `2`, `3` names a security level or a
 comment-viewer bucket — **not** a group — so `GET /groups/{1,2,3}` 404s and
@@ -531,7 +531,7 @@ and `ct plan`.
   too broad and is removed.
 - **Revocation is a later extension, not exposed yet.** `GrantTuple.type` is
   typed as `"grant" | "revoke"`, but the DSL and `desiredTuples` currently
-  only ever *emit* `"grant"` tuples — there is no config-level way to declare
+  only ever _emit_ `"grant"` tuples — there is no config-level way to declare
   an explicit `type: "revoke"` grant today (`type: "revoke"` is reserved for
   a future `group_role`-only extension). Removing a grant's entry from the
   config still works as expected: the reconciler's set-diff (see below)
@@ -578,7 +578,7 @@ unmanageable grant makes an entire role instance undeclarable — and on a real
 instance the blocker is almost always module data (an HTML template, a calendar
 category, a wiki category) sitting next to perfectly expressible structural
 grants. On eqrm prod that cost 403 of 590 authored grants, several of them
-blocked by a *single* `cc_html_template` row on a 41-grant role.
+blocked by a _single_ `cc_html_template` row on a 41-grant role.
 
 `preserveUnknown` is the deliberate way out:
 
@@ -590,7 +590,7 @@ ct.groupRole({
   // Own the structural grants; leave anything on these dimensions alone. This role also carries
   // cc_html_template grants that this scaffold has no business owning.
   preserveUnknown: ["cc_html_template"],
-  grants: [ /* the 40 structural ones */ ],
+  grants: [/* the 40 structural ones */],
 });
 ```
 
@@ -598,7 +598,7 @@ ct.groupRole({
 - **`true` preserves everything undeclared**; a **list of scope dimensions** is
   the form to prefer — it keeps the escape hatch's blast radius to the
   dimensions you consciously excluded, so a genuinely unexpected new grant on a
-  dimension you *do* manage still shows up as drift rather than being swallowed.
+  dimension you _do_ manage still shows up as drift rather than being swallowed.
 - A dimension list never widens to **unscoped** rights: you named dimensions to
   leave alone, and "no dimension" is not one of them.
 - A dimension no right in the catalog scopes by is an **eval-time error**, not a

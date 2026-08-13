@@ -184,7 +184,12 @@ export class CtClient {
       const pageMeta = envelope?.meta;
       meta = pageMeta ?? meta;
       const pagination = pageMeta?.pagination;
-      if (pageItems.length === 0 || !pagination || pagination.current === undefined || pagination.lastPage === undefined) {
+      if (
+        pageItems.length === 0 ||
+        !pagination ||
+        pagination.current === undefined ||
+        pagination.lastPage === undefined
+      ) {
         break;
       }
       if (pagination.current >= pagination.lastPage) {

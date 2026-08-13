@@ -14,7 +14,13 @@ import type { Plan } from "../src/engine/types.js";
 
 const plan: Plan = {
   items: [
-    { type: "campus", key: "mainz", id: null, action: "create", changes: [{ field: "name", from: undefined, to: "Mainz" }] },
+    {
+      type: "campus",
+      key: "mainz",
+      id: null,
+      action: "create",
+      changes: [{ field: "name", from: undefined, to: "Mainz" }],
+    },
   ],
 };
 

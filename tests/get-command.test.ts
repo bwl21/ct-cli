@@ -87,7 +87,12 @@ describe("ct get (#50)", () => {
     getAllMock.mockResolvedValue({
       data: [
         { id: 5, name: "first_contact", securityLevel: 1, fieldCategory: { internCode: "f_person" } },
-        { id: 9, name: "bezeichnung", securityLevel: 2, fieldCategory: { internCode: "f_group", table: "cdb_gruppe" } },
+        {
+          id: 9,
+          name: "bezeichnung",
+          securityLevel: 2,
+          fieldCategory: { internCode: "f_group", table: "cdb_gruppe" },
+        },
       ],
       meta: { pagination: { total: 2, current: 1, lastPage: 1, limit: 100 } },
     });
@@ -204,7 +209,10 @@ describe("ct get raw pagination (#100)", () => {
   });
 
   it("honours a caller's own page=/limit= verbatim rather than appending a conflicting pair", async () => {
-    getRawMock.mockResolvedValue({ data: [{ id: 1 }], meta: { pagination: { total: 1, current: 1, lastPage: 1 } } });
+    getRawMock.mockResolvedValue({
+      data: [{ id: 1 }],
+      meta: { pagination: { total: 1, current: 1, lastPage: 1 } },
+    });
     const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
     await runGet(["raw", "/groups?limit=100&page=2"]);

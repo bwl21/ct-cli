@@ -62,7 +62,10 @@ function cookieHeader(res: Response): string {
   const raw =
     (res.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ??
     (res.headers.get("set-cookie") ? [res.headers.get("set-cookie") as string] : []);
-  return raw.map((c) => c.split(";")[0]).filter(Boolean).join("; ");
+  return raw
+    .map((c) => c.split(";")[0])
+    .filter(Boolean)
+    .join("; ");
 }
 
 async function main(): Promise<void> {
@@ -78,8 +81,13 @@ async function main(): Promise<void> {
   if (!cookie) throw new Error("Login succeeded but no session cookie was returned.");
 
   // 2. Read the instance CT version (for the catalog's provenance stamp).
-  const infoRes = await fetch(`${host}/api/info`, { headers: { Accept: "application/json", Cookie: cookie } });
-  const infoBody = (await infoRes.json().catch(() => ({}))) as { data?: { version?: string }; version?: string };
+  const infoRes = await fetch(`${host}/api/info`, {
+    headers: { Accept: "application/json", Cookie: cookie },
+  });
+  const infoBody = (await infoRes.json().catch(() => ({}))) as {
+    data?: { version?: string };
+    version?: string;
+  };
   const ctVersion = infoBody.data?.version ?? infoBody.version ?? "unknown";
 
   // 3. Fetch the permission master data from the legacy AJAX endpoint.
@@ -96,7 +104,9 @@ async function main(): Promise<void> {
   const master = (await res.json()) as MasterData;
   const authTable = master.data?.auth_table ?? master.auth_table;
   if (!authTable || typeof authTable !== "object") {
-    throw new Error("Unexpected response: no data.auth_table in getMasterData. Is the endpoint/shape unchanged?");
+    throw new Error(
+      "Unexpected response: no data.auth_table in getMasterData. Is the endpoint/shape unchanged?",
+    );
   }
 
   // 4. Flatten `auth_table[module][right]` → `"module:right" → CatalogEntry`, preserving iteration order.

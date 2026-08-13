@@ -431,17 +431,17 @@ describe("ct adopt group --with-dynamic --portable-rulesets (#76 Stage 3)", () =
       run(["group", "33", "--with-dynamic", "--strict-rulesets", "--state", statePath]),
     ).rejects.toThrow(/--strict-rulesets/);
     // Nothing was written — the refusal must not leave a half-portable file behind.
-    await expect(
-      readFile(join(workDir, "rulesets", "portable_dynamic.json"), "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(workDir, "rulesets", "portable_dynamic.json"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("--dry-run --portable-rulesets writes no file", async () => {
     await run(["group", "10", "--state", statePath]);
     await run(["group", "33", "--with-dynamic", "--portable-rulesets", "--dry-run", "--state", statePath]);
-    await expect(
-      readFile(join(workDir, "rulesets", "portable_dynamic.json"), "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(workDir, "rulesets", "portable_dynamic.json"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 });
 

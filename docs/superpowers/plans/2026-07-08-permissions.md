@@ -34,21 +34,29 @@
 ## Task 1: Catalog resolver
 
 **Files:**
+
 - Create: `src/permissions/catalog.ts`
 - Test: `tests/permission-catalog.test.ts`
 
 **Interfaces:**
+
 - Produces:
   ```ts
-  export interface CatalogEntry { authId: number; scopeField: string | null; revocable: boolean; desc: string }
-  export function loadCatalog(): Record<string, CatalogEntry>;              // reads catalog.json once (memoized)
-  export function resolveAuthId(name: string): CatalogEntry;               // throws with suggestions if unknown
+  export interface CatalogEntry {
+    authId: number;
+    scopeField: string | null;
+    revocable: boolean;
+    desc: string;
+  }
+  export function loadCatalog(): Record<string, CatalogEntry>; // reads catalog.json once (memoized)
+  export function resolveAuthId(name: string): CatalogEntry; // throws with suggestions if unknown
   ```
 - Consumes: the committed `src/permissions/catalog.json`.
 
 - [ ] **Step 1: Write the failing test**
 
 `tests/permission-catalog.test.ts`:
+
 ```ts
 import { describe, it, expect } from "vitest";
 import { resolveAuthId, loadCatalog } from "../src/permissions/catalog.js";
@@ -65,7 +73,9 @@ describe("permission catalog", () => {
     expect(e.scopeField).toBe("cdb_gruppe");
   });
   it("throws a helpful error for an unknown right", () => {
-    expect(() => resolveAuthId("churchgroup:no such right")).toThrow(/unknown permission "churchgroup:no such right"/i);
+    expect(() => resolveAuthId("churchgroup:no such right")).toThrow(
+      /unknown permission "churchgroup:no such right"/i,
+    );
   });
   it("loads the whole catalog (187 rights)", () => {
     expect(Object.keys(loadCatalog()).length).toBeGreaterThanOrEqual(180);
@@ -90,7 +100,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-export interface CatalogEntry { authId: number; scopeField: string | null; revocable: boolean; desc: string }
+export interface CatalogEntry {
+  authId: number;
+  scopeField: string | null;
+  revocable: boolean;
+  desc: string;
+}
 
 let cache: Record<string, CatalogEntry> | null = null;
 
@@ -105,13 +120,16 @@ export function resolveAuthId(name: string): CatalogEntry {
   const entry = loadCatalog()[name];
   if (!entry) {
     const [mod] = name.split(":");
-    const near = Object.keys(loadCatalog()).filter((k) => k.startsWith(`${mod}:`)).slice(0, 6);
+    const near = Object.keys(loadCatalog())
+      .filter((k) => k.startsWith(`${mod}:`))
+      .slice(0, 6);
     const hint = near.length ? ` Did you mean one of: ${near.join(", ")}?` : "";
     throw new Error(`Unknown permission "${name}".${hint}`);
   }
   return entry;
 }
 ```
+
 (`catalog.ts` compiles to `dist/permissions/`; ensure the build copies `catalog.json` next to it — see Task 8's build note. During `tsx`/vitest it reads from `src/permissions/`.)
 
 - [ ] **Step 4: Run to verify it passes**
@@ -131,25 +149,41 @@ git commit -m "feat(permissions): catalog resolver (name→authId, scope, revoca
 ## Task 2: Grant-tuple model + set reconciliation
 
 **Files:**
+
 - Create: `src/permissions/grants.ts`
 - Test: `tests/permission-grants.test.ts`
 
 **Interfaces:**
+
 - Produces:
   ```ts
   export type DomainType = "group_role" | "group_type_role";
-  export interface GrantTuple { authId: number; dataId: number[]; type: "grant" | "revoke" }   // dataId sorted; [] = unscoped
-  export interface RawPermission { authId: number; dataId: number | null; type: "grant" | "revoke"; isInherited?: boolean; meta?: { modifiedPid?: number } }
-  export function tupleKey(t: { authId: number; dataId: number[]; type: string }): string;      // stable identity
-  export function normalizeActual(rows: RawPermission[]): GrantTuple[];                          // exclude baseline+inherited; scalar dataId→[]
-  export interface GrantDiff { toPut: GrantTuple[]; toDelete: GrantTuple[] }
-  export function diffGrants(desired: GrantTuple[], actual: GrantTuple[]): GrantDiff;            // set reconciliation
+  export interface GrantTuple {
+    authId: number;
+    dataId: number[];
+    type: "grant" | "revoke";
+  } // dataId sorted; [] = unscoped
+  export interface RawPermission {
+    authId: number;
+    dataId: number | null;
+    type: "grant" | "revoke";
+    isInherited?: boolean;
+    meta?: { modifiedPid?: number };
+  }
+  export function tupleKey(t: { authId: number; dataId: number[]; type: string }): string; // stable identity
+  export function normalizeActual(rows: RawPermission[]): GrantTuple[]; // exclude baseline+inherited; scalar dataId→[]
+  export interface GrantDiff {
+    toPut: GrantTuple[];
+    toDelete: GrantTuple[];
+  }
+  export function diffGrants(desired: GrantTuple[], actual: GrantTuple[]): GrantDiff; // set reconciliation
   ```
 - Consumes: nothing from other tasks.
 
 - [ ] **Step 1: Write the failing test**
 
 `tests/permission-grants.test.ts`:
+
 ```ts
 import { describe, it, expect } from "vitest";
 import { normalizeActual, diffGrants, tupleKey } from "../src/permissions/grants.js";
@@ -160,7 +194,7 @@ describe("normalizeActual", () => {
       { authId: 1104, dataId: 3, type: "grant" as const, meta: { modifiedPid: 1 } },
       { authId: 1101, dataId: null, type: "grant" as const, meta: { modifiedPid: 1 } },
       { authId: 9999, dataId: 1, type: "grant" as const, meta: { modifiedPid: -1 } }, // system baseline → excluded
-      { authId: 8888, dataId: 1, type: "grant" as const, isInherited: true },          // inherited → excluded
+      { authId: 8888, dataId: 1, type: "grant" as const, isInherited: true }, // inherited → excluded
     ];
     expect(normalizeActual(rows)).toEqual([
       { authId: 1104, dataId: [3], type: "grant" },
@@ -173,11 +207,11 @@ describe("diffGrants", () => {
   it("adds missing, deletes extra, no-ops identical (order-independent dataId)", () => {
     const desired = [
       { authId: 1104, dataId: [7, 3], type: "grant" as const }, // present but reordered
-      { authId: 1101, dataId: [], type: "grant" as const },     // new
+      { authId: 1101, dataId: [], type: "grant" as const }, // new
     ];
     const actual = [
       { authId: 1104, dataId: [3, 7], type: "grant" as const }, // same tuple, different order
-      { authId: 2000, dataId: [], type: "grant" as const },     // extra → delete
+      { authId: 2000, dataId: [], type: "grant" as const }, // extra → delete
     ];
     const d = diffGrants(desired, actual);
     expect(d.toPut.map(tupleKey)).toEqual([tupleKey({ authId: 1101, dataId: [], type: "grant" })]);
@@ -201,10 +235,17 @@ Expected: FAIL — module missing.
  */
 export type DomainType = "group_role" | "group_type_role";
 
-export interface GrantTuple { authId: number; dataId: number[]; type: "grant" | "revoke" }
+export interface GrantTuple {
+  authId: number;
+  dataId: number[];
+  type: "grant" | "revoke";
+}
 export interface RawPermission {
-  authId: number; dataId: number | null; type: "grant" | "revoke";
-  isInherited?: boolean; meta?: { modifiedPid?: number };
+  authId: number;
+  dataId: number | null;
+  type: "grant" | "revoke";
+  isInherited?: boolean;
+  meta?: { modifiedPid?: number };
 }
 
 export function tupleKey(t: { authId: number; dataId: number[]; type: string }): string {
@@ -215,14 +256,17 @@ export function normalizeActual(rows: RawPermission[]): GrantTuple[] {
   const out: GrantTuple[] = [];
   for (const r of rows) {
     if (r.meta?.modifiedPid === -1) continue; // system baseline — invisible to reconciliation
-    if (r.isInherited) continue;              // inherited — not directly owned here
+    if (r.isInherited) continue; // inherited — not directly owned here
     const dataId = r.dataId == null ? [] : [r.dataId];
     out.push({ authId: r.authId, dataId: dataId.sort((a, b) => a - b), type: r.type });
   }
   return out;
 }
 
-export interface GrantDiff { toPut: GrantTuple[]; toDelete: GrantTuple[] }
+export interface GrantDiff {
+  toPut: GrantTuple[];
+  toDelete: GrantTuple[];
+}
 
 export function diffGrants(desired: GrantTuple[], actual: GrantTuple[]): GrantDiff {
   const desiredKeys = new Map(desired.map((t) => [tupleKey(t), t]));
@@ -250,16 +294,23 @@ git commit -m "feat(permissions): grant-tuple model + set reconciliation (baseli
 ## Task 3: DSL — `ct.groupRole` / `ct.groupTypeRole`
 
 **Files:**
+
 - Modify: `src/config/context.ts` (add the two declarations)
 - Create: `src/permissions/types.ts` (the desired-permission shape)
 - Test: `tests/context.test.ts` (extend)
 
 **Interfaces:**
+
 - Produces:
   ```ts
   // src/permissions/types.ts
   export type Grant = string | { right: string; scope: string[] };
-  export interface DesiredPermission { key: string; domainType: DomainType; domainId: number; grants: Grant[] }
+  export interface DesiredPermission {
+    key: string;
+    domainType: DomainType;
+    domainId: number;
+    grants: Grant[];
+  }
   // ConfigContext gains: groupRole(input), groupTypeRole(input)
   // evaluateConfig now returns BOTH resource declarations and permission declarations.
   ```
@@ -273,10 +324,11 @@ git commit -m "feat(permissions): grant-tuple model + set reconciliation (baseli
 describe("permission declarations", () => {
   it("collects groupRole / groupTypeRole with validated grants", async () => {
     const mod = (ct: any) => {
-      ct.groupTypeRole({ key: "leiter_tpl", id: 8, grants: [
-        "churchgroup:view group",
-        { right: "churchdb:view group", scope: ["kids_area"] },
-      ]});
+      ct.groupTypeRole({
+        key: "leiter_tpl",
+        id: 8,
+        grants: ["churchgroup:view group", { right: "churchdb:view group", scope: ["kids_area"] }],
+      });
       ct.groupRole({ key: "kids_lead", id: 2882, grants: ["churchgroup:edit group members"] });
     };
     const { permissions } = await evaluateConfig(mod); // evaluateConfig now returns {resources, permissions}
@@ -285,13 +337,16 @@ describe("permission declarations", () => {
     expect(permissions[1]).toMatchObject({ key: "kids_lead", domainType: "group_role", domainId: 2882 });
   });
   it("rejects a non-numeric id and an empty right name", async () => {
-    await expect(evaluateConfig((ct: any) => ct.groupRole({ key: "x", id: "nope", grants: [] })))
-      .rejects.toThrow(/id.*number/i);
-    await expect(evaluateConfig((ct: any) => ct.groupRole({ key: "x", id: 1, grants: [""] })))
-      .rejects.toThrow(/grant/i);
+    await expect(
+      evaluateConfig((ct: any) => ct.groupRole({ key: "x", id: "nope", grants: [] })),
+    ).rejects.toThrow(/id.*number/i);
+    await expect(
+      evaluateConfig((ct: any) => ct.groupRole({ key: "x", id: 1, grants: [""] })),
+    ).rejects.toThrow(/grant/i);
   });
 });
 ```
+
 (Adjust the existing `evaluateConfig` import/usages in this file to the new `{ resources, permissions }` return.)
 
 - [ ] **Step 2: Run to verify it fails**
@@ -304,8 +359,10 @@ Expected: FAIL — `groupRole`/`groupTypeRole` not defined; `evaluateConfig` ret
 Create `src/permissions/types.ts` with the interfaces above.
 
 In `src/config/context.ts`:
+
 - Add a `permissions: DesiredPermission[]` accumulator alongside `resources` in `createContext`.
 - Add `groupRole` and `groupTypeRole` to `ConfigContext` and the returned `ct`:
+
 ```ts
   const definePermission = (domainType: DomainType) => (input: { key: string; id: number; grants: Grant[] }): void => {
     if (typeof input.key !== "string" || !input.key) throw new Error(`${domainType} declaration missing a string "key".`);
@@ -324,7 +381,9 @@ In `src/config/context.ts`:
   groupRole: definePermission("group_role"),
   groupTypeRole: definePermission("group_type_role"),
 ```
+
 (Share the existing `seen` set so keys stay globally unique across resources and permissions.)
+
 - Change `createContext` to return `{ ct, resources, permissions }` and `evaluateConfig` to return `{ resources, permissions }`. Update `validateReferences` call site accordingly.
 
 In `src/config/load.ts`: `loadConfig` returns `{ resources, permissions }`. Update `src/commands/plan.ts` and `src/commands/apply.ts` to destructure (they currently do `const desired = await loadConfig(...)`) — thread `permissions` through (used in Task 5/6). Keep existing resource behavior identical.
@@ -346,13 +405,15 @@ git commit -m "feat(permissions): groupRole/groupTypeRole DSL + threaded permiss
 ## Task 4: Scope resolver (scope keys → dataId[])
 
 **Files:**
+
 - Create: `src/permissions/scope.ts`
 - Test: `tests/permission-scope.test.ts`
 
 **Interfaces:**
+
 - Produces:
   ```ts
-  export function resolveScope(scopeKeys: string[], state: State): number[];  // logical group keys → group ids, sorted
+  export function resolveScope(scopeKeys: string[], state: State): number[]; // logical group keys → group ids, sorted
   ```
 - Consumes: `State` (`src/state/state.js`).
 
@@ -361,15 +422,20 @@ git commit -m "feat(permissions): groupRole/groupTypeRole DSL + threaded permiss
 - [ ] **Step 1: Write the failing test**
 
 `tests/permission-scope.test.ts`:
+
 ```ts
 import { describe, it, expect } from "vitest";
 import { resolveScope } from "../src/permissions/scope.js";
 import type { State } from "../src/state/state.js";
 
-const state: State = { version: 1, host: "h", resources: {
-  kids_area: { type: "group", id: 42, key: "kids_area", fields: {}, adoptedAt: "t", updatedAt: "t" },
-  other: { type: "group", id: 7, key: "other", fields: {}, adoptedAt: "t", updatedAt: "t" },
-}};
+const state: State = {
+  version: 1,
+  host: "h",
+  resources: {
+    kids_area: { type: "group", id: 42, key: "kids_area", fields: {}, adoptedAt: "t", updatedAt: "t" },
+    other: { type: "group", id: 7, key: "other", fields: {}, adoptedAt: "t", updatedAt: "t" },
+  },
+};
 
 describe("resolveScope", () => {
   it("maps managed group keys to sorted ids", () => {
@@ -397,7 +463,9 @@ export function resolveScope(scopeKeys: string[], state: State): number[] {
   for (const key of scopeKeys) {
     const m = state.resources[key];
     if (!m || m.type !== "group") {
-      throw new Error(`Scope key "${key}" does not resolve to a managed group. Declare/adopt it, or use a group already under management.`);
+      throw new Error(
+        `Scope key "${key}" does not resolve to a managed group. Declare/adopt it, or use a group already under management.`,
+      );
     }
     ids.push(m.id);
   }
@@ -422,21 +490,31 @@ git commit -m "feat(permissions): scope-key → group dataId resolver"
 ## Task 5: Build the permission plan (desired tuples + actuals + diff + validation)
 
 **Files:**
+
 - Create: `src/permissions/plan.ts`
 - Test: `tests/permission-plan.test.ts`
 
 **Interfaces:**
+
 - Produces:
   ```ts
-  export interface PermissionPlanItem { key: string; domainType: DomainType; domainId: number; diff: GrantDiff }
-  export function desiredTuples(p: DesiredPermission, state: State): GrantTuple[];        // resolve names+scope, validate domain rules
+  export interface PermissionPlanItem {
+    key: string;
+    domainType: DomainType;
+    domainId: number;
+    diff: GrantDiff;
+  }
+  export function desiredTuples(p: DesiredPermission, state: State): GrantTuple[]; // resolve names+scope, validate domain rules
   export async function buildPermissionPlan(
-    client: Pick<CtClient, "get">, state: State, permissions: DesiredPermission[],
+    client: Pick<CtClient, "get">,
+    state: State,
+    permissions: DesiredPermission[],
   ): Promise<{ items: PermissionPlanItem[]; fetchErrors: string[] }>;
   ```
 - Consumes: `resolveAuthId` (T1), `normalizeActual`/`diffGrants`/`GrantTuple` (T2), `resolveScope` (T4), `DesiredPermission`/`DomainType` (T3).
 
 **Domain-rule validation in `desiredTuples`** (throw a clear error):
+
 - A scoped grant (`{right, scope}`) requires the catalog entry's `scopeField` to be non-null; a bare-string grant on a right whose `scopeField` is non-null is allowed (means "unscoped/all") — permitted.
 - `type: "revoke"` is only produced for `group_role` (MVP only emits `grant`; revoke support is a later extension — do NOT emit revoke here, but keep the tuple `type` field).
 - `group_type_role` + `authId >= 10000` → throw (write rule: those domains require authId < 10000).
@@ -446,44 +524,77 @@ git commit -m "feat(permissions): scope-key → group dataId resolver"
 - [ ] **Step 1: Write the failing test**
 
 `tests/permission-plan.test.ts`:
+
 ```ts
 import { describe, it, expect, vi } from "vitest";
 import { desiredTuples, buildPermissionPlan } from "../src/permissions/plan.js";
 import type { State } from "../src/state/state.js";
 
-const state: State = { version: 1, host: "h", resources: {
-  kids_area: { type: "group", id: 42, key: "kids_area", fields: {}, adoptedAt: "t", updatedAt: "t" },
-}};
+const state: State = {
+  version: 1,
+  host: "h",
+  resources: {
+    kids_area: { type: "group", id: 42, key: "kids_area", fields: {}, adoptedAt: "t", updatedAt: "t" },
+  },
+};
 
 describe("desiredTuples", () => {
   it("resolves names and scope to tuples", () => {
     const tuples = desiredTuples(
-      { key: "t", domainType: "group_type_role", domainId: 8, grants: [
-        "churchgroup:view group",                                   // authId 1104, unscoped
-        { right: "churchgroup:view group", scope: ["kids_area"] },  // authId 1104, dataId [42]
-      ]}, state);
+      {
+        key: "t",
+        domainType: "group_type_role",
+        domainId: 8,
+        grants: [
+          "churchgroup:view group", // authId 1104, unscoped
+          { right: "churchgroup:view group", scope: ["kids_area"] }, // authId 1104, dataId [42]
+        ],
+      },
+      state,
+    );
     expect(tuples).toEqual([
       { authId: 1104, dataId: [], type: "grant" },
       { authId: 1104, dataId: [42], type: "grant" },
     ]);
   });
   it("rejects authId >= 10000 on group_type_role", () => {
-    expect(() => desiredTuples({ key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchdb:+see persons"] }, state))
-      .toThrow(/10000/); // churchdb:+see persons is authId 10101
+    expect(() =>
+      desiredTuples(
+        { key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchdb:+see persons"] },
+        state,
+      ),
+    ).toThrow(/10000/); // churchdb:+see persons is authId 10101
   });
 });
 
 describe("buildPermissionPlan", () => {
   it("diffs desired vs actual (bulk fetch filtered to managed domainIds)", async () => {
-    const client = { get: vi.fn(async () => [
-      { domainType: "group_type_role", domainId: 8, authId: 1104, dataId: null, type: "grant", meta: { modifiedPid: 1 } },
-      { domainType: "group_type_role", domainId: 99, authId: 1, dataId: null, type: "grant", meta: { modifiedPid: 1 } }, // unmanaged domainId → ignored
-    ]) };
-    const { items, fetchErrors } = await buildPermissionPlan(client as never, state,
-      [{ key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchgroup:view group"] }]);
+    const client = {
+      get: vi.fn(async () => [
+        {
+          domainType: "group_type_role",
+          domainId: 8,
+          authId: 1104,
+          dataId: null,
+          type: "grant",
+          meta: { modifiedPid: 1 },
+        },
+        {
+          domainType: "group_type_role",
+          domainId: 99,
+          authId: 1,
+          dataId: null,
+          type: "grant",
+          meta: { modifiedPid: 1 },
+        }, // unmanaged domainId → ignored
+      ]),
+    };
+    const { items, fetchErrors } = await buildPermissionPlan(client as never, state, [
+      { key: "t", domainType: "group_type_role", domainId: 8, grants: ["churchgroup:view group"] },
+    ]);
     expect(fetchErrors).toEqual([]);
-    expect(items[0].diff.toPut).toEqual([]);     // 1104 unscoped already present
-    expect(items[0].diff.toDelete).toEqual([]);  // domainId 99 is unmanaged → invisible
+    expect(items[0].diff.toPut).toEqual([]); // 1104 unscoped already present
+    expect(items[0].diff.toDelete).toEqual([]); // domainId 99 is unmanaged → invisible
   });
 });
 ```
@@ -501,17 +612,31 @@ import { CtApiError } from "../api/ctClient.js";
 import type { State } from "../state/state.js";
 import { resolveAuthId } from "./catalog.js";
 import { resolveScope } from "./scope.js";
-import { normalizeActual, diffGrants, type GrantTuple, type GrantDiff, type DomainType, type RawPermission } from "./grants.js";
+import {
+  normalizeActual,
+  diffGrants,
+  type GrantTuple,
+  type GrantDiff,
+  type DomainType,
+  type RawPermission,
+} from "./grants.js";
 import type { DesiredPermission } from "./types.js";
 
-export interface PermissionPlanItem { key: string; domainType: DomainType; domainId: number; diff: GrantDiff }
+export interface PermissionPlanItem {
+  key: string;
+  domainType: DomainType;
+  domainId: number;
+  diff: GrantDiff;
+}
 
 export function desiredTuples(p: DesiredPermission, state: State): GrantTuple[] {
   return p.grants.map((g) => {
     const name = typeof g === "string" ? g : g.right;
     const entry = resolveAuthId(name);
-    if ((p.domainType === "group_type_role") && entry.authId >= 10000) {
-      throw new Error(`${p.domainType} "${p.key}": "${name}" (authId ${entry.authId}) is not writable — ${p.domainType} requires authId < 10000.`);
+    if (p.domainType === "group_type_role" && entry.authId >= 10000) {
+      throw new Error(
+        `${p.domainType} "${p.key}": "${name}" (authId ${entry.authId}) is not writable — ${p.domainType} requires authId < 10000.`,
+      );
     }
     const dataId = typeof g === "string" ? [] : resolveScope(g.scope, state);
     return { authId: entry.authId, dataId, type: "grant" as const };
@@ -519,7 +644,9 @@ export function desiredTuples(p: DesiredPermission, state: State): GrantTuple[] 
 }
 
 export async function buildPermissionPlan(
-  client: Pick<CtClient, "get">, state: State, permissions: DesiredPermission[],
+  client: Pick<CtClient, "get">,
+  state: State,
+  permissions: DesiredPermission[],
 ): Promise<{ items: PermissionPlanItem[]; fetchErrors: string[] }> {
   const items: PermissionPlanItem[] = [];
   const fetchErrors: string[] = [];
@@ -538,11 +665,17 @@ export async function buildPermissionPlan(
     const all = byType.get(p.domainType);
     if (all == null) continue; // fetch failed for this domainType — recorded above
     const actual = normalizeActual(all.filter((r) => (r as { domainId?: number }).domainId === p.domainId));
-    items.push({ key: p.key, domainType: p.domainType, domainId: p.domainId, diff: diffGrants(desiredTuples(p, state), actual) });
+    items.push({
+      key: p.key,
+      domainType: p.domainType,
+      domainId: p.domainId,
+      diff: diffGrants(desiredTuples(p, state), actual),
+    });
   }
   return { items, fetchErrors };
 }
 ```
+
 (Add `domainId` to `RawPermission` in `grants.ts` — `domainId: number` — so the filter typechecks.)
 
 - [ ] **Step 4: Run to verify it passes**
@@ -562,15 +695,20 @@ git commit -m "feat(permissions): build permission plan (tuples, bulk actuals, m
 ## Task 6: Apply permissions + render + wire into commands + catalog helper
 
 **Files:**
+
 - Create: `src/permissions/apply.ts`, `src/permissions/render.ts`
 - Modify: `src/commands/plan.ts`, `src/commands/apply.ts` (render + execute the permission plan)
 - Modify: `src/commands/get.ts` (add `permissions-catalog`)
 - Test: `tests/permission-apply.test.ts`
 
 **Interfaces:**
+
 - Produces:
   ```ts
-  export async function applyPermissionPlan(items: PermissionPlanItem[], client: Pick<CtClient, "request">): Promise<{ granted: number; deleted: number }>;
+  export async function applyPermissionPlan(
+    items: PermissionPlanItem[],
+    client: Pick<CtClient, "request">,
+  ): Promise<{ granted: number; deleted: number }>;
   export function renderPermissionPlan(items: PermissionPlanItem[]): string;
   ```
 - Consumes: `PermissionPlanItem` (T5), `assertNotPeople`.
@@ -582,6 +720,7 @@ git commit -m "feat(permissions): build permission plan (tuples, bulk actuals, m
 - [ ] **Step 1: Write the failing test**
 
 `tests/permission-apply.test.ts`:
+
 ```ts
 import { describe, it, expect, vi } from "vitest";
 import { applyPermissionPlan } from "../src/permissions/apply.js";
@@ -589,17 +728,37 @@ import { applyPermissionPlan } from "../src/permissions/apply.js";
 describe("applyPermissionPlan", () => {
   it("PUTs each grant and DELETEs each removed tuple with the array dataId body", async () => {
     const request = vi.fn(async () => ({}));
-    const res = await applyPermissionPlan([{
-      key: "t", domainType: "group_type_role", domainId: 8,
-      diff: {
-        toPut: [{ authId: 1104, dataId: [42], type: "grant" }, { authId: 1101, dataId: [], type: "grant" }],
-        toDelete: [{ authId: 2000, dataId: [], type: "grant" }],
-      },
-    }], { request } as never);
+    const res = await applyPermissionPlan(
+      [
+        {
+          key: "t",
+          domainType: "group_type_role",
+          domainId: 8,
+          diff: {
+            toPut: [
+              { authId: 1104, dataId: [42], type: "grant" },
+              { authId: 1101, dataId: [], type: "grant" },
+            ],
+            toDelete: [{ authId: 2000, dataId: [], type: "grant" }],
+          },
+        },
+      ],
+      { request } as never,
+    );
     expect(res).toEqual({ granted: 2, deleted: 1 });
-    expect(request).toHaveBeenCalledWith("PUT", "/permissions/group_type_role/8", { authId: 1104, dataId: [42], type: "grant" });
-    expect(request).toHaveBeenCalledWith("PUT", "/permissions/group_type_role/8", { authId: 1101, type: "grant" }); // no dataId when unscoped
-    expect(request).toHaveBeenCalledWith("DELETE", "/permissions/group_type_role/8", { authId: 2000, type: "grant" });
+    expect(request).toHaveBeenCalledWith("PUT", "/permissions/group_type_role/8", {
+      authId: 1104,
+      dataId: [42],
+      type: "grant",
+    });
+    expect(request).toHaveBeenCalledWith("PUT", "/permissions/group_type_role/8", {
+      authId: 1101,
+      type: "grant",
+    }); // no dataId when unscoped
+    expect(request).toHaveBeenCalledWith("DELETE", "/permissions/group_type_role/8", {
+      authId: 2000,
+      type: "grant",
+    });
   });
 });
 ```
@@ -625,18 +784,27 @@ function body(t: GrantTuple): Record<string, unknown> {
 }
 
 export async function applyPermissionPlan(
-  items: PermissionPlanItem[], client: Pick<CtClient, "request">,
+  items: PermissionPlanItem[],
+  client: Pick<CtClient, "request">,
 ): Promise<{ granted: number; deleted: number }> {
-  let granted = 0, deleted = 0;
+  let granted = 0,
+    deleted = 0;
   for (const item of items) {
     const path = `/permissions/${item.domainType}/${item.domainId}`;
     assertNotPeople(path);
-    for (const t of item.diff.toPut) { await client.request("PUT", path, body(t)); granted++; }
-    for (const t of item.diff.toDelete) { await client.request("DELETE", path, body(t)); deleted++; }
+    for (const t of item.diff.toPut) {
+      await client.request("PUT", path, body(t));
+      granted++;
+    }
+    for (const t of item.diff.toDelete) {
+      await client.request("DELETE", path, body(t));
+      deleted++;
+    }
   }
   return { granted, deleted };
 }
 ```
+
 `render.ts`: format each item as `group_type_role #8: +2 grant(s), -1 revoke(s)` with per-tuple lines (reuse `picocolors` like `engine/render.ts`).
 
 - [ ] **Step 4: Run to verify it passes**
@@ -667,11 +835,12 @@ git commit -m "feat(permissions): apply grants (PUT/DELETE) + plan/apply wiring 
 ## Task 7: Live round-trip + domain-rule tests (gated, DEV-only)
 
 **Files:**
+
 - Test: `tests/permission.integration.test.ts` (opt-in, `CT_LIVE=1`, **DEV instance only**)
 
 - [ ] **Step 1: Write the gated integration test**
 
-`describe.runIf(process.env.CT_LIVE === "1")`: against a **dev** instance, pick a disposable `group_type_role` domainId (`CT_PERM_FIXTURE_ID`), read its grants, and assert `buildPermissionPlan` for a config that declares its *current* user-authored grants is a no-op (`toPut`/`toDelete` empty) — i.e. read→diff is drift-free. Do NOT write in the read-only assertion. A second, explicitly-guarded block may PUT+DELETE a single throwaway grant and assert idempotency, but only when `CT_LIVE_WRITE=1` AND the host is not production.
+`describe.runIf(process.env.CT_LIVE === "1")`: against a **dev** instance, pick a disposable `group_type_role` domainId (`CT_PERM_FIXTURE_ID`), read its grants, and assert `buildPermissionPlan` for a config that declares its _current_ user-authored grants is a no-op (`toPut`/`toDelete` empty) — i.e. read→diff is drift-free. Do NOT write in the read-only assertion. A second, explicitly-guarded block may PUT+DELETE a single throwaway grant and assert idempotency, but only when `CT_LIVE_WRITE=1` AND the host is not production.
 
 - [ ] **Step 2: Confirm it SKIPS by default**
 
@@ -690,6 +859,7 @@ git commit -m "test(permissions): gated DEV-only round-trip + domain-rule checks
 ## Task 8: Build asset copy, docs, example
 
 **Files:**
+
 - Modify: `package.json` (ensure `catalog.json` ships to `dist/permissions/`) or `tsup.config` — verify the built `ct` binary can read the catalog. If tsup doesn't copy JSON, add a copy step or `import` the JSON so it's bundled. **Verify `node dist/index.js get permissions-catalog` works after build.**
 - Create: `docs/permissions.md`
 - Create: `examples/permissions.config.ts`
@@ -719,6 +889,7 @@ git commit -m "docs(permissions): guide + example; ensure catalog ships in build
 ## Self-Review
 
 **Spec coverage (#13 section of the design spec):**
+
 - DSL declares named grants on `group_role`/`group_type_role`; names resolve to authId → Tasks 1, 3, 5. ✓
 - `ct plan` shows accurate grant create/delete diffs vs actual; unmanaged domain objects invisible → Tasks 5 (managed-guard), 6 (render/wiring). ✓
 - `ct apply` reconciles via PUT/DELETE; re-run is a no-op → Tasks 2 (set reconciliation), 6 (apply). ✓

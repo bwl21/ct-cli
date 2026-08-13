@@ -40,11 +40,13 @@
 ## Task 1: Capture live fixtures for a real dynamic group
 
 **Files:**
+
 - Create: `tests/fixtures/dynamic/ruleset.get.json` (bare `RuleSet` as returned by GET)
 - Create: `tests/fixtures/dynamic/status.get.json` (`{ dynamicGroupStatus }`)
 - Create: `tests/fixtures/dynamic/README.md` (how the fixture was produced + the group id used, so it is reproducible)
 
 **Interfaces:**
+
 - Produces: canonical example `RuleSet` + status JSON consumed by Tasks 4, 5, 7 (normalizer, synthetic-field, typed-query). All later normalizer code is validated against these files.
 
 **Why a task:** the `query.params.filter` JSONLogic internals and `handleMembership` contents are opaque in OpenAPI. The only way to write a correct normalizer + typed-query compiler is against real rulesets.
@@ -58,12 +60,14 @@
 ## Task 2: Generic synthetic-field seam; migrate `parents` into it
 
 **Files:**
+
 - Create: `src/engine/synthetic.ts`
 - Modify: `src/engine/build.ts` (replace the inline hierarchy fold with the registry)
 - Modify: `src/engine/execute.ts` (route synthetic-field writes through the registry)
 - Test: `tests/synthetic.test.ts`
 
 **Interfaces:**
+
 - Produces:
   ```ts
   export interface SyntheticFoldCtx {
@@ -75,23 +79,26 @@
   export interface SyntheticApplyCtx {
     client: Pick<CtClient, "request">;
     state: State;
-    id: number;            // CT id of the owning resource just created/updated
-    change: FieldChange;   // the change whose `field` === this.field
+    id: number; // CT id of the owning resource just created/updated
+    change: FieldChange; // the change whose `field` === this.field
   }
   export interface SyntheticField {
-    field: string;                                            // pseudo-field name, e.g. "parents", "dynamic"
+    field: string; // pseudo-field name, e.g. "parents", "dynamic"
     fold(ctx: SyntheticFoldCtx): Promise<{ desired: DesiredResource[]; errors: string[] }>;
     apply(ctx: SyntheticApplyCtx): Promise<void>;
   }
-  export const SYNTHETIC_FIELDS: SyntheticField[];            // registry; parents first
+  export const SYNTHETIC_FIELDS: SyntheticField[]; // registry; parents first
   export function isSyntheticField(field: string): boolean;
-  export async function foldSynthetic(ctx: SyntheticFoldCtx): Promise<{ desired: DesiredResource[]; errors: string[] }>;
+  export async function foldSynthetic(
+    ctx: SyntheticFoldCtx,
+  ): Promise<{ desired: DesiredResource[]; errors: string[] }>;
   ```
 - Consumes: existing `applyHierarchy`, `parentIdsByGroupId`, `HierarchyEntry` (from `hierarchy.ts`); existing `applyParentEdges` logic (moved/wrapped).
 
 - [ ] **Step 1: Write the failing test**
 
 `tests/synthetic.test.ts`:
+
 ```ts
 import { describe, it, expect } from "vitest";
 import { isSyntheticField, SYNTHETIC_FIELDS, foldSynthetic } from "../src/engine/synthetic.js";
@@ -107,20 +114,41 @@ describe("synthetic-field registry", () => {
 
   it("parents fold folds managed hierarchy into desired + actual", async () => {
     const state: State = {
-      version: 1, host: "h",
+      version: 1,
+      host: "h",
       resources: {
-        child: { type: "group", id: 1311, key: "child", fields: { name: "child" }, adoptedAt: "t", updatedAt: "t" },
-        parent: { type: "group", id: 8, key: "parent", fields: { name: "parent" }, adoptedAt: "t", updatedAt: "t" },
+        child: {
+          type: "group",
+          id: 1311,
+          key: "child",
+          fields: { name: "child" },
+          adoptedAt: "t",
+          updatedAt: "t",
+        },
+        parent: {
+          type: "group",
+          id: 8,
+          key: "parent",
+          fields: { name: "parent" },
+          adoptedAt: "t",
+          updatedAt: "t",
+        },
       },
     };
     const actual = new Map<string, Record<string, unknown>>([
-      ["child", { name: "child" }], ["parent", { name: "parent" }],
+      ["child", { name: "child" }],
+      ["parent", { name: "parent" }],
     ]);
     const desired: DesiredResource[] = [
       { type: "group", key: "child", fields: { name: "child" }, parents: ["parent"], dependsOn: ["parent"] },
       { type: "group", key: "parent", fields: { name: "parent" }, dependsOn: [] },
     ];
-    const client = { get: async () => [{ groupId: 1311, parents: [8], children: [] }, { groupId: 8, children: [1311] }] };
+    const client = {
+      get: async () => [
+        { groupId: 1311, parents: [8], children: [] },
+        { groupId: 8, children: [1311] },
+      ],
+    };
     const out = await foldSynthetic({ client, state, desired, actual });
     expect(out.errors).toEqual([]);
     expect(actual.get("child")?.parents).toEqual(["parent"]);
@@ -239,19 +267,23 @@ Expected: PASS.
 - [ ] **Step 5: Rewire `build.ts` to use `foldSynthetic`**
 
 In `src/engine/build.ts`, replace the hierarchy block (the `let parentIds` / `hasManagedGroups` / `applyHierarchy` section, lines ~59-76) with:
+
 ```ts
-  // Synthetic sub-resource fields (parents, dynamic, …) fold into the diff on both sides.
-  const folded = await foldSynthetic({ client, state, desired, actual });
-  fetchErrors.push(...folded.errors);
-  const plan = computePlan(folded.desired, state, actual, { unresolved });
+// Synthetic sub-resource fields (parents, dynamic, …) fold into the diff on both sides.
+const folded = await foldSynthetic({ client, state, desired, actual });
+fetchErrors.push(...folded.errors);
+const plan = computePlan(folded.desired, state, actual, { unresolved });
 ```
+
 Update imports: remove `applyHierarchy`, `parentIdsByGroupId`, `HierarchyEntry`, and add `import { foldSynthetic } from "./synthetic.js";`. Delete the now-unused `desiredWithHierarchy`/`hierarchyOk` locals.
 
 - [ ] **Step 6: Rewire `execute.ts` to route synthetic writes through the registry**
 
 In `src/engine/execute.ts`:
+
 - Replace `applyParentEdges(...)` calls (in both the create and update branches) with a generic `applySyntheticFields(client, state, id, item.changes)`.
 - Add the helper and update `snapshotFromChanges` to drop **all** synthetic fields, not just `parents`:
+
 ```ts
 import { isSyntheticField, syntheticField } from "./synthetic.js";
 
@@ -263,7 +295,10 @@ function snapshotFromChanges(base: Record<string, unknown>, changes: FieldChange
 }
 
 async function applySyntheticFields(
-  client: Pick<CtClient, "request">, state: State, id: number, changes: FieldChange[],
+  client: Pick<CtClient, "request">,
+  state: State,
+  id: number,
+  changes: FieldChange[],
 ): Promise<void> {
   for (const c of changes) {
     const f = syntheticField(c.field);
@@ -271,6 +306,7 @@ async function applySyntheticFields(
   }
 }
 ```
+
 Also update `hasFieldChange` in the update branch to `item.changes.some((c) => !isSyntheticField(c.field))` so a change touching only synthetic fields still skips the body PATCH. Remove the old `parentEdges`/`resolveId`/`applyParentEdges` functions.
 
 - [ ] **Step 7: Run the full suite to verify the refactor is behavior-preserving**
@@ -290,18 +326,20 @@ git commit -m "refactor(engine): generic synthetic-field seam; migrate parents i
 ## Task 3: Accept and validate the `dynamic` block in the config DSL
 
 **Files:**
+
 - Modify: `src/config/context.ts` (add `dynamic` handling to `toDesired` + validation)
 - Modify: `src/engine/types.ts` (add `dynamic?` to `DesiredResource`, define `DynamicSpec`)
 - Test: `tests/context.test.ts` (extend)
 
 **Interfaces:**
+
 - Produces:
   ```ts
   // types.ts
   export type DynamicStatus = "active" | "inactive" | "manual" | "none";
   export interface DynamicSpec {
     status: DynamicStatus;
-    ruleset: unknown;   // RuleSet object, or { ref: "./path.json" }, or a typed-query build result
+    ruleset: unknown; // RuleSet object, or { ref: "./path.json" }, or a typed-query build result
   }
   // DesiredResource gains: dynamic?: DynamicSpec;
   ```
@@ -315,23 +353,32 @@ import { createContext } from "../src/config/context.js";
 describe("dynamic block", () => {
   it("attaches a validated dynamic spec to the group and drops it from plain fields", async () => {
     const { ct, resources } = createContext();
-    ct.group({ key: "all_mainz", name: "Alle Mainz", groupTypeId: 1,
-      dynamic: { status: "manual", ruleset: { description: "x", method: "ChurchQuery", params: {} } } });
+    ct.group({
+      key: "all_mainz",
+      name: "Alle Mainz",
+      groupTypeId: 1,
+      dynamic: { status: "manual", ruleset: { description: "x", method: "ChurchQuery", params: {} } },
+    });
     const g = resources.find((r) => r.key === "all_mainz")!;
-    expect(g.dynamic).toEqual({ status: "manual", ruleset: { description: "x", method: "ChurchQuery", params: {} } });
-    expect(g.fields).not.toHaveProperty("dynamic");   // never a plain diffed field
+    expect(g.dynamic).toEqual({
+      status: "manual",
+      ruleset: { description: "x", method: "ChurchQuery", params: {} },
+    });
+    expect(g.fields).not.toHaveProperty("dynamic"); // never a plain diffed field
   });
 
   it("rejects an invalid status", async () => {
     const { ct } = createContext();
-    expect(() => ct.group({ key: "g", name: "G", dynamic: { status: "bogus", ruleset: {} } as never }))
-      .toThrow(/dynamic.*status/i);
+    expect(() =>
+      ct.group({ key: "g", name: "G", dynamic: { status: "bogus", ruleset: {} } as never }),
+    ).toThrow(/dynamic.*status/i);
   });
 
   it("rejects dynamic on a non-group", async () => {
     const { ct } = createContext();
-    expect(() => ct.campus({ key: "c", name: "C", dynamic: { status: "manual", ruleset: {} } } as never))
-      .toThrow(/dynamic.*only.*group/i);
+    expect(() =>
+      ct.campus({ key: "c", name: "C", dynamic: { status: "manual", ruleset: {} } } as never),
+    ).toThrow(/dynamic.*only.*group/i);
   });
 });
 ```
@@ -346,21 +393,24 @@ Expected: FAIL — `g.dynamic` undefined; no validation.
 In `src/engine/types.ts` add the exports above and `dynamic?: DynamicSpec;` to `DesiredResource`.
 
 In `src/config/context.ts`:
+
 - Add `dynamic` to the destructure in `toDesired`: `const { key, parent, parents, dependsOn = [], preventDestroy, dynamic, ...fields } = input;`
 - After the existing validation, add:
+
 ```ts
-  const DYNAMIC_STATUSES = ["active", "inactive", "manual", "none"] as const;
-  let dynamicSpec: DynamicSpec | undefined;
-  if (dynamic !== undefined) {
-    if (type !== "group") throw new Error(`${type} "${key}": "dynamic" is only valid on a group.`);
-    const d = dynamic as Record<string, unknown>;
-    if (!DYNAMIC_STATUSES.includes(d.status as never))
-      throw new Error(`group "${key}": "dynamic.status" must be one of ${DYNAMIC_STATUSES.join(", ")}.`);
-    if (d.ruleset == null || typeof d.ruleset !== "object")
-      throw new Error(`group "${key}": "dynamic.ruleset" must be a RuleSet object or a { ref } reference.`);
-    dynamicSpec = { status: d.status as DynamicStatus, ruleset: d.ruleset };
-  }
+const DYNAMIC_STATUSES = ["active", "inactive", "manual", "none"] as const;
+let dynamicSpec: DynamicSpec | undefined;
+if (dynamic !== undefined) {
+  if (type !== "group") throw new Error(`${type} "${key}": "dynamic" is only valid on a group.`);
+  const d = dynamic as Record<string, unknown>;
+  if (!DYNAMIC_STATUSES.includes(d.status as never))
+    throw new Error(`group "${key}": "dynamic.status" must be one of ${DYNAMIC_STATUSES.join(", ")}.`);
+  if (d.ruleset == null || typeof d.ruleset !== "object")
+    throw new Error(`group "${key}": "dynamic.ruleset" must be a RuleSet object or a { ref } reference.`);
+  dynamicSpec = { status: d.status as DynamicStatus, ruleset: d.ruleset };
+}
 ```
+
 - Return `dynamic: dynamicSpec` on the `DesiredResource` (add to the returned object). Import `DynamicSpec`, `DynamicStatus` from `../engine/types.js`.
 - Keep `dynamic` out of `fields` (it is destructured out above — verify it is not spread back in).
 
@@ -381,21 +431,27 @@ git commit -m "feat(dynamic): accept and validate the dynamic block in the confi
 ## Task 4: Ruleset normalizer
 
 **Files:**
+
 - Create: `src/engine/dynamic.ts` (normalizer + status helpers)
 - Test: `tests/dynamic.test.ts`
 
 **Interfaces:**
+
 - Produces:
   ```ts
-  export interface NormalizedDynamic { status: DynamicStatus; ruleset: Record<string, unknown> }
-  export function normalizeRuleset(rule: unknown): Record<string, unknown>;   // canonical form for diffing
-  export function stripCosmeticLabels(node: unknown): unknown;                // remove dterm [label, expr] wrappers
-  export function coerceScalars(node: unknown): unknown;                      // int/string coercion of leaf values
+  export interface NormalizedDynamic {
+    status: DynamicStatus;
+    ruleset: Record<string, unknown>;
+  }
+  export function normalizeRuleset(rule: unknown): Record<string, unknown>; // canonical form for diffing
+  export function stripCosmeticLabels(node: unknown): unknown; // remove dterm [label, expr] wrappers
+  export function coerceScalars(node: unknown): unknown; // int/string coercion of leaf values
   export function normalizeDynamic(spec: { status: DynamicStatus; ruleset: unknown }): NormalizedDynamic;
   ```
 - Consumes: `DynamicStatus` from `types.js`; the fixtures from Task 1.
 
 **Reference:** the golden inputs are the **real production fixtures** captured in Task 1 (`tests/fixtures/dynamic/ruleset*.get.json`) — see `tests/fixtures/dynamic/README.md`. Key realities they encode:
+
 - **`GET …/ruleset` returns a single-element array `[RuleSet]`** — `normalizeRuleset` unwraps it (see code below).
 - `dterm: [label, expr]` labels appear as **both** plain strings (`"Nur aktive Personen"`) and objects (`{ title, stereotype? }`, `title` possibly an i18n key). The stripper drops element 0 regardless of its shape and keeps `expr`.
 - int/string inconsistency is pervasive (`1` vs `"1"`, `oneof [...["112","8"]]` vs `oneof [...[1]]`) — `coerceScalars` fixes it. Non-numeric strings (`"active"`, field names) are left alone.
@@ -403,10 +459,16 @@ git commit -m "feat(dynamic): accept and validate the dynamic block in the confi
 - [ ] **Step 1: Write the failing test**
 
 `tests/dynamic.test.ts`:
+
 ```ts
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { normalizeRuleset, stripCosmeticLabels, coerceScalars, normalizeDynamic } from "../src/engine/dynamic.js";
+import {
+  normalizeRuleset,
+  stripCosmeticLabels,
+  coerceScalars,
+  normalizeDynamic,
+} from "../src/engine/dynamic.js";
 
 describe("stripCosmeticLabels", () => {
   it("unwraps a dterm with a string label to its expr, recursively", () => {
@@ -414,27 +476,37 @@ describe("stripCosmeticLabels", () => {
     expect(stripCosmeticLabels(input)).toEqual({ and: [{ "==": [{ var: "ctgroup.campusId" }, 1] }] });
   });
   it("unwraps a dterm with an object label (title/stereotype/i18n key)", () => {
-    const input = { dterm: [{ title: "group.x.title", stereotype: ["groupmembership"] }, { isnull: [{ var: "person.dateOfDeath" }] }] };
+    const input = {
+      dterm: [
+        { title: "group.x.title", stereotype: ["groupmembership"] },
+        { isnull: [{ var: "person.dateOfDeath" }] },
+      ],
+    };
     expect(stripCosmeticLabels(input)).toEqual({ isnull: [{ var: "person.dateOfDeath" }] });
   });
 });
 
 describe("coerceScalars", () => {
   it("coerces numeric strings to numbers so int/string drift is not spurious", () => {
-    expect(coerceScalars({ "==": [{ var: "ctgroup.campusId" }, "1"] }))
-      .toEqual({ "==": [{ var: "ctgroup.campusId" }, 1] });
+    expect(coerceScalars({ "==": [{ var: "ctgroup.campusId" }, "1"] })).toEqual({
+      "==": [{ var: "ctgroup.campusId" }, 1],
+    });
   });
   it("coerces numeric strings inside oneof arrays but leaves non-numeric strings", () => {
-    expect(coerceScalars({ oneof: [{ var: "ctgroup.id" }, ["112", "8"]] }))
-      .toEqual({ oneof: [{ var: "ctgroup.id" }, [112, 8]] });
-    expect(coerceScalars({ "==": [{ var: "groupmember.groupMemberStatus" }, "active"] }))
-      .toEqual({ "==": [{ var: "groupmember.groupMemberStatus" }, "active"] });
+    expect(coerceScalars({ oneof: [{ var: "ctgroup.id" }, ["112", "8"]] })).toEqual({
+      oneof: [{ var: "ctgroup.id" }, [112, 8]],
+    });
+    expect(coerceScalars({ "==": [{ var: "groupmember.groupMemberStatus" }, "active"] })).toEqual({
+      "==": [{ var: "groupmember.groupMemberStatus" }, "active"],
+    });
   });
 });
 
 describe("normalizeRuleset", () => {
   it("drops read-only timestamps and the PUT envelope, and is idempotent", () => {
-    const withEnvelope = { dynamicGroupRuleSet: { description: "x", dynamicGroupUpdateStarted: "t", process: {}, query: {} } };
+    const withEnvelope = {
+      dynamicGroupRuleSet: { description: "x", dynamicGroupUpdateStarted: "t", process: {}, query: {} },
+    };
     const once = normalizeRuleset(withEnvelope);
     expect(once).not.toHaveProperty("dynamicGroupUpdateStarted");
     expect(once).not.toHaveProperty("dynamicGroupRuleSet");
@@ -450,8 +522,8 @@ describe("normalizeRuleset", () => {
     for (const name of ["ruleset-683", "ruleset-2022", "ruleset-1092"]) {
       const raw = JSON.parse(readFileSync(`tests/fixtures/dynamic/${name}.get.json`, "utf8")); // array shape
       const once = normalizeRuleset(raw);
-      expect(normalizeRuleset(once)).toEqual(once);                 // idempotent
-      expect(JSON.stringify(once)).not.toContain("dterm");          // cosmetic labels stripped
+      expect(normalizeRuleset(once)).toEqual(once); // idempotent
+      expect(JSON.stringify(once)).not.toContain("dterm"); // cosmetic labels stripped
     }
   });
 });
@@ -519,7 +591,7 @@ function dropReadOnly(rule: Record<string, unknown>): Record<string, unknown> {
 /** Canonicalise a ruleset for diffing: unwrap array/PUT envelope, drop timestamps, strip labels, coerce scalars. */
 export function normalizeRuleset(rule: unknown): Record<string, unknown> {
   let r: unknown = rule ?? {};
-  if (Array.isArray(r)) r = r[0] ?? {};                       // GET returns a single-element [RuleSet]
+  if (Array.isArray(r)) r = r[0] ?? {}; // GET returns a single-element [RuleSet]
   let obj = (r ?? {}) as Record<string, unknown>;
   if (obj.dynamicGroupRuleSet && typeof obj.dynamicGroupRuleSet === "object") {
     obj = obj.dynamicGroupRuleSet as Record<string, unknown>; // unwrap the PUT envelope
@@ -527,7 +599,10 @@ export function normalizeRuleset(rule: unknown): Record<string, unknown> {
   return coerceScalars(stripCosmeticLabels(dropReadOnly(obj))) as Record<string, unknown>;
 }
 
-export interface NormalizedDynamic { status: DynamicStatus; ruleset: Record<string, unknown> }
+export interface NormalizedDynamic {
+  status: DynamicStatus;
+  ruleset: Record<string, unknown>;
+}
 
 export function normalizeDynamic(spec: { status: DynamicStatus; ruleset: unknown }): NormalizedDynamic {
   return { status: spec.status, ruleset: normalizeRuleset(spec.ruleset) };
@@ -551,11 +626,13 @@ git commit -m "feat(dynamic): ruleset normalizer (labels, scalars, timestamps, e
 ## Task 5: `dynamic` synthetic-field entry (fold + apply)
 
 **Files:**
+
 - Modify: `src/engine/dynamic.ts` (add `resolveRulesetRef`)
 - Modify: `src/engine/synthetic.ts` (register the `dynamic` field)
 - Test: `tests/synthetic-dynamic.test.ts`
 
 **Interfaces:**
+
 - Consumes: `normalizeDynamic`, `normalizeRuleset` (Task 4); `SyntheticField` (Task 2); `CtClient.get/request`.
 - Produces: a second entry in `SYNTHETIC_FIELDS` with `field: "dynamic"`.
 
@@ -564,6 +641,7 @@ git commit -m "feat(dynamic): ruleset normalizer (labels, scalars, timestamps, e
 - [ ] **Step 1: Write the failing test**
 
 `tests/synthetic-dynamic.test.ts`:
+
 ```ts
 import { describe, it, expect, vi } from "vitest";
 import { SYNTHETIC_FIELDS, syntheticField } from "../src/engine/synthetic.js";
@@ -575,25 +653,50 @@ const dynamicField = () => syntheticField("dynamic")!;
 describe("dynamic synthetic field — fold", () => {
   it("injects normalized dynamic into desired.fields and actual for an opted-in managed group", async () => {
     expect(SYNTHETIC_FIELDS.some((f) => f.field === "dynamic")).toBe(true);
-    const state: State = { version: 1, host: "h",
-      resources: { g: { type: "group", id: 5, key: "g", fields: { name: "G" }, adoptedAt: "t", updatedAt: "t" } } };
+    const state: State = {
+      version: 1,
+      host: "h",
+      resources: {
+        g: { type: "group", id: 5, key: "g", fields: { name: "G" }, adoptedAt: "t", updatedAt: "t" },
+      },
+    };
     const actual = new Map<string, Record<string, unknown>>([["g", { name: "G" }]]);
     const desired: DesiredResource[] = [
-      { type: "group", key: "g", fields: { name: "G" }, dependsOn: [],
-        dynamic: { status: "manual", ruleset: { description: "x", query: {}, process: {} } } },
+      {
+        type: "group",
+        key: "g",
+        fields: { name: "G" },
+        dependsOn: [],
+        dynamic: { status: "manual", ruleset: { description: "x", query: {}, process: {} } },
+      },
     ];
-    const client = { get: vi.fn(async (p: string) =>
-      p.endsWith("/ruleset") ? { description: "x", query: {}, process: {}, dynamicGroupUpdateStarted: "t" }
-                             : { dynamicGroupStatus: "manual" }) };
+    const client = {
+      get: vi.fn(async (p: string) =>
+        p.endsWith("/ruleset")
+          ? { description: "x", query: {}, process: {}, dynamicGroupUpdateStarted: "t" }
+          : { dynamicGroupStatus: "manual" },
+      ),
+    };
     const out = await dynamicField().fold({ client, state, desired, actual });
     expect(out.errors).toEqual([]);
-    expect(actual.get("g")?.dynamic).toEqual({ status: "manual", ruleset: { description: "x", query: {}, process: {} } });
-    expect(out.desired[0]?.fields.dynamic).toEqual({ status: "manual", ruleset: { description: "x", query: {}, process: {} } });
+    expect(actual.get("g")?.dynamic).toEqual({
+      status: "manual",
+      ruleset: { description: "x", query: {}, process: {} },
+    });
+    expect(out.desired[0]?.fields.dynamic).toEqual({
+      status: "manual",
+      ruleset: { description: "x", query: {}, process: {} },
+    });
   });
 
   it("ignores groups that did not opt into dynamic", async () => {
-    const state: State = { version: 1, host: "h",
-      resources: { g: { type: "group", id: 5, key: "g", fields: { name: "G" }, adoptedAt: "t", updatedAt: "t" } } };
+    const state: State = {
+      version: 1,
+      host: "h",
+      resources: {
+        g: { type: "group", id: 5, key: "g", fields: { name: "G" }, adoptedAt: "t", updatedAt: "t" },
+      },
+    };
     const actual = new Map<string, Record<string, unknown>>([["g", { name: "G" }]]);
     const desired: DesiredResource[] = [{ type: "group", key: "g", fields: { name: "G" }, dependsOn: [] }];
     const client = { get: vi.fn() };
@@ -607,21 +710,41 @@ describe("dynamic synthetic field — apply", () => {
   it("PUTs the wrapped ruleset then the status", async () => {
     const request = vi.fn(async () => ({}));
     const state: State = { version: 1, host: "h", resources: {} };
-    await dynamicField().apply({ client: { request }, state, id: 5,
-      change: { field: "dynamic", from: undefined,
-        to: { status: "active", ruleset: { description: "x", query: {}, process: {} } } } });
-    expect(request).toHaveBeenNthCalledWith(1, "PUT", "/dynamicgroups/5/ruleset",
-      { dynamicGroupRuleSet: { description: "x", query: {}, process: {} } });
-    expect(request).toHaveBeenNthCalledWith(2, "PUT", "/dynamicgroups/5/status", { dynamicGroupStatus: "active" });
+    await dynamicField().apply({
+      client: { request },
+      state,
+      id: 5,
+      change: {
+        field: "dynamic",
+        from: undefined,
+        to: { status: "active", ruleset: { description: "x", query: {}, process: {} } },
+      },
+    });
+    expect(request).toHaveBeenNthCalledWith(1, "PUT", "/dynamicgroups/5/ruleset", {
+      dynamicGroupRuleSet: { description: "x", query: {}, process: {} },
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "PUT", "/dynamicgroups/5/status", {
+      dynamicGroupStatus: "active",
+    });
   });
 
   it("demotes to a normal group when status is none: DELETE ruleset then status none", async () => {
     const request = vi.fn(async () => ({}));
     const state: State = { version: 1, host: "h", resources: {} };
-    await dynamicField().apply({ client: { request }, state, id: 5,
-      change: { field: "dynamic", from: { status: "active", ruleset: {} }, to: { status: "none", ruleset: {} } } });
+    await dynamicField().apply({
+      client: { request },
+      state,
+      id: 5,
+      change: {
+        field: "dynamic",
+        from: { status: "active", ruleset: {} },
+        to: { status: "none", ruleset: {} },
+      },
+    });
     expect(request).toHaveBeenNthCalledWith(1, "DELETE", "/dynamicgroups/5/ruleset");
-    expect(request).toHaveBeenNthCalledWith(2, "PUT", "/dynamicgroups/5/status", { dynamicGroupStatus: "none" });
+    expect(request).toHaveBeenNthCalledWith(2, "PUT", "/dynamicgroups/5/status", {
+      dynamicGroupStatus: "none",
+    });
   });
 });
 ```
@@ -634,6 +757,7 @@ Expected: FAIL — no `dynamic` entry registered.
 - [ ] **Step 3: Add `resolveRulesetRef` to `dynamic.ts`**
 
 Append to `src/engine/dynamic.ts`:
+
 ```ts
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -647,11 +771,13 @@ export function resolveRulesetRef(ruleset: unknown, baseDir: string = process.cw
   return ruleset;
 }
 ```
+
 (`dirname` import is for future per-config-file resolution; if unused now, omit it to satisfy `no-unused-vars`.)
 
 - [ ] **Step 4: Register the `dynamic` field in `synthetic.ts`**
 
 Add to `src/engine/synthetic.ts`:
+
 ```ts
 import { normalizeDynamic, normalizeRuleset, resolveRulesetRef } from "./dynamic.js";
 import type { DynamicStatus } from "./types.js";
@@ -659,7 +785,9 @@ import type { DynamicStatus } from "./types.js";
 const dynamicField: SyntheticField = {
   field: "dynamic",
   async fold({ client, state, desired, actual }) {
-    const optedIn = new Set(desired.filter((d) => d.type === "group" && d.dynamic !== undefined).map((d) => d.key));
+    const optedIn = new Set(
+      desired.filter((d) => d.type === "group" && d.dynamic !== undefined).map((d) => d.key),
+    );
     if (optedIn.size === 0) return { desired, errors: [] };
     const errors: string[] = [];
     for (const managed of Object.values(state.resources)) {
@@ -668,7 +796,9 @@ const dynamicField: SyntheticField = {
       if (!a) continue; // vanished from CT → handled as a recreate by the plain plan
       try {
         const ruleset = await client.get<Record<string, unknown>>(`/dynamicgroups/${managed.id}/ruleset`);
-        const statusRes = await client.get<{ dynamicGroupStatus?: string }>(`/dynamicgroups/${managed.id}/status`);
+        const statusRes = await client.get<{ dynamicGroupStatus?: string }>(
+          `/dynamicgroups/${managed.id}/status`,
+        );
         a.dynamic = {
           status: (statusRes?.dynamicGroupStatus ?? "none") as DynamicStatus,
           ruleset: normalizeRuleset(ruleset),
@@ -680,7 +810,16 @@ const dynamicField: SyntheticField = {
     }
     const augmented = desired.map((d) =>
       d.type === "group" && d.dynamic !== undefined
-        ? { ...d, fields: { ...d.fields, dynamic: normalizeDynamic({ status: d.dynamic.status, ruleset: resolveRulesetRef(d.dynamic.ruleset) }) } }
+        ? {
+            ...d,
+            fields: {
+              ...d.fields,
+              dynamic: normalizeDynamic({
+                status: d.dynamic.status,
+                ruleset: resolveRulesetRef(d.dynamic.ruleset),
+              }),
+            },
+          }
         : d,
     );
     return { desired: augmented, errors };
@@ -703,6 +842,7 @@ const dynamicField: SyntheticField = {
 
 export const SYNTHETIC_FIELDS: SyntheticField[] = [parentsField, dynamicField];
 ```
+
 (Replace the previous single-entry `SYNTHETIC_FIELDS` line.)
 
 - [ ] **Step 5: Run to verify it passes**
@@ -727,16 +867,19 @@ git commit -m "feat(dynamic): synthetic-field fold + apply for ruleset & status"
 ## Task 6: End-to-end plan/apply + opt-in live round-trip test
 
 **Files:**
+
 - Modify: `src/commands/apply.ts` (add `--refresh` flag → per-group `POST /dynamicgroups/{id}/refresh` after a successful apply of a changed dynamic group)
 - Test: `tests/dynamic.integration.test.ts` (opt-in, `CT_LIVE=1`)
 
 **Interfaces:**
+
 - Consumes: `buildPlan`, `executePlan`, the `dynamic` synthetic field.
 - Produces: `ct apply --refresh` behavior; a green round-trip proof.
 
 - [ ] **Step 1: Write the opt-in live round-trip test**
 
 `tests/dynamic.integration.test.ts`:
+
 ```ts
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -784,12 +927,15 @@ if (opts.refresh) {
     const id = state.resources[item.key]?.id;
     if (id === undefined) continue;
     const res = await client.request<Array<{ created: number; updated: number; deleted: number }>>(
-      "POST", `/dynamicgroups/${id}/refresh`);
+      "POST",
+      `/dynamicgroups/${id}/refresh`,
+    );
     const r = res?.[0];
     if (r) info(`refreshed ${item.key}: +${r.created} ~${r.updated} -${r.deleted}`);
   }
 }
 ```
+
 (Use the file's existing logging helper in place of `info`.)
 
 - [ ] **Step 4: Add a unit test for the refresh gating** (in `tests/apply.test.ts` or a new `tests/apply-refresh.test.ts`) asserting `POST /dynamicgroups/{id}/refresh` is called once per changed dynamic group and **never** `/dynamicgroups/refresh`, and not at all without `--refresh`.
@@ -811,18 +957,26 @@ git commit -m "feat(dynamic): end-to-end apply, opt-in --refresh, live round-tri
 ## Task 7: Typed query DSL (Phase 2)
 
 **Files:**
+
 - Create: `src/config/query.ts` (the `q.*` builder + resolver hook)
 - Modify: `src/config/context.ts` (expose `q` and a `campus()`/`group()` key→id resolver on the context, or export `q` standalone)
 - Test: `tests/query.test.ts`
 
 **Interfaces:**
+
 - Produces:
   ```ts
-  export interface QueryNode { [op: string]: unknown }
+  export interface QueryNode {
+    [op: string]: unknown;
+  }
   export const q: {
-    and(...n: QueryNode[]): QueryNode; or(...n: QueryNode[]): QueryNode; not(n: QueryNode): QueryNode;
-    eq(varName: string, value: unknown): QueryNode; oneof(varName: string, values: unknown[]): QueryNode;
-    isnull(varName: string): QueryNode; var(name: string): QueryNode;
+    and(...n: QueryNode[]): QueryNode;
+    or(...n: QueryNode[]): QueryNode;
+    not(n: QueryNode): QueryNode;
+    eq(varName: string, value: unknown): QueryNode;
+    oneof(varName: string, values: unknown[]): QueryNode;
+    isnull(varName: string): QueryNode;
+    var(name: string): QueryNode;
   };
   export function churchQuery(filter: QueryNode, opts?: { description?: string }): Record<string, unknown>;
   ```
@@ -833,6 +987,7 @@ git commit -m "feat(dynamic): end-to-end apply, opt-in --refresh, live round-tri
 - [ ] **Step 1: Write the failing test**
 
 `tests/query.test.ts`:
+
 ```ts
 import { describe, it, expect } from "vitest";
 import { q, churchQuery } from "../src/config/query.js";
@@ -841,25 +996,35 @@ import { normalizeRuleset } from "../src/engine/dynamic.js";
 describe("typed query builder", () => {
   it("builds a JSONLogic tree", () => {
     const tree = q.and(q.eq("ctgroup.campusId", 1), q.eq("person.isArchived", false));
-    expect(tree).toEqual({ and: [
-      { "==": [{ var: "ctgroup.campusId" }, 1] },
-      { "==": [{ var: "person.isArchived" }, false] },
-    ] });
+    expect(tree).toEqual({
+      and: [{ "==": [{ var: "ctgroup.campusId" }, 1] }, { "==": [{ var: "person.isArchived" }, false] }],
+    });
   });
 
   it("oneof and isnull", () => {
-    expect(q.oneof("ctgroup.groupTypeId", [1, 2])).toEqual({ oneof: [{ var: "ctgroup.groupTypeId" }, [1, 2]] });
+    expect(q.oneof("ctgroup.groupTypeId", [1, 2])).toEqual({
+      oneof: [{ var: "ctgroup.groupTypeId" }, [1, 2]],
+    });
     expect(q.isnull("person.isArchived")).toEqual({ isnull: [{ var: "person.isArchived" }] });
   });
 
   it("churchQuery wraps the filter in the ChurchQuery envelope", () => {
     const cq = churchQuery(q.eq("ctgroup.campusId", 1), { description: "Mainz" });
-    expect(cq).toEqual({ description: "Mainz", method: "ChurchQuery", params: { filter: { "==": [{ var: "ctgroup.campusId" }, 1] } } });
+    expect(cq).toEqual({
+      description: "Mainz",
+      method: "ChurchQuery",
+      params: { filter: { "==": [{ var: "ctgroup.campusId" }, 1] } },
+    });
   });
 
   it("a built ruleset normalizes stably (matches read-back normalization)", () => {
-    const ruleset = { description: "x", importance: 0, personIdFieldName: "id",
-      process: {}, query: churchQuery(q.eq("ctgroup.campusId", 1)) };
+    const ruleset = {
+      description: "x",
+      importance: 0,
+      personIdFieldName: "id",
+      process: {},
+      query: churchQuery(q.eq("ctgroup.campusId", 1)),
+    };
     expect(normalizeRuleset(normalizeRuleset(ruleset))).toEqual(normalizeRuleset(ruleset));
   });
 });
@@ -878,7 +1043,9 @@ Expected: FAIL — module missing.
  * tree that lives inside the ChurchQuery `params.filter`. `var` values are raw
  * ChurchTools ids — resolve keys → ids at config-build time and pass the number.
  */
-export interface QueryNode { [op: string]: unknown }
+export interface QueryNode {
+  [op: string]: unknown;
+}
 
 export const q = {
   and: (...n: QueryNode[]): QueryNode => ({ and: n }),
@@ -917,6 +1084,7 @@ git commit -m "feat(dynamic): typed query builder + ChurchQuery envelope (Phase 
 ## Task 8: Docs + example config
 
 **Files:**
+
 - Modify: `README.md` (add an "Auto-groups" subsection under usage/status)
 - Create: `docs/dynamic-groups.md` (the full feature guide)
 - Create: `examples/dynamic-group.config.ts` (a runnable example config)
@@ -932,13 +1100,19 @@ import { q, churchQuery } from "../src/config/query.js"; // or the published imp
 export default (ct: any) => {
   ct.campus({ key: "mainz", name: "Mainz", shorty: "MZ" });
   ct.group({
-    key: "all_mainz", name: "Alle Mainz", groupTypeId: 1,
+    key: "all_mainz",
+    name: "Alle Mainz",
+    groupTypeId: 1,
     dynamic: {
       status: "manual",
       ruleset: {
         description: "Alle aktiven Personen in Mainz", // description lives on the ruleset, NOT inside query
-        importance: 0, personIdFieldName: "person.id", process: {},
-        query: churchQuery(q.and(q.eq("ctgroup.campusId", 0 /* mainz id */), q.eq("person.isArchived", false))),
+        importance: 0,
+        personIdFieldName: "person.id",
+        process: {},
+        query: churchQuery(
+          q.and(q.eq("ctgroup.campusId", 0 /* mainz id */), q.eq("person.isArchived", false)),
+        ),
       },
     },
   });
@@ -965,6 +1139,7 @@ git commit -m "docs(dynamic): auto-groups guide + runnable example config"
 ## Self-Review
 
 **Spec coverage (against the #14 section of the design spec):**
+
 - DSL `dynamic` block on a group → Task 3. ✓
 - `ct plan` shows ruleset/status create/update/delete with a normalizer avoiding cosmetic false diffs → Tasks 4 (normalizer) + 5 (fold makes it a diffable field). ✓
 - `ct apply` writes ruleset + status in the right order (group first); re-run is a no-op → Task 5 (apply order) + group tier 1 means the group item owns the write, exactly like `parents` (owner exists before the synthetic write). ✓

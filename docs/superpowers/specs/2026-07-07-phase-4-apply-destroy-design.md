@@ -26,7 +26,7 @@ each successful action (crash-safe / resumable).
 2. **Destroy-protection = a config `preventDestroy` lifecycle flag** plus a typed
    confirmation. A targeted destroy of a flagged resource hard-fails until the
    flag (or the whole declaration) is removed from config.
-3. **Backup = a JSON snapshot** of the current *actual* ChurchTools values of all
+3. **Backup = a JSON snapshot** of the current _actual_ ChurchTools values of all
    managed resources, written to `backups/ct-backup-<ISO-timestamp>.json` beside
    the state file, before any write. Directory overridable via `--backup-dir` /
    `CT_BACKUP_DIR`.
@@ -99,15 +99,15 @@ Extend `AdoptableResource`:
 Add read+write entries for the new types. **Provisional** managed fields (to be
 confirmed against the live API — fetch one of each with `ct get`, adjust):
 
-| type                | collection path             | update | provisional managed fields          |
-| ------------------- | --------------------------- | ------ | ----------------------------------- |
-| `campus`            | `/campuses`                 | PUT    | `name`, `shortName`                 |
-| `group`             | `/groups`                   | PATCH  | `name`, `groupTypeId`, `groupStatusId` |
-| `group-type`        | `/group/grouptypes`         | PUT    | `name`, `nameTranslated`            |
-| `age-group`         | `/group/agegroups`          | PUT    | `name`, `sortKey`                   |
-| `target-group`      | `/group/targetgroups`       | PUT    | `name`, `sortKey`                   |
+| type                | collection path             | update | provisional managed fields               |
+| ------------------- | --------------------------- | ------ | ---------------------------------------- |
+| `campus`            | `/campuses`                 | PUT    | `name`, `shortName`                      |
+| `group`             | `/groups`                   | PATCH  | `name`, `groupTypeId`, `groupStatusId`   |
+| `group-type`        | `/group/grouptypes`         | PUT    | `name`, `nameTranslated`                 |
+| `age-group`         | `/group/agegroups`          | PUT    | `name`, `sortKey`                        |
+| `target-group`      | `/group/targetgroups`       | PUT    | `name`, `sortKey`                        |
 | `relationship-type` | `/person/relationshiptypes` | PUT    | `name`, `degreeForward`, `degreeReverse` |
-| `group-role`        | `/group/roles`              | PUT    | `name`, `groupTypeId`               |
+| `group-role`        | `/group/roles`              | PUT    | `name`, `groupTypeId`                    |
 
 Provisional field sets are a registry-local detail; the engine is field-agnostic,
 so refining them later touches only this file (+ its test).
@@ -182,14 +182,14 @@ Add `commands/apply.ts` and `commands/destroy.ts`; remove both entries from
 
 ## Guardrail → mechanism map
 
-| Guardrail (issue #6)             | Mechanism                                                        |
-| -------------------------------- | --------------------------------------------------------------- |
-| Confirmation before any change   | `confirm` (apply) / `confirmTyped` (destroy)                    |
-| Automatic backup before apply    | `writeBackup(actual)` before the first write                    |
-| People/memberships never touched | structural-only registry + `assertNotPeople` denylist           |
+| Guardrail (issue #6)             | Mechanism                                                            |
+| -------------------------------- | -------------------------------------------------------------------- |
+| Confirmation before any change   | `confirm` (apply) / `confirmTyped` (destroy)                         |
+| Automatic backup before apply    | `writeBackup(actual)` before the first write                         |
+| People/memberships never touched | structural-only registry + `assertNotPeople` denylist                |
 | Rate-limit + retry on writes     | existing `fetchWithRetry` (429 retried; 5xx/network not, for writes) |
-| State updated after each action  | `save` after every create/update/edge/delete                   |
-| Destroy-protection               | `preventDestroy` flag + explicit `--target` + typed confirm     |
+| State updated after each action  | `save` after every create/update/edge/delete                         |
+| Destroy-protection               | `preventDestroy` flag + explicit `--target` + typed confirm          |
 
 Rate-limit/retry needs **no code change**: `fetchWithRetry` already retries `429`
 for every method (safe — rejected before processing) and deliberately does not

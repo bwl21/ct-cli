@@ -127,7 +127,11 @@ export class ReverseResolver {
           if (Array.isArray(rows)) {
             for (const row of rows) {
               const groupTypeId = Number(row?.groupTypeId);
-              if (typeof row?.id === "number" && typeof row.name === "string" && Number.isFinite(groupTypeId)) {
+              if (
+                typeof row?.id === "number" &&
+                typeof row.name === "string" &&
+                Number.isFinite(groupTypeId)
+              ) {
                 map.set(row.id, { groupTypeId, name: row.name });
               }
             }

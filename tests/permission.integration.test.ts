@@ -63,7 +63,12 @@ describe.runIf(live)("permission round-trip (live, read-only)", () => {
       return { right: name, scope: t.dataId.map((id) => `fixture_group_${id}`) };
     });
 
-    const desired: DesiredPermission = { key: "fixture", domainType: "group_type_role", domainId: DOMAIN_ID, grants };
+    const desired: DesiredPermission = {
+      key: "fixture",
+      domainType: "group_type_role",
+      domainId: DOMAIN_ID,
+      grants,
+    };
 
     // Read-only: buildPermissionPlan only issues GETs.
     const { items, fetchErrors } = await buildPermissionPlan(client, state, [desired]);

@@ -38,7 +38,14 @@ function stateWithKoblenz(id: number): State {
     version: 1,
     host: HOST,
     resources: {
-      koblenz: { type: "campus", id, key: "koblenz", fields: { name: "Koblenz" }, adoptedAt: "t", updatedAt: "t" },
+      koblenz: {
+        type: "campus",
+        id,
+        key: "koblenz",
+        fields: { name: "Koblenz" },
+        adoptedAt: "t",
+        updatedAt: "t",
+      },
     },
   };
 }
@@ -55,11 +62,21 @@ function mockClient(campuses: { id: number; name: string }[] = [], newId = 555) 
   return { client: { get, request } as unknown as CtClient, calls, get };
 }
 
-async function tuplesFor(perm: DesiredPermission, state: State, desired: DesiredResource[] = [], client?: CtClient) {
+async function tuplesFor(
+  perm: DesiredPermission,
+  state: State,
+  desired: DesiredResource[] = [],
+  client?: CtClient,
+) {
   const c = client ?? mockClient().client;
   const resolver = new Resolver({ client: c, state, desired });
   const refs = await resolveScopeRefs([perm], resolver, state);
-  return desiredTuples(perm, state, new Set(desired.filter((r) => r.type === "group").map((r) => r.key)), refs);
+  return desiredTuples(
+    perm,
+    state,
+    new Set(desired.filter((r) => r.type === "group").map((r) => r.key)),
+    refs,
+  );
 }
 
 describe("campus-scoped grants are portable across hosts (#98)", () => {
@@ -68,14 +85,27 @@ describe("campus-scoped grants are portable across hosts (#98)", () => {
     const dev = await tuplesFor(campusScoped, stateWithKoblenz(6));
     const prod = await tuplesFor(campusScoped, stateWithKoblenz(23));
 
-    expect(dev).toEqual([{ authId: 124, dataId: [6], type: "grant", scopeKey: "koblenz", scopeType: "campus" }]);
-    expect(prod).toEqual([{ authId: 124, dataId: [23], type: "grant", scopeKey: "koblenz", scopeType: "campus" }]);
+    expect(dev).toEqual([
+      { authId: 124, dataId: [6], type: "grant", scopeKey: "koblenz", scopeType: "campus" },
+    ]);
+    expect(prod).toEqual([
+      { authId: 124, dataId: [23], type: "grant", scopeKey: "koblenz", scopeType: "campus" },
+    ]);
   });
 
   it("plans to a clean no-op against each host's live rows", async () => {
     for (const id of [6, 23]) {
       const state = stateWithKoblenz(id);
-      const live = [{ domainType: "group_role", domainId: 900, authId: 124, dataId: id, type: "grant", meta: { modifiedPid: 5 } }];
+      const live = [
+        {
+          domainType: "group_role",
+          domainId: 900,
+          authId: 124,
+          dataId: id,
+          type: "grant",
+          meta: { modifiedPid: 5 },
+        },
+      ];
       const client = { get: vi.fn(async (path: string) => (path === "/campuses" ? [] : live)) };
       const { items, fetchErrors } = await buildPermissionPlan(client as never, state, [campusScoped]);
       expect(fetchErrors).toEqual([]);
@@ -93,7 +123,9 @@ describe("campus-scoped grants are portable across hosts (#98)", () => {
   });
 
   it("a campus created in the same run is pending at plan time and gets its real id at apply time", async () => {
-    const desired: DesiredResource[] = [{ type: "campus", key: "koblenz", fields: { name: "Koblenz", shorty: "KO" }, dependsOn: [] }];
+    const desired: DesiredResource[] = [
+      { type: "campus", key: "koblenz", fields: { name: "Koblenz", shorty: "KO" }, dependsOn: [] },
+    ];
     const { client, calls } = mockClient([], 555);
     const state = emptyState(HOST);
     const { items } = await buildPermissionPlan(client, state, [campusScoped], desired);
@@ -102,7 +134,15 @@ describe("campus-scoped grants are portable across hosts (#98)", () => {
     ]);
 
     const createCampus: Plan = {
-      items: [{ type: "campus", key: "koblenz", id: null, action: "create", changes: [{ field: "name", from: undefined, to: "Koblenz" }] }],
+      items: [
+        {
+          type: "campus",
+          key: "koblenz",
+          id: null,
+          action: "create",
+          changes: [{ field: "name", from: undefined, to: "Koblenz" }],
+        },
+      ],
     };
     await executePlan(createCampus, { client, state, statePath: "unused", save: async () => {} });
     expect(state.resources.koblenz?.id).toBe(555);
@@ -119,7 +159,9 @@ describe("scope-dimension validation (#98)", () => {
 
   it("rejects a ref whose dimension does not match the right's scopeField, naming both", async () => {
     const perm: DesiredPermission = {
-      key: "p", domainType: "group_role", domainId: 1,
+      key: "p",
+      domainType: "group_role",
+      domainId: 1,
       // churchdb:view station scopes by cdb_station (campus) — a group-type ref there is a config bug.
       grants: [{ right: VIEW_STATION, scope: [ref.groupType("struktur")] }],
     };
@@ -130,7 +172,9 @@ describe("scope-dimension validation (#98)", () => {
 
   it("rejects a ref on a dimension with no logical form at all, naming the ref and the dimension", async () => {
     const perm: DesiredPermission = {
-      key: "p", domainType: "group_role", domainId: 1,
+      key: "p",
+      domainType: "group_role",
+      domainId: 1,
       // churchdb:security level person scopes by cc_securitylevel — security levels are not resources.
       grants: [{ right: "churchdb:security level person", scope: [ref.campus("koblenz")] }],
     };
@@ -141,7 +185,9 @@ describe("scope-dimension validation (#98)", () => {
 
   it("rejects a logical ref on a dimension that has no logical form, pointing at the numeric hatch", async () => {
     const perm: DesiredPermission = {
-      key: "p", domainType: "group_role", domainId: 1,
+      key: "p",
+      domainType: "group_role",
+      domainId: 1,
       // ccm_data_category: its values are not resources at all — numbers only, by nature.
       grants: [{ right: "jpmFlowManagerPreview:view custom category", scope: [ref.campus("x")] }],
     };
@@ -152,7 +198,9 @@ describe("scope-dimension validation (#98)", () => {
 
   it("rejects a logical ref on an unscoped right", async () => {
     const perm: DesiredPermission = {
-      key: "p", domainType: "group_role", domainId: 1,
+      key: "p",
+      domainType: "group_role",
+      domainId: 1,
       grants: [{ right: "churchcore:administer settings", scope: [ref.campus("koblenz")] }],
     };
     await expect(resolveScopeRefs([perm], resolverFor(emptyState(HOST)), emptyState(HOST))).rejects.toThrow(
@@ -164,16 +212,22 @@ describe("scope-dimension validation (#98)", () => {
     // Before #98 this was the trap: "koblenz" was looked up among managed GROUPS regardless of the
     // right's dimension, so it either errored confusingly or matched an unrelated same-keyed group.
     const perm: DesiredPermission = {
-      key: "p", domainType: "group_role", domainId: 1,
+      key: "p",
+      domainType: "group_role",
+      domainId: 1,
       grants: [{ right: VIEW_STATION, scope: ["koblenz"] }],
     };
     const state = stateWithKoblenz(6);
-    await expect(tuplesFor(perm, state)).rejects.toThrow(/bare string.*scopes by "cdb_station".*\{ campus: "koblenz" \}/s);
+    await expect(tuplesFor(perm, state)).rejects.toThrow(
+      /bare string.*scopes by "cdb_station".*\{ campus: "koblenz" \}/s,
+    );
   });
 
   it("a ref that cannot resolve is a hard error, never a dropped or guessed dataId", async () => {
     const perm: DesiredPermission = {
-      key: "p", domainType: "group_role", domainId: 1,
+      key: "p",
+      domainType: "group_role",
+      domainId: 1,
       grants: [{ right: VIEW_STATION, scope: [ref.campus("nowhere")] }],
     };
     await expect(tuplesFor(perm, emptyState(HOST))).rejects.toThrow(/Cannot resolve campus:nowhere/);
@@ -181,18 +235,26 @@ describe("scope-dimension validation (#98)", () => {
 
   it("still accepts a numeric dataId on any dimension (the #49 escape hatch is untouched)", async () => {
     const perm: DesiredPermission = {
-      key: "p", domainType: "group_role", domainId: 1,
+      key: "p",
+      domainType: "group_role",
+      domainId: 1,
       grants: [{ right: "churchdb:view alldata", scope: [7] }],
     };
     expect(await tuplesFor(perm, emptyState(HOST))).toEqual([{ authId: 102, dataId: [7], type: "grant" }]);
   });
 
   it("resolves a group-type scope ref against the managed group type", async () => {
-    const state: State = { version: 1, host: HOST, resources: {
-      struktur: { type: "group-type", id: 12, key: "struktur", fields: {}, adoptedAt: "t", updatedAt: "t" },
-    }};
+    const state: State = {
+      version: 1,
+      host: HOST,
+      resources: {
+        struktur: { type: "group-type", id: 12, key: "struktur", fields: {}, adoptedAt: "t", updatedAt: "t" },
+      },
+    };
     const perm: DesiredPermission = {
-      key: "p", domainType: "group_role", domainId: 1,
+      key: "p",
+      domainType: "group_role",
+      domainId: 1,
       grants: [{ right: "churchgroup:view groups of grouptype", scope: [ref.groupType("struktur")] }],
     };
     expect(await tuplesFor(perm, state)).toEqual([
@@ -204,11 +266,18 @@ describe("scope-dimension validation (#98)", () => {
 describe("department scopes are a READ-ONLY ref catalog (cdb_bereich, #98)", () => {
   // `/departments` is GET-only — live-probed 2026-08-13 against the instance's own OpenAPI spec
   // (eqrm prod, CT 3.135.2). So a department resolves by NAME on every host but is never declarable.
-  const departments = [{ id: 7, name: "Equippers Koblenz" }, { id: 1, name: "Equippers Rhein-Main" }];
-  const client = { get: vi.fn(async (path: string) => (path === "/departments" ? departments : [])) } as unknown as CtClient;
+  const departments = [
+    { id: 7, name: "Equippers Koblenz" },
+    { id: 1, name: "Equippers Rhein-Main" },
+  ];
+  const client = {
+    get: vi.fn(async (path: string) => (path === "/departments" ? departments : [])),
+  } as unknown as CtClient;
 
   const perm = (key: string): DesiredPermission => ({
-    key: "p", domainType: "group_role", domainId: 1,
+    key: "p",
+    domainType: "group_role",
+    domainId: 1,
     grants: [{ right: "churchdb:view alldata", scope: [{ department: key }] }],
   });
 
@@ -227,9 +296,20 @@ describe("department scopes are a READ-ONLY ref catalog (cdb_bereich, #98)", () 
   });
 
   it("is never treated as a managed resource, even if a same-keyed resource is in state", async () => {
-    const state: State = { version: 1, host: HOST, resources: {
-      equippers_koblenz: { type: "group", id: 999, key: "equippers_koblenz", fields: {}, adoptedAt: "t", updatedAt: "t" },
-    }};
+    const state: State = {
+      version: 1,
+      host: HOST,
+      resources: {
+        equippers_koblenz: {
+          type: "group",
+          id: 999,
+          key: "equippers_koblenz",
+          fields: {},
+          adoptedAt: "t",
+          updatedAt: "t",
+        },
+      },
+    };
     // The group must not shadow the department catalog — that would be the misgrant #98 is about.
     expect(await tuplesFor(perm("equippers_koblenz"), state, [], client)).toEqual([
       { authId: 102, dataId: [7], type: "grant" },
@@ -238,7 +318,7 @@ describe("department scopes are a READ-ONLY ref catalog (cdb_bereich, #98)", () 
 });
 
 describe("scope object sugar", () => {
-  it("compiles { campus: \"koblenz\" } to the same Ref as ref.campus(...)", () => {
+  it('compiles { campus: "koblenz" } to the same Ref as ref.campus(...)', () => {
     const { ct, permissions } = createContext();
     ct.groupRole({ key: "p", id: 900, grants: [{ right: VIEW_STATION, scope: [{ campus: "koblenz" }] }] });
     expect(permissions[0]?.grants).toEqual([{ right: VIEW_STATION, scope: [ref.campus("koblenz")] }]);
@@ -247,10 +327,18 @@ describe("scope object sugar", () => {
   it("rejects a scope object naming zero or several dimensions", () => {
     const { ct } = createContext();
     expect(() =>
-      ct.groupRole({ key: "a", id: 1, grants: [{ right: VIEW_STATION, scope: [{ campus: "a", groupType: "b" } as never] }] }),
+      ct.groupRole({
+        key: "a",
+        id: 1,
+        grants: [{ right: VIEW_STATION, scope: [{ campus: "a", groupType: "b" } as never] }],
+      }),
     ).toThrow(/exactly one dimension/);
     expect(() =>
-      ct.groupRole({ key: "b", id: 2, grants: [{ right: VIEW_STATION, scope: [{ bereich: "a" } as never] }] }),
+      ct.groupRole({
+        key: "b",
+        id: 2,
+        grants: [{ right: VIEW_STATION, scope: [{ bereich: "a" } as never] }],
+      }),
     ).toThrow(/unknown scope dimension "bereich"/);
   });
 
@@ -264,18 +352,40 @@ describe("scope object sugar", () => {
 
 describe("re-resolution is type-aware", () => {
   it("re-resolves a campus scope against the campus in state, not a same-keyed group", () => {
-    const state: State = { version: 1, host: HOST, resources: {
-      koblenz: { type: "campus", id: 23, key: "koblenz", fields: {}, adoptedAt: "t", updatedAt: "t" },
-    }};
-    const t = { authId: 124, dataId: [], type: "grant" as const, scopeKey: "koblenz", scopeType: "campus", pending: true };
+    const state: State = {
+      version: 1,
+      host: HOST,
+      resources: {
+        koblenz: { type: "campus", id: 23, key: "koblenz", fields: {}, adoptedAt: "t", updatedAt: "t" },
+      },
+    };
+    const t = {
+      authId: 124,
+      dataId: [],
+      type: "grant" as const,
+      scopeKey: "koblenz",
+      scopeType: "campus",
+      pending: true,
+    };
     expect(reresolveTuple(t, state)).toEqual({ ...t, dataId: [23], pending: false });
   });
 
   it("refuses to write a grant whose scope key now names a different resource type", () => {
-    const state: State = { version: 1, host: HOST, resources: {
-      koblenz: { type: "group", id: 5, key: "koblenz", fields: {}, adoptedAt: "t", updatedAt: "t" },
-    }};
-    const t = { authId: 124, dataId: [], type: "grant" as const, scopeKey: "koblenz", scopeType: "campus", pending: true };
+    const state: State = {
+      version: 1,
+      host: HOST,
+      resources: {
+        koblenz: { type: "group", id: 5, key: "koblenz", fields: {}, adoptedAt: "t", updatedAt: "t" },
+      },
+    };
+    const t = {
+      authId: 124,
+      dataId: [],
+      type: "grant" as const,
+      scopeKey: "koblenz",
+      scopeType: "campus",
+      pending: true,
+    };
     expect(() => reresolveTuple(t, state)).toThrow(/did not resolve to a managed campus/);
   });
 });

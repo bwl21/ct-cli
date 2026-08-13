@@ -53,10 +53,7 @@ async function wireEnv(opts: EnvOpts, env: NodeJS.ProcessEnv): Promise<EnvProfil
  * Prepare a state-touching command's environment. Call this FIRST — before
  * `resolveConfig` / `authedSession` — so the wired host/token take effect.
  */
-export async function prepareEnv(
-  opts: EnvOpts,
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<CommandEnv> {
+export async function prepareEnv(opts: EnvOpts, env: NodeJS.ProcessEnv = process.env): Promise<CommandEnv> {
   const profile = await wireEnv(opts, env);
   const statePath = resolveStatePath(opts.state, env, profile?.statePath);
   return { name: profile?.name ?? null, protected: profile?.protected ?? false, statePath };

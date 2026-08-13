@@ -38,7 +38,7 @@ against this production login.**
    write-back re-sends exactly what CT returned, so it is drift-free by
    construction.
 2. **`CT_LIVE=1 CT_LIVE_WRITE=1 CT_LIVE_WRITE_HOST=<dev host>
-   CT_DYNAMIC_FIXTURE_GID=<disposable dev group id>`** — the **#36 pin**:
+CT_DYNAMIC_FIXTURE_GID=<disposable dev group id>`** — the **#36 pin**:
    PUTs a ruleset this test authors itself (custom `description`, `shorty`,
    `importance`, …, never copied from a GET) to the designated group, GETs it
    back, and asserts normalized deep-equality field by field. It also builds

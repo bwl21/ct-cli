@@ -322,7 +322,9 @@ export function adoptGroupCommand(): Command {
                       lines.map((l) => `    ${l}`).join("\n"),
                   );
                 }
-                warn(`${relPath} keeps ${warnings.length} host-specific id(s) — NOT portable to another host:`);
+                warn(
+                  `${relPath} keeps ${warnings.length} host-specific id(s) — NOT portable to another host:`,
+                );
                 for (const line of lines) info(`    ${line}`);
               }
             } else {

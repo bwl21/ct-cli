@@ -40,7 +40,13 @@ import { isPendingRef, refKey, refLabel, type Ref } from "../resolve/refs.js";
  * (#20/#46) and the scope pending path (#29). A pending domain has no live grants yet, so its diff
  * is `desired → toPut` against an empty actual set.
  */
-export interface PermissionPlanItem { key: string; domainType: DomainType; domainId: number | null; pendingDomain?: Ref; diff: GrantDiff }
+export interface PermissionPlanItem {
+  key: string;
+  domainType: DomainType;
+  domainId: number | null;
+  pendingDomain?: Ref;
+  diff: GrantDiff;
+}
 
 /**
  * Fan out each grant to (authId, dataId) tuples. ChurchTools reads a scoped grant back as
@@ -69,7 +75,9 @@ export function desiredTuples(
       return [{ authId: entry.authId, dataId: [], type: "grant" as const }];
     }
     if (entry.scopeField == null) {
-      throw new Error(`${p.domainType} "${p.key}": "${name}" is not a scoped right (no scopeField) — remove "scope" or use a scoped right.`);
+      throw new Error(
+        `${p.domainType} "${p.key}": "${name}" is not a scoped right (no scopeField) — remove "scope" or use a scoped right.`,
+      );
     }
     // Retain the symbolic scopeKey (and its managed resource type, #98) on every scoped tuple so its
     // dataId is re-resolved against post-execute state at apply time. `id === null` means the target is
@@ -84,7 +92,14 @@ export function desiredTuples(
     });
     return scoped.map(({ key, id, numeric, type }) =>
       id === null
-        ? { authId: entry.authId, dataId: [], type: "grant" as const, scopeKey: key, scopeType: type, pending: true }
+        ? {
+            authId: entry.authId,
+            dataId: [],
+            type: "grant" as const,
+            scopeKey: key,
+            scopeType: type,
+            pending: true,
+          }
         : numeric
           ? { authId: entry.authId, dataId: [id], type: "grant" as const }
           : { authId: entry.authId, dataId: [id], type: "grant" as const, scopeKey: key, scopeType: type },
@@ -100,7 +115,9 @@ export function desiredTuples(
  * catalog cannot name never reaches here — `buildPermissionPlan` already excludes those from the diff
  * entirely (they are warned about and left untouched, never revoked).
  */
-export function preservePredicateFor(preserveUnknown: PreserveUnknown | undefined): PreservePredicate | undefined {
+export function preservePredicateFor(
+  preserveUnknown: PreserveUnknown | undefined,
+): PreservePredicate | undefined {
   if (preserveUnknown === undefined || preserveUnknown === false) return undefined;
   if (preserveUnknown === true) return () => true;
   const dimensions = new Set<string>(preserveUnknown);
@@ -137,7 +154,8 @@ type ResolvedPermission =
  * would otherwise each diff against the other's grants and churn forever. Mirrors config/context.ts.
  */
 async function resolveDomainIds(
-  permissions: DesiredPermission[], resolver: Resolver,
+  permissions: DesiredPermission[],
+  resolver: Resolver,
 ): Promise<ResolvedPermission[]> {
   const resolved: ResolvedPermission[] = [];
   for (const p of permissions) {
@@ -179,8 +197,12 @@ async function resolveDomainIds(
 }
 
 export async function buildPermissionPlan(
-  client: Pick<CtClient, "get">, state: State, permissions: DesiredPermission[], desired: DesiredResource[] = [],
-  resolver?: Resolver, instanceVersion?: string,
+  client: Pick<CtClient, "get">,
+  state: State,
+  permissions: DesiredPermission[],
+  desired: DesiredResource[] = [],
+  resolver?: Resolver,
+  instanceVersion?: string,
 ): Promise<{ items: PermissionPlanItem[]; fetchErrors: string[]; warnings: string[] }> {
   const items: PermissionPlanItem[] = [];
   const fetchErrors: string[] = [];
@@ -243,7 +265,10 @@ export async function buildPermissionPlan(
         pendingDomain: p.pendingDomain,
         // domainId is irrelevant to desiredTuples (it only reads key/domainType/grants); pass the
         // pending Ref through so the shape stays a valid DesiredPermission.
-        diff: diffGrants(desiredTuples({ ...p, domainId: p.pendingDomain }, state, declaredGroupKeys, scopeRefs), []),
+        diff: diffGrants(
+          desiredTuples({ ...p, domainId: p.pendingDomain }, state, declaredGroupKeys, scopeRefs),
+          [],
+        ),
       });
       continue;
     }

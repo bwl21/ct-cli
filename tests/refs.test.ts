@@ -18,7 +18,12 @@ describe("ref helper", () => {
     expect(ref.status("active")).toEqual({ __ctRef: true, kind: "group-status", key: "active" });
     expect(ref.roleDef("leiter")).toEqual({ __ctRef: true, kind: "role-def", key: "leiter" });
     expect(ref.group("g")).toEqual({ __ctRef: true, kind: "group", key: "g" });
-    expect(ref.groupRole("g", "Leiter")).toEqual({ __ctRef: true, kind: "group-role", group: "g", role: "Leiter" });
+    expect(ref.groupRole("g", "Leiter")).toEqual({
+      __ctRef: true,
+      kind: "group-role",
+      group: "g",
+      role: "Leiter",
+    });
   });
 
   it("rejects an empty/non-string key", () => {

@@ -49,8 +49,12 @@ export interface GrantTuple {
   pending?: boolean;
 }
 export interface RawPermission {
-  authId: number; dataId: number | null; type: "grant" | "revoke"; domainId: number;
-  isInherited?: boolean; meta?: { modifiedPid?: number };
+  authId: number;
+  dataId: number | null;
+  type: "grant" | "revoke";
+  domainId: number;
+  isInherited?: boolean;
+  meta?: { modifiedPid?: number };
 }
 
 /**
@@ -59,8 +63,15 @@ export interface RawPermission {
  * and guarantees it can never collide with an actual row (actuals never carry a scopeKey), so it
  * always lands in `toPut`.
  */
-export function tupleKey(t: { authId: number; dataId: number[]; type: string; scopeKey?: string; pending?: boolean }): string {
-  const scope = t.pending && t.scopeKey != null ? `pending:${t.scopeKey}` : [...t.dataId].sort((a, b) => a - b).join(",");
+export function tupleKey(t: {
+  authId: number;
+  dataId: number[];
+  type: string;
+  scopeKey?: string;
+  pending?: boolean;
+}): string {
+  const scope =
+    t.pending && t.scopeKey != null ? `pending:${t.scopeKey}` : [...t.dataId].sort((a, b) => a - b).join(",");
   return `${t.type}:${t.authId}:${scope}`;
 }
 
@@ -68,7 +79,7 @@ export function normalizeActual(rows: RawPermission[]): GrantTuple[] {
   const out: GrantTuple[] = [];
   for (const r of rows) {
     if (r.meta?.modifiedPid === -1) continue; // system baseline — invisible to reconciliation
-    if (r.isInherited) continue;              // inherited — not directly owned here
+    if (r.isInherited) continue; // inherited — not directly owned here
     // dataId is [] or a single element (CT reads scoped grants back one row per dataId), so there is
     // nothing to sort here — and tupleKey sorts defensively anyway when it builds the identity key.
     out.push({ authId: r.authId, dataId: r.dataId == null ? [] : [r.dataId], type: r.type });

@@ -61,7 +61,9 @@ export function coverageCommand(): Command {
       if (opts.type) {
         const wanted = opts.type.trim();
         const typeIds = new Set(
-          report.byType.filter((t) => t.name === wanted || slug(t.name) === slug(wanted)).map((t) => t.groupTypeId),
+          report.byType
+            .filter((t) => t.name === wanted || slug(t.name) === slug(wanted))
+            .map((t) => t.groupTypeId),
         );
         if (typeIds.size === 0) {
           throw new Error(

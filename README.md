@@ -15,13 +15,13 @@ code, and reconcile it against the ChurchTools API with Terraform-style
 A ChurchTools instance's structure is normally maintained by clicking. That
 works — until you need to answer questions clicking cannot:
 
-| Clicking | With `ct` |
-| --- | --- |
-| "Who changed this group's rights, and why?" | `git log`, and the PR that changed it |
-| "Set up the next campus like the last one" | Call the same blueprint function again |
-| "Try it somewhere safe first" | `ct plan --env dev` → `ct apply --env dev` → promote |
-| "Has anyone edited this by hand?" | `ct plan` reports drift against the last known state |
-| "What will this actually change?" | `ct plan` prints it before anything is written |
+| Clicking                                    | With `ct`                                            |
+| ------------------------------------------- | ---------------------------------------------------- |
+| "Who changed this group's rights, and why?" | `git log`, and the PR that changed it                |
+| "Set up the next campus like the last one"  | Call the same blueprint function again               |
+| "Try it somewhere safe first"               | `ct plan --env dev` → `ct apply --env dev` → promote |
+| "Has anyone edited this by hand?"           | `ct plan` reports drift against the last known state |
+| "What will this actually change?"           | `ct plan` prints it before anything is written       |
 
 ## Show me
 
@@ -118,17 +118,17 @@ confirmation — and a declaration marked `preventDestroy: true` blocks even tha
 
 ## What it manages
 
-| Resource | DSL | Guide |
-| --- | --- | --- |
-| Campuses | `ct.campus` | [config guide](docs/configuration.md) |
-| Groups (fields, campus, multi-parent hierarchy) | `ct.group` | [config guide](docs/configuration.md) |
-| Group types, roles, age/target groups, relationship types, person statuses | `ct.groupType`, `ct.roleDefinition`, `ct.ageGroup`, `ct.targetGroup`, `ct.relationshipType`, `ct.personStatus` | reusable building blocks |
-| Permissions (group-role, group-type-role, person-status) | `ct.groupRole`, `ct.groupTypeRole`, `ct.status` | [permissions](docs/handbuch/permissions.md) |
-| Auto-groups (dynamic groups) | the `dynamic` block on a group | [dynamic groups](docs/handbuch/dynamic-groups.md) |
-| Repeated structure, parametrized | a plain function over the DSL | [blueprints](docs/handbuch/blueprints.md) |
+| Resource                                                                   | DSL                                                                                                            | Guide                                             |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Campuses                                                                   | `ct.campus`                                                                                                    | [config guide](docs/configuration.md)             |
+| Groups (fields, campus, multi-parent hierarchy)                            | `ct.group`                                                                                                     | [config guide](docs/configuration.md)             |
+| Group types, roles, age/target groups, relationship types, person statuses | `ct.groupType`, `ct.roleDefinition`, `ct.ageGroup`, `ct.targetGroup`, `ct.relationshipType`, `ct.personStatus` | reusable building blocks                          |
+| Permissions (group-role, group-type-role, person-status)                   | `ct.groupRole`, `ct.groupTypeRole`, `ct.status`                                                                | [permissions](docs/handbuch/permissions.md)       |
+| Auto-groups (dynamic groups)                                               | the `dynamic` block on a group                                                                                 | [dynamic groups](docs/handbuch/dynamic-groups.md) |
+| Repeated structure, parametrized                                           | a plain function over the DSL                                                                                  | [blueprints](docs/handbuch/blueprints.md)         |
 
 Read-only by design: the person master-data model, security levels and
-custom-field *definitions* (`ct get person-masterdata`, `ct get data-fields`) —
+custom-field _definitions_ (`ct get person-masterdata`, `ct get data-fields`) —
 schema in scope, per-record values never. See
 [field definitions](docs/handbuch/field-definitions.md).
 
@@ -139,7 +139,7 @@ in place, `ct` says so rather than letting a host-specific id travel silently to
 another instance.
 
 `ct coverage` answers the other direction: what exists on the instance that the
-config does not manage, and which of it could be declared today (per group *and*
+config does not manage, and which of it could be declared today (per group _and_
 role, with the blocking scope dimension named). `--json` makes it a CI gate.
 
 ## Environments and CI
@@ -174,10 +174,10 @@ ct apply --env prod    # protected env: type the env name to confirm
 
 ## Two-repo model
 
-| Repo | Contents |
-| --- | --- |
-| **`eqrm/ct-cli`** (this repo) | The tool: CLI, API client, plan/apply engine. Generic, reusable. |
-| *your config repo* (private) | Your instance's desired-state config + state files. Depends on this tool. |
+| Repo                          | Contents                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------- |
+| **`eqrm/ct-cli`** (this repo) | The tool: CLI, API client, plan/apply engine. Generic, reusable.          |
+| _your config repo_ (private)  | Your instance's desired-state config + state files. Depends on this tool. |
 
 Like Terraform, the tool never lives in the same repo as the infra config — the config
 repo holds an organisation's actual structure and stays private. This repo is the tool

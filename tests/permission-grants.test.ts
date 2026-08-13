@@ -7,7 +7,7 @@ describe("normalizeActual", () => {
       { authId: 1104, dataId: 3, type: "grant" as const, domainId: 42, meta: { modifiedPid: 1 } },
       { authId: 1101, dataId: null, type: "grant" as const, domainId: 42, meta: { modifiedPid: 1 } },
       { authId: 9999, dataId: 1, type: "grant" as const, domainId: 42, meta: { modifiedPid: -1 } }, // system baseline → excluded
-      { authId: 8888, dataId: 1, type: "grant" as const, domainId: 42, isInherited: true },          // inherited → excluded
+      { authId: 8888, dataId: 1, type: "grant" as const, domainId: 42, isInherited: true }, // inherited → excluded
     ];
     expect(normalizeActual(rows)).toEqual([
       { authId: 1104, dataId: [3], type: "grant" },
@@ -20,11 +20,11 @@ describe("diffGrants", () => {
   it("adds missing, deletes extra, no-ops identical (order-independent dataId)", () => {
     const desired = [
       { authId: 1104, dataId: [7, 3], type: "grant" as const }, // present but reordered
-      { authId: 1101, dataId: [], type: "grant" as const },     // new
+      { authId: 1101, dataId: [], type: "grant" as const }, // new
     ];
     const actual = [
       { authId: 1104, dataId: [3, 7], type: "grant" as const }, // same tuple, different order
-      { authId: 2000, dataId: [], type: "grant" as const },     // extra → delete
+      { authId: 2000, dataId: [], type: "grant" as const }, // extra → delete
     ];
     const d = diffGrants(desired, actual);
     expect(d.toPut.map(tupleKey)).toEqual([tupleKey({ authId: 1101, dataId: [], type: "grant" })]);
@@ -37,8 +37,8 @@ describe("diffGrants", () => {
     // It must NOT land in toDelete (that would silently remove an admin's explicit deny).
     const desired = [{ authId: 1104, dataId: [3], type: "grant" as const }];
     const actual = [
-      { authId: 1104, dataId: [3], type: "grant" as const },   // matched → no-op
-      { authId: 1105, dataId: [7], type: "revoke" as const },  // pre-existing deny → preserved, never deleted
+      { authId: 1104, dataId: [3], type: "grant" as const }, // matched → no-op
+      { authId: 1105, dataId: [7], type: "revoke" as const }, // pre-existing deny → preserved, never deleted
     ];
     const d = diffGrants(desired, actual);
     expect(d.toPut).toEqual([]);

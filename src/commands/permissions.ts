@@ -55,7 +55,9 @@ export function permissionsCommand(): Command {
           );
         }
         if (!loaded) {
-          info(`  refresh it for this instance: \`ct permissions catalog --refresh${opts.env ? ` --env ${opts.env}` : ""}\``);
+          info(
+            `  refresh it for this instance: \`ct permissions catalog --refresh${opts.env ? ` --env ${opts.env}` : ""}\``,
+          );
         }
         return;
       }
@@ -65,10 +67,10 @@ export function permissionsCommand(): Command {
       const path = await writeHostCatalog(config.host, catalog);
       const meta = catalog.$meta as { rightCount: number; ctVersion: string };
       success(`Wrote ${path} — ${meta.rightCount} rights · ChurchTools ${meta.ctVersion} · ${config.host}`);
-      info("Commit this file: every plan/apply against this host will use it instead of the bundled catalog.");
-      warn(
-        "Review the diff before committing — an authId that MOVED changes what a declared right grants.",
+      info(
+        "Commit this file: every plan/apply against this host will use it instead of the bundled catalog.",
       );
+      warn("Review the diff before committing — an authId that MOVED changes what a declared right grants.");
     });
 
   return cmd;

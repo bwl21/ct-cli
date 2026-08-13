@@ -7,9 +7,7 @@
     "query": {
       "method": "ChurchQuery",
       "params": {
-        "groupBy": [
-          "person.id"
-        ],
+        "groupBy": ["person.id"],
         "filter": {
           "and": [
             {
@@ -20,9 +18,7 @@
                     {
                       "dterm": [
                         {
-                          "stereotype": [
-                            "groupmembership"
-                          ],
+                          "stereotype": ["groupmembership"],
                           "title": "Mitgliedschaft in einer Gruppe"
                         },
                         {
@@ -34,9 +30,7 @@
                                     {
                                       "var": "ctgroup.groupStatusId"
                                     },
-                                    [
-                                      1
-                                    ]
+                                    [1]
                                   ]
                                 },
                                 {
@@ -44,13 +38,7 @@
                                     {
                                       "var": "ctgroup.groupTypeId"
                                     },
-                                    [
-                                      2,
-                                      12,
-                                      16,
-                                      19,
-                                      1
-                                    ]
+                                    [2, 12, 16, 19, 1]
                                   ]
                                 },
                                 {
@@ -58,17 +46,7 @@
                                     {
                                       "var": "ctgroup.campusId"
                                     },
-                                    [
-                                      0,
-                                      9,
-                                      17,
-                                      18,
-                                      23,
-                                      26,
-                                      29,
-                                      32,
-                                      33
-                                    ]
+                                    [0, 9, 17, 18, 23, 26, 29, 32, 33]
                                   ]
                                 }
                               ]
@@ -115,9 +93,7 @@
                     {
                       "dterm": [
                         {
-                          "stereotype": [
-                            "groupmembership"
-                          ],
+                          "stereotype": ["groupmembership"],
                           "title": "Mitgliedschaft in einer Gruppe"
                         },
                         {
@@ -127,9 +103,7 @@
                                 {
                                   "var": "ctgroup.id"
                                 },
-                                [
-                                  "1993"
-                                ]
+                                ["1993"]
                               ]
                             },
                             {
@@ -170,11 +144,7 @@
           ]
         },
         "primaryEntityAlias": "person",
-        "responseFields": [
-          "person.id",
-          "person.firstName",
-          "person.lastName"
-        ]
+        "responseFields": ["person.id", "person.firstName", "person.lastName"]
       }
     },
     "process": {

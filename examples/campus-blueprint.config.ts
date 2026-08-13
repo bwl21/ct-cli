@@ -21,7 +21,11 @@ const CAMPUSES = ["mainz", "berlin"] as const;
 function kidsArea(ct: ConfigContext, campus: string): void {
   const lead = `${campus}_kids_lead`;
   ct.group({ key: lead, name: `${campus} · Kids Leitung`, groupType: "ministry_team", campus, parents: [] });
-  for (const [suffix, label] of [["0_3", "0–3"], ["4_6", "4–6"], ["checkin", "Check-in"]] as const) {
+  for (const [suffix, label] of [
+    ["0_3", "0–3"],
+    ["4_6", "4–6"],
+    ["checkin", "Check-in"],
+  ] as const) {
     ct.group({
       key: `${campus}_kids_${suffix}`,
       name: `${campus} · Kids ${label}`,

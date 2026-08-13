@@ -2,12 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  DEFAULT_ENVS_PATH,
-  resolveEnvsPath,
-  defaultEnvStatePath,
-  loadEnvProfile,
-} from "../src/env/envs.js";
+import { DEFAULT_ENVS_PATH, resolveEnvsPath, defaultEnvStatePath, loadEnvProfile } from "../src/env/envs.js";
 
 const envsPath = join(tmpdir(), `ct-cli-envs-${process.pid}.json`);
 
@@ -67,16 +62,12 @@ describe("loadEnvProfile", () => {
   });
 
   it("throws a friendly error when the envs file is missing", async () => {
-    await expect(loadEnvProfile("dev", envsPath)).rejects.toThrow(
-      /Environment profile file not found/,
-    );
+    await expect(loadEnvProfile("dev", envsPath)).rejects.toThrow(/Environment profile file not found/);
   });
 
   it("names the known environments when the requested one is absent", async () => {
     await writeEnvs({ environments: { dev: { host: "https://d.church.tools" } } });
-    await expect(loadEnvProfile("prod", envsPath)).rejects.toThrow(
-      /Unknown environment "prod".*dev/s,
-    );
+    await expect(loadEnvProfile("prod", envsPath)).rejects.toThrow(/Unknown environment "prod".*dev/s);
   });
 
   it("rejects a profile missing a host", async () => {

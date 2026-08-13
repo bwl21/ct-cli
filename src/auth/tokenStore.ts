@@ -60,16 +60,7 @@ export function parseCredentials(raw: string): Credentials | null {
 }
 
 async function keychainSet(account: string, value: string): Promise<void> {
-  await run("security", [
-    "add-generic-password",
-    "-U",
-    "-s",
-    KEYCHAIN_SERVICE,
-    "-a",
-    account,
-    "-w",
-    value,
-  ]);
+  await run("security", ["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", account, "-w", value]);
 }
 
 /**

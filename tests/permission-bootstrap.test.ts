@@ -41,7 +41,15 @@ function mockClient(newId: number) {
 }
 
 const createKidsPlan: Plan = {
-  items: [{ type: "group", key: "kids", id: null, action: "create", changes: [{ field: "name", from: undefined, to: "Kids" }] }],
+  items: [
+    {
+      type: "group",
+      key: "kids",
+      id: null,
+      action: "create",
+      changes: [{ field: "name", from: undefined, to: "Kids" }],
+    },
+  ],
 };
 
 describe("scope bootstrap: declare group + grant scoped to it in one config (#29)", () => {
@@ -51,7 +59,9 @@ describe("scope bootstrap: declare group + grant scoped to it in one config (#29
     const { items, fetchErrors } = await buildPermissionPlan(client, state, [scopedPerm], desiredKidsGroup);
     expect(fetchErrors).toEqual([]);
     // The scoped grant survives planning and lands in toPut as a pending tuple.
-    expect(items[0]?.diff.toPut).toEqual([{ authId: 1104, dataId: [], type: "grant", scopeKey: "kids", scopeType: "group", pending: true }]);
+    expect(items[0]?.diff.toPut).toEqual([
+      { authId: 1104, dataId: [], type: "grant", scopeKey: "kids", scopeType: "group", pending: true },
+    ]);
     // Read-only `ct plan` renders instead of aborting, and labels the pending scope.
     expect(renderPermissionPlan(items)).toContain("kids (created this apply)");
   });
@@ -75,12 +85,25 @@ describe("stale id after recreate (#33 item 3)", () => {
   it("re-resolves the scope dataId against post-execute state — grant PUT carries the NEW id", async () => {
     const { client, calls } = mockClient(777);
     // Pre-apply state has kids under a stale id 100 (it vanished from CT and will be recreated).
-    const state: State = { version: 1, host: HOST, resources: {
-      kids: { type: "group", id: 100, key: "kids", fields: { name: "Kids" }, adoptedAt: "t", updatedAt: "t" },
-    }};
+    const state: State = {
+      version: 1,
+      host: HOST,
+      resources: {
+        kids: {
+          type: "group",
+          id: 100,
+          key: "kids",
+          fields: { name: "Kids" },
+          adoptedAt: "t",
+          updatedAt: "t",
+        },
+      },
+    };
     const { items } = await buildPermissionPlan(client, state, [scopedPerm], desiredKidsGroup);
     // At plan time the tuple resolves to the OLD id 100…
-    expect(items[0]?.diff.toPut).toEqual([{ authId: 1104, dataId: [100], type: "grant", scopeKey: "kids", scopeType: "group" }]);
+    expect(items[0]?.diff.toPut).toEqual([
+      { authId: 1104, dataId: [100], type: "grant", scopeKey: "kids", scopeType: "group" },
+    ]);
 
     // …then a recreate mints id 777 in state.
     await executePlan(createKidsPlan, { client, state, statePath: "unused", save: async () => {} });
@@ -94,6 +117,8 @@ describe("stale id after recreate (#33 item 3)", () => {
 
 describe("truly-unknown scope key still hard-fails (#29 acceptance)", () => {
   it("throws the clear error when a key is neither in state nor declared", () => {
-    expect(() => desiredTuples(scopedPerm, emptyState(HOST), new Set())).toThrow(/scope key "kids" does not resolve/i);
+    expect(() => desiredTuples(scopedPerm, emptyState(HOST), new Set())).toThrow(
+      /scope key "kids" does not resolve/i,
+    );
   });
 });

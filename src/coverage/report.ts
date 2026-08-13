@@ -77,7 +77,13 @@ export interface TypeCoverage {
 export interface CoverageReport {
   host: string;
   groups: { total: number; managed: number; dynamic: number; managedDynamic: number };
-  grants: { authored: number; roleInstances: number; declarable: number; blocked: number; blockingDimensions: string[] };
+  grants: {
+    authored: number;
+    roleInstances: number;
+    declarable: number;
+    blocked: number;
+    blockingDimensions: string[];
+  };
   byType: TypeCoverage[];
   roleInstances: RoleInstanceCoverage[];
 }

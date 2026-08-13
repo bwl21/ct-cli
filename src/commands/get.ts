@@ -192,5 +192,9 @@ function reportRows(data: unknown, meta: CtMeta | undefined): void {
     );
     return;
   }
-  info(total !== undefined && total !== data.length ? `${data.length} of ${total} total` : `${data.length} total`);
+  info(
+    total !== undefined && total !== data.length
+      ? `${data.length} of ${total} total`
+      : `${data.length} total`,
+  );
 }

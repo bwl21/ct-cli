@@ -61,7 +61,12 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
   it("rewrites every managed id in a `oneof` id list and keeps operand order", () => {
     const ruleset = { query: churchQuery(q.oneof("ctgroup.id", [148, 1228])) };
     const { ruleset: out } = portablizeRuleset(ruleset, {
-      idToKeyByKind: { group: new Map([[148, "jugend-mainz"], [1228, "jugend-berlin"]]) },
+      idToKeyByKind: {
+        group: new Map([
+          [148, "jugend-mainz"],
+          [1228, "jugend-berlin"],
+        ]),
+      },
     });
     const filter = (out.query as { params: { filter: { oneof: unknown[] } } }).params.filter;
     expect(filter.oneof[0]).toEqual({ var: "ctgroup.id" });
@@ -114,7 +119,10 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
       [84, { groupTypeId: 12, name: "Leiter" }],
       [16, { groupTypeId: 2, name: "Leiter" }], // SAME name as 84, different group type
     ]);
-    const groupTypeIdToKey = new Map<number, string>([[12, "local_lead"], [2, "team"]]);
+    const groupTypeIdToKey = new Map<number, string>([
+      [12, "local_lead"],
+      [2, "team"],
+    ]);
 
     it("disambiguates two same-named roles by their group type", () => {
       const ruleset = { query: churchQuery(q.oneof("role.id", [84, 16])) };
@@ -195,7 +203,11 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
     it("rewrites the integer field to a group-type-role marker via the same role catalog", () => {
       const ruleset = {
         query: churchQuery(q.eq("person.isArchived", 0)),
-        process: { queryResultOnly: { none: { handleMembership: { groupMemberStatus: "active", groupTypeRoleId: 66 } } } },
+        process: {
+          queryResultOnly: {
+            none: { handleMembership: { groupMemberStatus: "active", groupTypeRoleId: 66 } },
+          },
+        },
       };
       const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
         idToKeyByKind: {},
@@ -215,7 +227,9 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
     });
 
     it("leaves the field numeric with a warning when the role is unknown", () => {
-      const ruleset = { process: { queryResultOnly: { none: { handleMembership: { groupTypeRoleId: 4242 } } } } };
+      const ruleset = {
+        process: { queryResultOnly: { none: { handleMembership: { groupTypeRoleId: 4242 } } } },
+      };
       const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
         idToKeyByKind: {},
         roleCatalog,
@@ -252,10 +266,17 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
       [17, { groupTypeId: 2, name: "Organisator" }],
       [66, { groupTypeId: 9, name: "Mitglied" }], // the process.groupTypeRoleId target
     ]);
-    const groupTypeIdToKey = new Map<number, string>([[12, "local_lead"], [2, "team"], [9, "struktur"]]);
+    const groupTypeIdToKey = new Map<number, string>([
+      [12, "local_lead"],
+      [2, "team"],
+      [9, "struktur"],
+    ]);
     // Group 1246 is deliberately UNMANAGED (not in the map) — the escape hatch: it stays numeric.
     const idToKeyByKind: Partial<Record<RefKind, Map<number, string>>> = {
-      group: new Map([[112, "bereich_kids"], [8, "team_kidsdienst"]]),
+      group: new Map([
+        [112, "bereich_kids"],
+        [8, "team_kidsdienst"],
+      ]),
     };
     const opts = { idToKeyByKind, roleCatalog, groupTypeIdToKey };
 
@@ -263,9 +284,12 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
       const { ruleset: portable } = portablizeRuleset(normalized, opts);
       const json = JSON.stringify(portable);
       // A query role marker (84 → local_lead/Leiter) and the process-field marker (66 → struktur/Mitglied).
-      expect(json).toContain('{"__ctRef":true,"kind":"group-type-role","groupType":"local_lead","role":"Leiter"}');
-      const hm = (portable.process as { queryResultOnly: { none: { handleMembership: Record<string, unknown> } } })
-        .queryResultOnly.none.handleMembership;
+      expect(json).toContain(
+        '{"__ctRef":true,"kind":"group-type-role","groupType":"local_lead","role":"Leiter"}',
+      );
+      const hm = (
+        portable.process as { queryResultOnly: { none: { handleMembership: Record<string, unknown> } } }
+      ).queryResultOnly.none.handleMembership;
       expect(hm.groupTypeRoleId).toEqual({
         __ctRef: true,
         kind: "group-type-role",
@@ -280,12 +304,20 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
       // deepMapRefs the resolver uses. Markers sit exactly where the ids were, so the whole ruleset
       // (query filter AND the out-of-query process.groupTypeRoleId) restores byte-identical.
       const keyToId = new Map<string, number>();
-      for (const [id, key] of [[112, "bereich_kids"], [8, "team_kidsdienst"]] as const) {
+      for (const [id, key] of [
+        [112, "bereich_kids"],
+        [8, "team_kidsdienst"],
+      ] as const) {
         keyToId.set(refKey({ __ctRef: true, kind: "group", key }), id);
       }
       for (const [id, entry] of roleCatalog) {
         keyToId.set(
-          refKey({ __ctRef: true, kind: "group-type-role", groupType: groupTypeIdToKey.get(entry.groupTypeId)!, role: entry.name }),
+          refKey({
+            __ctRef: true,
+            kind: "group-type-role",
+            groupType: groupTypeIdToKey.get(entry.groupTypeId)!,
+            role: entry.name,
+          }),
           id,
         );
       }
@@ -301,11 +333,14 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
         var: "ctgroup.id",
         id: 1246,
         reason: "unmanaged",
-        detail: "group #1246 is not under management — `ct adopt group 1246` (then re-adopt) makes it portable",
+        detail:
+          "group #1246 is not under management — `ct adopt group 1246` (then re-adopt) makes it portable",
       });
       // groupStatusId is never REWRITTEN (no catalog exists) but is still a host-specific id in a
       // cross-host file, so #101 reports it rather than letting the capture look fully portable.
-      expect(warnings.filter((w) => w.var === "ctgroup.groupStatusId").every((w) => w.reason === "no-ref-kind")).toBe(true);
+      expect(
+        warnings.filter((w) => w.var === "ctgroup.groupStatusId").every((w) => w.reason === "no-ref-kind"),
+      ).toBe(true);
       expect(warnings.some((w) => w.var === "ctgroup.groupStatusId")).toBe(true);
     });
 
@@ -315,7 +350,9 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
       // Every marker-rewritten id is gone from the report; the numeric leftovers remain.
       expect(left.some((w) => w.var === "ctgroup.id" && w.id === 1246)).toBe(true);
       expect(left.some((w) => w.id === 112 || w.id === 8)).toBe(false); // now `{ __ctRef }` markers
-      expect(formatPortablizeWarnings(left).some((l) => l.startsWith("ctgroup.id: 1246 left numeric"))).toBe(true);
+      expect(formatPortablizeWarnings(left).some((l) => l.startsWith("ctgroup.id: 1246 left numeric"))).toBe(
+        true,
+      );
     });
   });
 });

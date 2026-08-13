@@ -45,8 +45,12 @@ function tempCatalogDir(contents?: unknown): string {
 
 describe("hostCatalogPath", () => {
   it("keeps one file per instance so dev and prod captures coexist", () => {
-    expect(hostCatalogPath("https://dev.church.tools", ".ct")).toBe(".ct/permission-catalog.dev.church.tools.json");
-    expect(hostCatalogPath("https://prod.church.tools/", ".ct")).toBe(".ct/permission-catalog.prod.church.tools.json");
+    expect(hostCatalogPath("https://dev.church.tools", ".ct")).toBe(
+      ".ct/permission-catalog.dev.church.tools.json",
+    );
+    expect(hostCatalogPath("https://prod.church.tools/", ".ct")).toBe(
+      ".ct/permission-catalog.prod.church.tools.json",
+    );
   });
 });
 
@@ -60,7 +64,12 @@ describe("loadHostCatalog", () => {
 
   it("replaces every derived index, not just the name map", async () => {
     const dir = tempCatalogDir({
-      $meta: { capturedFrom: "mychurch.church.tools", ctVersion: "9.9.9", capturedAt: "2026-08-13", rightCount: 1 },
+      $meta: {
+        capturedFrom: "mychurch.church.tools",
+        ctVersion: "9.9.9",
+        capturedAt: "2026-08-13",
+        rightCount: 1,
+      },
       "newmodule:new right": { authId: 4242, scopeField: "cdb_zone", revocable: false, desc: "New" },
     });
 
@@ -101,7 +110,12 @@ describe("capturePermissionCatalog", () => {
       data: {
         auth_table: {
           churchdb: {
-            "view station": { id: 124, datenfeld: "cdb_station", bezeichnung: "Standort sehen", isRevocable: 1 },
+            "view station": {
+              id: 124,
+              datenfeld: "cdb_station",
+              bezeichnung: "Standort sehen",
+              isRevocable: 1,
+            },
             "view alldata": { id: 102, datenfeld: "", bezeichnung: "Alle sehen", isRevocable: false },
           },
         },

@@ -13,9 +13,7 @@ import { refLabel } from "../resolve/refs.js";
  * resource pending-ref rendering (src/engine/render.ts). Its real id is filled in at apply time.
  */
 function fmtDomain(item: PermissionPlanItem): string {
-  return item.pendingDomain
-    ? `<${refLabel(item.pendingDomain)} (created this apply)>`
-    : `#${item.domainId}`;
+  return item.pendingDomain ? `<${refLabel(item.pendingDomain)} (created this apply)>` : `#${item.domainId}`;
 }
 
 function fmtTuple(t: GrantTuple): string {
@@ -38,9 +36,7 @@ export function renderPermissionPlan(items: PermissionPlanItem[]): string {
 
   if (changed.length === 0) {
     const preserved = items.reduce((n, i) => n + i.diff.preserved.length, 0);
-    const suffix = preserved > 0
-      ? ` (${preserved} pre-existing deny row(s) left untouched.)`
-      : "";
+    const suffix = preserved > 0 ? ` (${preserved} pre-existing deny row(s) left untouched.)` : "";
     return pc.green(`No permission changes. Desired grants match ChurchTools.${suffix}`);
   }
 
@@ -78,6 +74,8 @@ export function renderPermissionPlan(items: PermissionPlanItem[]): string {
   // Preserved grants are counted separately and never folded into the change totals: they are
   // explicitly what apply will NOT do.
   const preservedSummary = totalPreserved > 0 ? `, ${totalPreserved} preserved (not managed)` : "";
-  lines.push(pc.bold(`Permission plan: ${totalGrant} to grant, ${totalRevoke} to remove${preservedSummary}.`));
+  lines.push(
+    pc.bold(`Permission plan: ${totalGrant} to grant, ${totalRevoke} to remove${preservedSummary}.`),
+  );
   return lines.join("\n");
 }

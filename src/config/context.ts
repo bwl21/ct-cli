@@ -191,7 +191,9 @@ function resolveDomainInput(domainType: DomainType, input: PermissionInput): num
     if (input.personStatus !== undefined) {
       if (hasId) throw bothError('"personStatus"');
       if (typeof input.personStatus !== "string" || !input.personStatus)
-        throw new Error(`${domainType} "${input.key}": "personStatus" must be a non-empty person-status key.`);
+        throw new Error(
+          `${domainType} "${input.key}": "personStatus" must be a non-empty person-status key.`,
+        );
       return ref.personStatus(input.personStatus);
     }
   } else {
@@ -316,7 +318,16 @@ function desugarDynamic(type: string, key: string, dynamic: unknown): DynamicSpe
 }
 
 function toDesired(type: string, input: ResourceInput, location?: string): DesiredResource {
-  const { key, parent, parents, dependsOn = [], preventDestroy, dynamic, allowDuplicateName, ...fields } = input;
+  const {
+    key,
+    parent,
+    parents,
+    dependsOn = [],
+    preventDestroy,
+    dynamic,
+    allowDuplicateName,
+    ...fields
+  } = input;
   if (!key || typeof key !== "string") {
     throw new Error(`${type} declaration is missing a string "key".`);
   }

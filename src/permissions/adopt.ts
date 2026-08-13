@@ -136,7 +136,9 @@ export function buildAdoptedGrants(args: AdoptGrantsArgs): AdoptedGrantsBlock {
   if (key !== undefined) {
     body.push(`  key: ${JSON.stringify(key)},`);
   } else {
-    body.push(`  key: "${domainType}_${domainId}", // a logical key, unique across the config — rename to taste`);
+    body.push(
+      `  key: "${domainType}_${domainId}", // a logical key, unique across the config — rename to taste`,
+    );
   }
   if (domain) {
     // Portable form: resolved per host at plan time, so the same block applies to dev and prod.
@@ -165,9 +167,15 @@ export function buildAdoptedGrants(args: AdoptGrantsArgs): AdoptedGrantsBlock {
     // Reconciliation is set-based: a live grant absent from the declaration lands in `toDelete`.
     // So every grant left below as a comment WILL BE REVOKED by the next apply of this block —
     // this must be impossible to miss, hence the header.
-    lines.push(`// WARNING: ${omitted} live grant(s) could not be expressed as config and are left as comments below.`);
-    lines.push("// They are still ACTIVE on the instance — applying this block as-is will REVOKE them, because");
-    lines.push("// reconciliation deletes any live grant missing from the declaration. Resolve every WARNING/NOTE");
+    lines.push(
+      `// WARNING: ${omitted} live grant(s) could not be expressed as config and are left as comments below.`,
+    );
+    lines.push(
+      "// They are still ACTIVE on the instance — applying this block as-is will REVOKE them, because",
+    );
+    lines.push(
+      "// reconciliation deletes any live grant missing from the declaration. Resolve every WARNING/NOTE",
+    );
     lines.push("// comment (adopt the group, regenerate the catalog, …) before running `ct apply`.");
   }
   lines.push(...body);
@@ -200,11 +208,7 @@ interface GrantLinesResult {
  * reject (a scoped right without a declarable scope, an unscoped right carrying dataIds) is emitted
  * as a comment instead.
  */
-function grantLines(
-  g: CollapsedGrant,
-  rev: Map<number, ReverseEntry>,
-  state: State,
-): GrantLinesResult {
+function grantLines(g: CollapsedGrant, rev: Map<number, ReverseEntry>, state: State): GrantLinesResult {
   const entry = rev.get(g.authId);
   if (!entry) {
     // Unknown authId → no name to emit, and a numeric right is not declarable in the DSL. Surface
@@ -236,8 +240,12 @@ function grantLines(
     const out: string[] = [];
     let omitted = false;
     if (g.hasUnscoped) {
-      out.push(`    // WARNING: "${entry.name}" is granted GLOBALLY here (scoped right, no dataId). The config`);
-      out.push("    //          DSL cannot declare a global grant of a scoped right; re-grant it with an explicit");
+      out.push(
+        `    // WARNING: "${entry.name}" is granted GLOBALLY here (scoped right, no dataId). The config`,
+      );
+      out.push(
+        "    //          DSL cannot declare a global grant of a scoped right; re-grant it with an explicit",
+      );
       out.push("    //          scope in CT, or leave this domain unmanaged.");
       omitted = true;
     }
@@ -286,7 +294,9 @@ function grantLines(
         // Reached only for a dimension with NO logical form at all (`cc_securitylevel`, `oauth_client`,
         // …). A catalog-only dimension (`cdb_bereich`) already got its own NOTE above — emitting this
         // line there too would contradict it ("not a group, use numbers" vs "portable form exists").
-        out.push(`    // "${entry.name}" scopes by "${entry.scopeField}", not a group — using its numeric dataId(s) directly.`);
+        out.push(
+          `    // "${entry.name}" scopes by "${entry.scopeField}", not a group — using its numeric dataId(s) directly.`,
+        );
       }
       out.push(`    { right: ${JSON.stringify(entry.name)}, scope: [${entries.join(", ")}] },`);
     }
@@ -313,8 +323,12 @@ function grantLines(
       // A scoped right granted with dataId null = granted GLOBALLY in CT. The DSL cannot declare
       // that (a bare string for a scoped right is rejected at plan time precisely to prevent
       // accidental global grants), so it can only be surfaced as a comment.
-      out.push(`    // WARNING: "${entry.name}" is granted GLOBALLY here (scoped right, no dataId). The config`);
-      out.push("    //          DSL cannot declare a global grant of a scoped right; re-grant it with an explicit");
+      out.push(
+        `    // WARNING: "${entry.name}" is granted GLOBALLY here (scoped right, no dataId). The config`,
+      );
+      out.push(
+        "    //          DSL cannot declare a global grant of a scoped right; re-grant it with an explicit",
+      );
       out.push("    //          scope in CT, or leave this domain unmanaged.");
       omitted = true;
     }
@@ -331,7 +345,9 @@ function grantLines(
     } else if (unmanaged.length > 0) {
       // Every scope target is unmanaged: there is no valid key to emit, so the grant itself is a
       // commented placeholder the user completes after adopting the group(s) above.
-      out.push(`    // { right: ${JSON.stringify(entry.name)}, scope: [/* adopt the group(s) above first */] },`);
+      out.push(
+        `    // { right: ${JSON.stringify(entry.name)}, scope: [/* adopt the group(s) above first */] },`,
+      );
     }
     return { lines: out, omitted };
   }
@@ -344,7 +360,9 @@ function grantLines(
     out.push(
       `    // WARNING: "${entry.name}" is unscoped per the catalog, but CT returned it with dataId(s)`,
     );
-    out.push(`    //          ${g.dataIds.join(", ")} — the catalog may be stale. Regenerate it, then re-adopt.`);
+    out.push(
+      `    //          ${g.dataIds.join(", ")} — the catalog may be stale. Regenerate it, then re-adopt.`,
+    );
     omitted = true;
   }
   if (g.hasUnscoped) {

@@ -50,11 +50,13 @@ export function planCommand(): Command {
       // instance means each master-data catalog is fetched at most once (cache is Promise-keyed).
       const resolver = new Resolver({ client, state, desired, host: config.host });
       // Independent fetches run concurrently (see commands/apply.ts).
-      const [{ plan, fetchErrors }, { items: permItems, fetchErrors: permFetchErrors, warnings: permWarnings }] =
-        await Promise.all([
-          buildPlan(client, state, desired, { configDir, resolver }),
-          buildPermissionPlan(client, state, permissions, desired, resolver, client.version ?? undefined),
-        ]);
+      const [
+        { plan, fetchErrors },
+        { items: permItems, fetchErrors: permFetchErrors, warnings: permWarnings },
+      ] = await Promise.all([
+        buildPlan(client, state, desired, { configDir, resolver }),
+        buildPermissionPlan(client, state, permissions, desired, resolver, client.version ?? undefined),
+      ]);
       // "Changes present" for --detailed-exitcode / the JSON summary: anything `ct apply` would
       // actually act on — a resource item whose action isn't a no-op, OR a permission item with a
       // grant/revoke to write. Drift by itself does NOT count: an item can carry `drift` while

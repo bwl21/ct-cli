@@ -6,7 +6,14 @@ import { CtApiError, type CtClient } from "../src/api/ctClient.js";
 function stateWith(...entries: Array<{ key: string; type: string; id: number }>): State {
   const state = emptyState("h");
   for (const e of entries) {
-    state.resources[e.key] = { type: e.type, id: e.id, key: e.key, fields: {}, adoptedAt: "t", updatedAt: "t" };
+    state.resources[e.key] = {
+      type: e.type,
+      id: e.id,
+      key: e.key,
+      fields: {},
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
   }
   return state;
 }
@@ -40,10 +47,7 @@ describe("orderDestroy", () => {
   });
 
   it("orders a child before its parent within the group tier (live hierarchy edges)", () => {
-    const state = stateWith(
-      { key: "area", type: "group", id: 1 },
-      { key: "kids", type: "group", id: 2 },
-    );
+    const state = stateWith({ key: "area", type: "group", id: 1 }, { key: "kids", type: "group", id: 2 });
     // kids → parent area. State carries no edges, so the command supplies them from /groups/hierarchies.
     const edges = new Map([["kids", ["area"]]]);
     // Input order deliberately parent-first: a tier-only sort would delete area before kids.
@@ -74,10 +78,16 @@ describe("runDeleteLoop", () => {
     });
     const save = vi.fn(async () => {});
 
-    await runDeleteLoop({ client: asClient(request), state, statePath: "s.json", ordered: ["gone", "other"], save });
+    await runDeleteLoop({
+      client: asClient(request),
+      state,
+      statePath: "s.json",
+      ordered: ["gone", "other"],
+      save,
+    });
 
-    expect(state.resources.gone).toBeUndefined();  // already-deleted target removed from state
-    expect(state.resources.other).toBeUndefined();  // loop continued and deleted the rest
+    expect(state.resources.gone).toBeUndefined(); // already-deleted target removed from state
+    expect(state.resources.other).toBeUndefined(); // loop continued and deleted the rest
     expect(request).toHaveBeenCalledTimes(2);
     expect(save).toHaveBeenCalledTimes(2);
   });
@@ -91,11 +101,17 @@ describe("runDeleteLoop", () => {
     const save = vi.fn(async () => {});
     const prevExit = process.exitCode;
 
-    await runDeleteLoop({ client: asClient(request), state, statePath: "s.json", ordered: ["boom", "later"], save });
+    await runDeleteLoop({
+      client: asClient(request),
+      state,
+      statePath: "s.json",
+      ordered: ["boom", "later"],
+      save,
+    });
 
-    expect(state.resources.boom).toBeDefined();   // not removed — the DELETE failed
-    expect(state.resources.later).toBeDefined();  // never reached
-    expect(request).toHaveBeenCalledTimes(1);     // stopped at the first target
+    expect(state.resources.boom).toBeDefined(); // not removed — the DELETE failed
+    expect(state.resources.later).toBeDefined(); // never reached
+    expect(request).toHaveBeenCalledTimes(1); // stopped at the first target
     expect(save).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
     process.exitCode = prevExit;
@@ -104,7 +120,8 @@ describe("runDeleteLoop", () => {
   it("renders a CtApiError's HTTP status + body in the stop message, via the shared formatter (#71)", async () => {
     const state = stateWith({ key: "boom", type: "group", id: 1 });
     const request = vi.fn(async (_m: string, path: string) => {
-      if (path === "/groups/1") throw new CtApiError("DELETE /groups/1 failed", 403, { message: "no permission" });
+      if (path === "/groups/1")
+        throw new CtApiError("DELETE /groups/1 failed", 403, { message: "no permission" });
       return {};
     });
     const save = vi.fn(async () => {});

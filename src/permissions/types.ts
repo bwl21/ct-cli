@@ -14,10 +14,7 @@ import type { Ref } from "../resolve/refs.js";
  * (see `normalizeScopeEntry` in src/permissions/scope.ts), so `ref.campus("koblenz")` is identical.
  */
 export type ScopeSugar =
-  | { group: string }
-  | { campus: string }
-  | { groupType: string }
-  | { department: string };
+  { group: string } | { campus: string } | { groupType: string } | { department: string };
 
 /**
  * One entry of a scoped grant's `scope`:

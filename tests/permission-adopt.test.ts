@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { emitAdoptedGrants } from "../src/permissions/adopt.js";
-import { diffGrants, normalizeActual, type DomainType, type RawPermission } from "../src/permissions/grants.js";
+import {
+  diffGrants,
+  normalizeActual,
+  type DomainType,
+  type RawPermission,
+} from "../src/permissions/grants.js";
 import { desiredTuples } from "../src/permissions/plan.js";
 import { resolveScopeRefs } from "../src/permissions/scope.js";
 import { Resolver } from "../src/resolve/resolver.js";
@@ -62,7 +67,12 @@ describe("emitAdoptedGrants", () => {
     const rows: RawPermission[] = [
       { authId: 1, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
-    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 42, rows, state: emptyState() });
+    const block = emitAdoptedGrants({
+      domainType: "group_type_role",
+      domainId: 42,
+      rows,
+      state: emptyState(),
+    });
 
     expect(block).toContain("ct.groupTypeRole({");
     expect(block).toContain("id: 42,");
@@ -72,7 +82,9 @@ describe("emitAdoptedGrants", () => {
   });
 
   it("group_role emits ct.groupRole", () => {
-    const rows: RawPermission[] = [{ authId: 1, dataId: null, type: "grant", domainId: 7, meta: { modifiedPid: 5 } }];
+    const rows: RawPermission[] = [
+      { authId: 1, dataId: null, type: "grant", domainId: 7, meta: { modifiedPid: 5 } },
+    ];
     const block = emitAdoptedGrants({ domainType: "group_role", domainId: 7, rows, state: emptyState() });
     expect(block).toContain("ct.groupRole({");
   });
@@ -81,7 +93,12 @@ describe("emitAdoptedGrants", () => {
     const rows: RawPermission[] = [
       { authId: 1104, dataId: 99, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
-    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 42, rows, state: stateWithKids() });
+    const block = emitAdoptedGrants({
+      domainType: "group_type_role",
+      domainId: 42,
+      rows,
+      state: stateWithKids(),
+    });
 
     expect(block).toContain('{ right: "churchgroup:view group", scope: ["kids"] }');
     expect(block).not.toContain("WARNING");
@@ -89,7 +106,14 @@ describe("emitAdoptedGrants", () => {
 
   it("collapses a multi-scope grant (one CT row per dataId) into one entry", () => {
     const state = stateWithKids();
-    state.resources.youth = { type: "group", id: 100, key: "youth", fields: {}, adoptedAt: "t", updatedAt: "t" };
+    state.resources.youth = {
+      type: "group",
+      id: 100,
+      key: "youth",
+      fields: {},
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
     const rows: RawPermission[] = [
       { authId: 1104, dataId: 99, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
       { authId: 1104, dataId: 100, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
@@ -102,12 +126,17 @@ describe("emitAdoptedGrants", () => {
     const rows: RawPermission[] = [
       { authId: 1104, dataId: 777, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
-    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 42, rows, state: emptyState() });
+    const block = emitAdoptedGrants({
+      domainType: "group_type_role",
+      domainId: 42,
+      rows,
+      state: emptyState(),
+    });
 
     expect(block).toContain("WARNING: scope target group #777 is not managed");
     expect(block).toContain("ct adopt group 777");
     // the grant is a commented placeholder — never an active line with an invalid/guessed key
-    expect(block).toContain("// { right: \"churchgroup:view group\", scope:");
+    expect(block).toContain('// { right: "churchgroup:view group", scope:');
   });
 
   it("excludes baseline + inherited rows and notes preserved revoke/deny rows", () => {
@@ -117,7 +146,12 @@ describe("emitAdoptedGrants", () => {
       { authId: 3, dataId: null, type: "grant", domainId: 42, isInherited: true }, // inherited → excluded
       { authId: 1104, dataId: 99, type: "revoke", domainId: 42, meta: { modifiedPid: 5 } }, // deny → preserved, noted
     ];
-    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 42, rows, state: stateWithKids() });
+    const block = emitAdoptedGrants({
+      domainType: "group_type_role",
+      domainId: 42,
+      rows,
+      state: stateWithKids(),
+    });
 
     expect(block).toContain('"churchcore:administer settings"'); // authId 1 kept
     expect(block).not.toContain('scope: ["kids"]'); // the revoke row is NOT emitted as a grant
@@ -129,7 +163,12 @@ describe("emitAdoptedGrants", () => {
     const rows: RawPermission[] = [
       { authId: 999999, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
-    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 42, rows, state: emptyState() });
+    const block = emitAdoptedGrants({
+      domainType: "group_type_role",
+      domainId: 42,
+      rows,
+      state: emptyState(),
+    });
 
     expect(block).toContain("WARNING: authId 999999 has no catalog entry");
     expect(parseEmittedGrants(block)).toEqual([]); // comment only, no active grant line
@@ -149,7 +188,12 @@ describe("emitAdoptedGrants", () => {
     const rows: RawPermission[] = [
       { authId: 10122, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
-    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 42, rows, state: emptyState() });
+    const block = emitAdoptedGrants({
+      domainType: "group_type_role",
+      domainId: 42,
+      rows,
+      state: emptyState(),
+    });
 
     expect(block).not.toContain("NOTE:");
     expect(parseEmittedGrants(block)).toEqual(["churchdb:+edit group infos"]);
@@ -168,7 +212,12 @@ describe("emitAdoptedGrants", () => {
     const rows: RawPermission[] = [
       { authId: 1104, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
-    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 42, rows, state: emptyState() });
+    const block = emitAdoptedGrants({
+      domainType: "group_type_role",
+      domainId: 42,
+      rows,
+      state: emptyState(),
+    });
 
     expect(block).toContain('WARNING: "churchgroup:view group" is granted GLOBALLY here');
     expect(parseEmittedGrants(block)).toEqual([]);
@@ -178,7 +227,12 @@ describe("emitAdoptedGrants", () => {
     const rows: RawPermission[] = [
       { authId: 1, dataId: 55, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
-    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 42, rows, state: emptyState() });
+    const block = emitAdoptedGrants({
+      domainType: "group_type_role",
+      domainId: 42,
+      rows,
+      state: emptyState(),
+    });
 
     expect(block).toContain('WARNING: "churchcore:administer settings" is unscoped per the catalog');
     expect(parseEmittedGrants(block)).toEqual([]);
@@ -214,7 +268,12 @@ describe("emitAdoptedGrants", () => {
       { authId: 113, dataId: 1, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
       { authId: 113, dataId: 2, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
     ];
-    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 9, rows, state: emptyState() });
+    const block = emitAdoptedGrants({
+      domainType: "group_type_role",
+      domainId: 9,
+      rows,
+      state: emptyState(),
+    });
 
     expect(block).toContain('{ right: "churchdb:view comments", scope: [1, 2] }');
     expect(block).not.toContain("ct adopt group");
@@ -233,7 +292,12 @@ describe("emitAdoptedGrants", () => {
       { authId: 131, dataId: 5, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
       { authId: 132, dataId: 1, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
     ];
-    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 9, rows, state: emptyState() });
+    const block = emitAdoptedGrants({
+      domainType: "group_type_role",
+      domainId: 9,
+      rows,
+      state: emptyState(),
+    });
     const grants = parseEmittedGrants(block);
 
     expect(block).not.toContain("WARNING");
@@ -246,7 +310,12 @@ describe("emitAdoptedGrants", () => {
     // Full round-trip: pasting this block into config and diffing against the SAME live rows must
     // be a no-op — no toPut, and critically no toDelete (a partial block must never revoke a live
     // grant it could not express).
-    const desired = grants.flatMap((g) => desiredTuples({ key: "adopted", domainType: "group_type_role", domainId: 9, grants: [g] }, emptyState()));
+    const desired = grants.flatMap((g) =>
+      desiredTuples(
+        { key: "adopted", domainType: "group_type_role", domainId: 9, grants: [g] },
+        emptyState(),
+      ),
+    );
     const actual = normalizeActual(rows);
     const diff = diffGrants(desired, actual);
     expect(diff.toPut).toEqual([]);
@@ -265,14 +334,14 @@ describe("emitAdoptedGrants", () => {
     const rows: RawPermission[] = [
       // writable, user-authored grants (unscoped + group-scoped) — emitted active
       { authId: 1113, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: 5 } }, // churchgroup:administer groups
-      { authId: 1104, dataId: 99, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },   // churchgroup:view group scoped to managed "kids"
+      { authId: 1104, dataId: 99, type: "grant", domainId: 9, meta: { modifiedPid: 5 } }, // churchgroup:view group scoped to managed "kids"
       // admin-authored MEMBER rights (authId >= 10000) — NOW managed: unscoped + security-level scopes
       { authId: 10107, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: 5 } }, // churchdb:+add person (unscoped)
-      { authId: 10101, dataId: 2, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },    // churchdb:+see persons scope [2]
-      { authId: 10133, dataId: 1, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },    // churchdb:+edit group member fields scope [1]
+      { authId: 10101, dataId: 2, type: "grant", domainId: 9, meta: { modifiedPid: 5 } }, // churchdb:+see persons scope [2]
+      { authId: 10133, dataId: 1, type: "grant", domainId: 9, meta: { modifiedPid: 5 } }, // churchdb:+edit group member fields scope [1]
       // EXCLUDED (authId >= 10000 too): system baseline + a truly-inherited row → never revoked
       { authId: 10122, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: -1 } }, // system baseline
-      { authId: 10111, dataId: null, type: "grant", domainId: 9, isInherited: true },          // inherited
+      { authId: 10111, dataId: null, type: "grant", domainId: 9, isInherited: true }, // inherited
     ];
     const state = stateWithKids();
     const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 9, rows, state });
@@ -283,7 +352,9 @@ describe("emitAdoptedGrants", () => {
 
     // Paste-and-plan: diff the emitted declaration against the FULL live row set. normalizeActual
     // drops the system-baseline + inherited rows, so they never appear as revokes.
-    const desired = grants.flatMap((g) => desiredTuples({ key: "adopted", domainType: "group_type_role", domainId: 9, grants: [g] }, state));
+    const desired = grants.flatMap((g) =>
+      desiredTuples({ key: "adopted", domainType: "group_type_role", domainId: 9, grants: [g] }, state),
+    );
     const actual = normalizeActual(rows);
     const diff = diffGrants(desired, actual);
     expect(diff.toPut).toEqual([]);
@@ -296,7 +367,12 @@ describe("emitAdoptedGrants", () => {
     const rows: RawPermission[] = [
       { authId: 1104, dataId: 777, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
-    const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 42, rows, state: emptyState() });
+    const block = emitAdoptedGrants({
+      domainType: "group_type_role",
+      domainId: 42,
+      rows,
+      state: emptyState(),
+    });
     expect(block).toContain("ct adopt group 777");
   });
 
@@ -304,7 +380,14 @@ describe("emitAdoptedGrants", () => {
     // churchdb:view station (authId 124) scopes by cdb_station. Campus ids are host-specific, so an
     // adopted numeric literal is a misgrant when the block is replayed on the other instance.
     const state = stateWithKids();
-    state.resources.koblenz = { type: "campus", id: 23, key: "koblenz", fields: {}, adoptedAt: "t", updatedAt: "t" };
+    state.resources.koblenz = {
+      type: "campus",
+      id: 23,
+      key: "koblenz",
+      fields: {},
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
     const rows: RawPermission[] = [
       { authId: 124, dataId: 23, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
@@ -331,7 +414,14 @@ describe("emitAdoptedGrants", () => {
 
   it("mixes managed (logical) and unmanaged (numeric) campus scopes in one grant", () => {
     const state = emptyState();
-    state.resources.koblenz = { type: "campus", id: 23, key: "koblenz", fields: {}, adoptedAt: "t", updatedAt: "t" };
+    state.resources.koblenz = {
+      type: "campus",
+      id: 23,
+      key: "koblenz",
+      fields: {},
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
     const rows: RawPermission[] = [
       { authId: 124, dataId: 23, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
       { authId: 124, dataId: 99, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
@@ -379,7 +469,14 @@ describe("emitAdoptedGrants", () => {
     // A managed campus, so the fixture also covers the #98 typed-ref emission form (`{ campus: … }`)
     // — without it the round-trip property was only ever exercised on group/numeric scopes, and the
     // one shape that needs a pre-resolved ScopeRefMap went unchecked.
-    state.resources.koblenz = { type: "campus", id: 23, key: "koblenz", fields: {}, adoptedAt: "t", updatedAt: "t" };
+    state.resources.koblenz = {
+      type: "campus",
+      id: 23,
+      key: "koblenz",
+      fields: {},
+      adoptedAt: "t",
+      updatedAt: "t",
+    };
     const rows: RawPermission[] = [
       { authId: 124, dataId: 23, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cdb_station, managed → { campus: … }
       { authId: 124, dataId: 777, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cdb_station, unmanaged → numeric

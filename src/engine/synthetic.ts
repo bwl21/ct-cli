@@ -146,7 +146,9 @@ const dynamicField: SyntheticField = {
         return [`dynamic ${managed.key} (#${managed.id}): ${formatError(err)}`];
       }
       try {
-        const statusRes = await client.get<{ dynamicGroupStatus?: string }>(`/dynamicgroups/${managed.id}/status`);
+        const statusRes = await client.get<{ dynamicGroupStatus?: string }>(
+          `/dynamicgroups/${managed.id}/status`,
+        );
         a.dynamic = {
           status: (statusRes?.dynamicGroupStatus ?? "none") as DynamicStatus,
           ruleset: normalizeRuleset(ruleset),

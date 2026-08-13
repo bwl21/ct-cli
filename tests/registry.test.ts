@@ -233,9 +233,9 @@ describe("createDefaults — required-but-unmanaged create fields (#73)", () => 
   });
 
   it("group-role fills the required `shorty` from the declared name (truncated to 10)", () => {
-    expect(
-      RESOURCES["group-role"]?.createDefaults?.({ name: "Verantwortlicher", groupTypeId: 2 }),
-    ).toEqual({ shorty: "Verantwort" });
+    expect(RESOURCES["group-role"]?.createDefaults?.({ name: "Verantwortlicher", groupTypeId: 2 })).toEqual({
+      shorty: "Verantwort",
+    });
   });
 
   it("pads a 1-char group-type name's namePlural up to CT's 2-char minimum", () => {

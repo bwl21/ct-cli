@@ -34,7 +34,15 @@ const strukturPerm: DesiredPermission = {
   grants: ["churchgroup:administer groups"],
 };
 const createStrukturPlan: Plan = {
-  items: [{ type: "group-type", key: "struktur", id: null, action: "create", changes: [{ field: "name", from: undefined, to: "Struktur" }] }],
+  items: [
+    {
+      type: "group-type",
+      key: "struktur",
+      id: null,
+      action: "create",
+      changes: [{ field: "name", from: undefined, to: "Struktur" }],
+    },
+  ],
 };
 
 /** A mock client: POST /group/grouptypes mints STRUKTUR_TYPE_ID; GETs return whatever `perms` maps. */
@@ -52,7 +60,12 @@ function mockClient(perms: Record<string, unknown[]> = {}) {
 describe("pending domain: declare group type + grant by reference in one config (#69/#23)", () => {
   it("plans from EMPTY state without aborting — a pending grant block, not the hard error", async () => {
     const { client, get } = mockClient();
-    const { items, fetchErrors } = await buildPermissionPlan(client, emptyState(HOST), [strukturPerm], strukturType);
+    const { items, fetchErrors } = await buildPermissionPlan(
+      client,
+      emptyState(HOST),
+      [strukturPerm],
+      strukturType,
+    );
 
     expect(fetchErrors).toEqual([]);
     // The domain is pending: no numeric id yet, the Ref is carried for apply-time re-resolution.
@@ -87,13 +100,22 @@ describe("pending domain: declare group type + grant by reference in one config 
     // …then permission reconciliation runs against POST-execute state and writes to the fresh domain.
     const res = await applyPermissionPlan(items, client, state);
     expect(res.granted).toBe(1);
-    const put = calls.find((c) => c.method === "PUT" && c.path === `/permissions/group_type_role/${STRUKTUR_TYPE_ID}`);
+    const put = calls.find(
+      (c) => c.method === "PUT" && c.path === `/permissions/group_type_role/${STRUKTUR_TYPE_ID}`,
+    );
     expect(put?.body).toEqual({ authId: 1113, type: "grant" }); // fresh domain id in the path, not a placeholder
 
     // Second plan (type now in state, grant now live) converges to a no-op — domain is concrete.
     const { client: c2 } = mockClient({
       "/permissions/group_type_role": [
-        { domainType: "group_type_role", domainId: STRUKTUR_TYPE_ID, authId: 1113, dataId: null, type: "grant", meta: { modifiedPid: 1 } },
+        {
+          domainType: "group_type_role",
+          domainId: STRUKTUR_TYPE_ID,
+          authId: 1113,
+          dataId: null,
+          type: "grant",
+          meta: { modifiedPid: 1 },
+        },
       ],
     });
     const { items: items2, fetchErrors } = await buildPermissionPlan(c2, state, [strukturPerm], strukturType);
@@ -108,12 +130,30 @@ describe("pending domain: declare group type + grant by reference in one config 
 
 describe("pending domain: prod-like scenario (type already in state) is unchanged (#69)", () => {
   it("resolves to the concrete domain id and reconciles idempotently — no pending path", async () => {
-    const state: State = { version: 1, host: HOST, resources: {
-      struktur: { type: "group-type", id: STRUKTUR_TYPE_ID, key: "struktur", fields: { name: "Struktur" }, adoptedAt: "t", updatedAt: "t" },
-    }};
+    const state: State = {
+      version: 1,
+      host: HOST,
+      resources: {
+        struktur: {
+          type: "group-type",
+          id: STRUKTUR_TYPE_ID,
+          key: "struktur",
+          fields: { name: "Struktur" },
+          adoptedAt: "t",
+          updatedAt: "t",
+        },
+      },
+    };
     const { client } = mockClient({
       "/permissions/group_type_role": [
-        { domainType: "group_type_role", domainId: STRUKTUR_TYPE_ID, authId: 1113, dataId: null, type: "grant", meta: { modifiedPid: 1 } },
+        {
+          domainType: "group_type_role",
+          domainId: STRUKTUR_TYPE_ID,
+          authId: 1113,
+          dataId: null,
+          type: "grant",
+          meta: { modifiedPid: 1 },
+        },
       ],
     });
     const { items, fetchErrors } = await buildPermissionPlan(client, state, [strukturPerm], strukturType);
@@ -132,9 +172,14 @@ describe("group_role symmetry: a same-run group is NOT made pending — it stays
     // materially harder case than group_type_role (whose domainId is the group type's OWN id, present
     // in post-execute state). So group_role deliberately does NOT go pending: it fails fast at
     // resolve time with its own actionable message, unchanged by this fix.
-    const declaredGroup: DesiredResource[] = [{ type: "group", key: "kids_area", fields: { name: "Kids" }, dependsOn: [] }];
+    const declaredGroup: DesiredResource[] = [
+      { type: "group", key: "kids_area", fields: { name: "Kids" }, dependsOn: [] },
+    ];
     const grPerm: DesiredPermission = {
-      key: "kids_lead", domainType: "group_role", domainId: ref.groupRole("kids_area", "Leiter"), grants: [],
+      key: "kids_lead",
+      domainType: "group_role",
+      domainId: ref.groupRole("kids_area", "Leiter"),
+      grants: [],
     };
     const { client } = mockClient();
     await expect(buildPermissionPlan(client, emptyState(HOST), [grPerm], declaredGroup)).rejects.toThrow(

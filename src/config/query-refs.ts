@@ -157,7 +157,7 @@ export function portablizeRuleset(
 ): PortablizeResult {
   const warnings: PortablizeWarning[] = [];
 
-  const marker = (kind: RefKind, key: string): SimpleRef => ({ __ctRef: true, kind, key } as SimpleRef);
+  const marker = (kind: RefKind, key: string): SimpleRef => ({ __ctRef: true, kind, key }) as SimpleRef;
 
   const mapScalar = (value: unknown, kind: RefKind, varName: string): unknown => {
     if (typeof value !== "number") return value; // booleans/strings/nulls are literals, never entity ids
@@ -246,10 +246,7 @@ export function portablizeRuleset(
       for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
         // `handleMembership.groupTypeRoleId` sits outside the query, so it has no `{ var }` leaf to key
         // off — rewrite it by object-key match, through the same role catalog as the `role.id` operand.
-        out[k] =
-          k === ROLE_FIELD_NAME && typeof v === "number"
-            ? mapRoleScalar(v, ROLE_FIELD_NAME)
-            : walk(v);
+        out[k] = k === ROLE_FIELD_NAME && typeof v === "number" ? mapRoleScalar(v, ROLE_FIELD_NAME) : walk(v);
       }
       return out;
     }

@@ -9,7 +9,12 @@
  */
 import catalogData from "./catalog.json" with { type: "json" };
 
-export interface CatalogEntry { authId: number; scopeField: string | null; revocable: boolean; desc: string }
+export interface CatalogEntry {
+  authId: number;
+  scopeField: string | null;
+  revocable: boolean;
+  desc: string;
+}
 
 /**
  * Provenance for the catalog (#25). Recorded as a reserved top-level `$meta` key in catalog.json so
@@ -121,7 +126,9 @@ export function resolveAuthId(name: string): CatalogEntry {
   const entry = CATALOG[name];
   if (!entry) {
     const [mod] = name.split(":");
-    const near = Object.keys(CATALOG).filter((k) => k.startsWith(`${mod}:`)).slice(0, 6);
+    const near = Object.keys(CATALOG)
+      .filter((k) => k.startsWith(`${mod}:`))
+      .slice(0, 6);
     const hint = near.length ? ` Did you mean one of: ${near.join(", ")}?` : "";
     throw new Error(`Unknown permission "${name}".${hint}`);
   }

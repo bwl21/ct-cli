@@ -102,7 +102,10 @@ describe("buildCoverageReport (#103)", () => {
     host: "h",
     state,
     groups,
-    groupTypeNames: new Map([[9, "Struktur"], [12, "Local Lead"]]),
+    groupTypeNames: new Map([
+      [9, "Struktur"],
+      [12, "Local Lead"],
+    ]),
     dynamicGroupIds: new Set([1, 3]),
     groupRolePermissions: [
       row({ authId: VIEW_GROUP, dataId: 42, domainId: 100 }),
@@ -128,10 +131,20 @@ describe("buildCoverageReport (#103)", () => {
 
   it("counts managed / dynamic / unmanaged-with-grants per group type", () => {
     const byName = new Map(report.byType.map((t) => [t.name, t]));
-    expect(byName.get("Struktur")).toMatchObject({ total: 1, managed: 1, dynamic: 1, unmanagedWithGrants: 0 });
+    expect(byName.get("Struktur")).toMatchObject({
+      total: 1,
+      managed: 1,
+      dynamic: 1,
+      unmanagedWithGrants: 0,
+    });
     // Group 2 is unmanaged AND carries grants — the "you are missing this" number. Group 3 is
     // unmanaged too but has no grants, so it must not inflate it.
-    expect(byName.get("Local Lead")).toMatchObject({ total: 2, managed: 0, dynamic: 1, unmanagedWithGrants: 1 });
+    expect(byName.get("Local Lead")).toMatchObject({
+      total: 2,
+      managed: 0,
+      dynamic: 1,
+      unmanagedWithGrants: 1,
+    });
   });
 
   it("skips role instances with no authored grants entirely", () => {

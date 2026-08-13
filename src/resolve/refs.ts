@@ -107,17 +107,37 @@ export const ref = {
    * So a department can be REFERENCED by name on any host, but never declared, adopted or created —
    * an unresolvable name is a hard error, not a create.
    */
-  department: (key: string): SimpleRef => ({ __ctRef: true, kind: "department", key: requireKey("department", key) }),
-  groupType: (key: string): SimpleRef => ({ __ctRef: true, kind: "group-type", key: requireKey("group-type", key) }),
-  status: (key: string): SimpleRef => ({ __ctRef: true, kind: "group-status", key: requireKey("group-status", key) }),
+  department: (key: string): SimpleRef => ({
+    __ctRef: true,
+    kind: "department",
+    key: requireKey("department", key),
+  }),
+  groupType: (key: string): SimpleRef => ({
+    __ctRef: true,
+    kind: "group-type",
+    key: requireKey("group-type", key),
+  }),
+  status: (key: string): SimpleRef => ({
+    __ctRef: true,
+    kind: "group-status",
+    key: requireKey("group-status", key),
+  }),
   /**
    * A PERSON status (`/statuses` — "0 - First", "3 - Group Active", …), the domain of a `status`
    * permission declaration. Unrelated to {@link ref.status} (GROUP status, `groupStatusId`), which
    * has no catalog at all (#67) — person statuses do, so this one resolves by name like any other
    * master-data ref.
    */
-  personStatus: (key: string): SimpleRef => ({ __ctRef: true, kind: "person-status", key: requireKey("person-status", key) }),
-  roleDef: (key: string): SimpleRef => ({ __ctRef: true, kind: "role-def", key: requireKey("role-def", key) }),
+  personStatus: (key: string): SimpleRef => ({
+    __ctRef: true,
+    kind: "person-status",
+    key: requireKey("person-status", key),
+  }),
+  roleDef: (key: string): SimpleRef => ({
+    __ctRef: true,
+    kind: "role-def",
+    key: requireKey("role-def", key),
+  }),
   group: (key: string): SimpleRef => ({ __ctRef: true, kind: "group", key: requireKey("group", key) }),
   /**
    * A `group_role` permission domain, by its (group, role) pair (#25). The resolver maps it to the
@@ -189,9 +209,7 @@ export function pendingRef(r: Ref): PendingRef {
 
 export function isPendingRef(value: unknown): value is PendingRef {
   return (
-    typeof value === "object" &&
-    value !== null &&
-    isRef((value as { __pendingRef?: unknown }).__pendingRef)
+    typeof value === "object" && value !== null && isRef((value as { __pendingRef?: unknown }).__pendingRef)
   );
 }
 

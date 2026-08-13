@@ -46,9 +46,7 @@ describe("authedSession host↔token binding (issue #30)", () => {
     readCredentials.mockResolvedValue({ host: "https://prod.church.tools", token: "prod-secret" });
     process.env.CT_HOST = "https://staging.church.tools";
 
-    await expect(authedSession()).rejects.toThrow(
-      /ct auth login --host https:\/\/staging\.church\.tools/,
-    );
+    await expect(authedSession()).rejects.toThrow(/ct auth login --host https:\/\/staging\.church\.tools/);
   });
 
   it("tolerates a trailing slash mismatch (host is normalized before comparison)", async () => {
