@@ -18,7 +18,9 @@ npm run dev -- get campuses    # run from source against a live instance
 Node ≥ 20; the repo pins 22 via `.nvmrc`.
 
 To run against a real instance, `ct auth login --host https://your.church.tools` stores
-host + token in the OS keychain. Never commit a token — see [SECURITY.md](SECURITY.md).
+host + token in the **macOS Keychain**. There is no keychain backend on Linux or Windows —
+export `CT_LOGINTOKEN` (and `CT_HOST`) instead. Never commit a token — see
+[SECURITY.md](SECURITY.md).
 
 ## Things worth knowing before you change engine code
 
@@ -26,11 +28,13 @@ host + token in the OS keychain. Never commit a token — see [SECURITY.md](SECU
   tool can have. Anything touching diffing needs a test that pins the rendered plan.
 - **A clean apply must round-trip to a no-op.** If applying a config and re-planning shows
   a diff, the resource's `managedFields` are wrong — that is a bug, not a quirk.
-- **People are out of scope, permanently.** Persons and memberships are guarded in code.
+- **People are out of scope, permanently.** `assertNotPeople` guards every write path.
   PRs that manage people will be declined regardless of quality; it is a boundary, not a
   gap.
-- **Live-API tests are opt-in.** Anything that writes is gated behind `CT_LIVE=1` and must
-  target a dev instance and clean up after itself. CI never runs them.
+- **Live-API tests are opt-in, and writes are triple-gated.** Reads need `CT_LIVE=1`.
+  Writes additionally need `CT_LIVE_WRITE=1` **and** `CT_LIVE_WRITE_HOST` set to exactly
+  the authenticated host — a deliberate barrier against a live write landing on prod.
+  They must target a dev instance and clean up after themselves. CI never runs them.
 
 ## Documentation
 

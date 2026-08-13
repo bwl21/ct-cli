@@ -18,7 +18,7 @@ describe("CtClient", () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
-        jsonResponse({ data: { id: 7, firstName: "Ada" } }, { setCookie: "ChurchTools_ct_eqrm=abc; Path=/" }),
+        jsonResponse({ data: { id: 7, firstName: "Ada" } }, { setCookie: "ChurchTools_ct_mychurch=abc; Path=/" }),
       )
       .mockResolvedValueOnce(jsonResponse({ data: "csrf-123" }));
     vi.stubGlobal("fetch", fetchMock);

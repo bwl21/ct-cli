@@ -24,7 +24,15 @@ const ROOT = process.cwd();
 const DOCS_DIR = "docs/handbuch";
 const SIGN = process.argv.includes("--sign");
 
-/** Frontmatter fields this gate reads. The subset is deliberate — no YAML dependency. */
+/**
+ * Frontmatter fields this gate reads. The subset is deliberate — no YAML dependency.
+ *
+ * This parser is strict on purpose: ANY line it does not positively understand is an
+ * error, never a skip. A lenient parser here fails in the one direction that matters —
+ * a dropped `sources:` entry means the gate passes while the docs are stale, which is
+ * exactly the outcome it exists to prevent, and `--sign` would then bake the truncated
+ * set in permanently.
+ */
 function parseFrontmatter(text, page) {
   if (!text.startsWith("---\n")) throw new Error(`${page}: no frontmatter`);
   const end = text.indexOf("\n---\n", 4);
@@ -33,22 +41,38 @@ function parseFrontmatter(text, page) {
 
   const fm = { sources: [] };
   let inSources = false;
-  for (const line of body.split("\n")) {
+  for (const [i, line] of body.split("\n").entries()) {
+    const where = `${page}:${i + 2}`;
     if (!line.trim()) continue;
-    const item = line.match(/^\s+-\s+(.*)$/);
-    if (inSources && item) {
-      fm.sources.push(item[1].trim().replace(/^["']|["']$/g, ""));
-      continue;
+    // A comment must not terminate a `sources:` block — that would silently truncate it.
+    if (/^\s*#/.test(line)) continue;
+
+    if (inSources) {
+      const item = line.match(/^\s+-\s+(.*)$/);
+      if (item) {
+        fm.sources.push(item[1].trim().replace(/^["']|["']$/g, ""));
+        continue;
+      }
+      // Not a list item and not a comment: the block ended. Only a new top-level key
+      // may do that; anything else (a stray indent, a wrapped line) is an error below.
+      inSources = false;
     }
-    inSources = false;
+
     const kv = line.match(/^([a-z_]+):\s*(.*)$/);
-    if (!kv) continue;
+    if (!kv) throw new Error(`${where}: cannot parse frontmatter line: ${line.trim()}`);
     const [, key, rawValue] = kv;
     const value = rawValue.trim().replace(/^["']|["']$/g, "");
+
+    // `>` / `|` block scalars would parse as the literal value ">" — truthy, and for
+    // sources_exempt_reason that silently drops the page from the gate.
+    if (/^[>|][0-9+-]*$/.test(value)) {
+      throw new Error(`${where}: YAML block scalars are not supported; put \`${key}\` on one line`);
+    }
+
     if (key === "sources") {
-      // Either `sources: []` inline or a block list on the following lines.
       if (value === "[]") fm.sources = [];
-      else inSources = true;
+      else if (value === "") inSources = true;
+      else throw new Error(`${where}: \`sources:\` must be \`[]\` or a block list`);
       continue;
     }
     fm[key] = value;
@@ -68,7 +92,12 @@ function walk(dir, out = []) {
 
 /**
  * Resolve one `sources:` entry to repo-relative file paths. Supports a literal path,
- * a `**` prefix-walk (`src/permissions/**`) and `*` within a single segment.
+ * a TRAILING `**` prefix-walk (`src/permissions/**`) and `*` within a single segment.
+ *
+ * `**` anywhere but the end is rejected rather than approximated: the obvious reading
+ * of `src/**\/*.ts` is "the .ts files", but a prefix-walk returns every file under
+ * `src/`, and a bare `**` prefix would walk the repo root and pull in .git/ and
+ * node_modules/ — making the hash depend on untracked local state.
  */
 function resolve(pattern) {
   if (!pattern.includes("*")) {
@@ -82,7 +111,11 @@ function resolve(pattern) {
 
   const deep = pattern.indexOf("**");
   if (deep !== -1) {
+    if (!pattern.endsWith("/**") || pattern.indexOf("**") !== pattern.lastIndexOf("**")) {
+      throw new Error(`\`**\` is only supported as a trailing prefix-walk (\`dir/**\`): ${pattern}`);
+    }
     const base = pattern.slice(0, deep).replace(/\/$/, "");
+    if (!base) throw new Error(`\`**\` needs a directory prefix: ${pattern}`);
     return walk(join(ROOT, base));
   }
 
@@ -149,9 +182,16 @@ for (const page of pages) {
 
   stale.push({ page, expected: fm.sources_hash ?? "(unsigned)", actual });
   if (SIGN) {
+    // Rewrite the whole line rather than string-matching the parsed value: the parser
+    // strips quotes, so `sources_hash: "abc"` would never match `sources_hash: abc` and
+    // the write would silently no-op while reporting success.
     const signed = fm.sources_hash
-      ? text.replace(`sources_hash: ${fm.sources_hash}`, `sources_hash: ${actual}`)
+      ? text.replace(/^sources_hash:.*$/m, `sources_hash: ${actual}`)
       : text.replace(/^---\n/, `---\nsources_hash: ${actual}\n`);
+    if (signed === text) {
+      errors.push(`${page}: could not write sources_hash — the frontmatter is not in the expected shape`);
+      continue;
+    }
     writeFileSync(join(ROOT, page), signed);
     console.log(`  signed  ${page} → ${actual}`);
   } else {

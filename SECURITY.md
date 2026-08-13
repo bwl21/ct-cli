@@ -12,11 +12,20 @@ rather than a public issue. Expect an initial response within a week.
 your own permissions, and it performs writes (`ct apply`, `ct destroy`). When assessing
 impact, the things worth knowing:
 
-- **Tokens are never written to the repo.** They live in the OS keychain (`ct auth login`,
-  keyed per host) or in `CT_LOGINTOKEN` for CI. `ct.envs.json` stores only the _name_ of a
-  token env var, never a value, which is why it is safe to commit.
-- **People are never managed.** Persons and memberships are out of scope by design and
-  guarded in code — the tool manages the overarching, rights-bearing structure only.
+- **Tokens are never written to the repo.** They live in the **macOS Keychain**
+  (`ct auth login`, keyed per host) or in `CT_LOGINTOKEN` for CI. There is no keychain
+  backend on Linux or Windows — those platforms must use `CT_LOGINTOKEN`. `ct.envs.json`
+  stores only the _name_ of a token env var, never a value, which is why it is safe to
+  commit.
+- **Storing a token exposes it briefly to `ps`.** `ct auth login` shells out to
+  `security add-generic-password -w <token>`, so the value sits in that process's argv for
+  the duration of the call. On a shared machine, assume another local user could observe
+  it at that moment.
+- **People are never _written_.** Persons and memberships are out of scope by design, and
+  `assertNotPeople` guards every write path. Reads are not guarded: `ct get raw /persons`
+  returns person records, because `ct get raw` is a deliberate general-purpose API
+  passthrough. The guarantee is that `ct` never creates, edits or deletes people — not
+  that it cannot display them.
 - **Writes are opt-in and ordered.** `plan` is the default; `apply` needs explicit
   confirmation, protected environments additionally require the env name to be typed (or
   `--confirm-env`), and deletions never happen implicitly.

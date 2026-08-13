@@ -26,11 +26,13 @@ on:
       - "docs/handbuch/**"
       - "src/**"
       - ".github/workflows/docs.yml"
+      - ".github/scripts/docs-staleness.mjs"
   pull_request:
     paths:
       - "docs/handbuch/**"
       - "src/**"
       - ".github/workflows/docs.yml"
+      - ".github/scripts/docs-staleness.mjs"
 
 permissions:
   contents: read
