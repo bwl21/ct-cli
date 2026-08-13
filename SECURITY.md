@@ -21,11 +21,13 @@ impact, the things worth knowing:
   `security add-generic-password -w <token>`, so the value sits in that process's argv for
   the duration of the call. On a shared machine, assume another local user could observe
   it at that moment.
-- **People are never _written_.** Persons and memberships are out of scope by design, and
-  `assertNotPeople` guards every write path. Reads are not guarded: `ct get raw /persons`
-  returns person records, because `ct get raw` is a deliberate general-purpose API
-  passthrough. The guarantee is that `ct` never creates, edits or deletes people — not
-  that it cannot display them.
+- **People are never _written_.** Persons and memberships are out of scope by design. The
+  load-bearing control is the resource registry: writes can only target the structural
+  resource kinds it defines, and there is no person kind. `assertNotPeople` sits on top of
+  every write path as a belt-and-braces second check. Reads are not guarded:
+  `ct get raw /persons` returns person records, because `ct get raw` is a deliberate
+  general-purpose API passthrough. The guarantee is that `ct` never creates, edits or
+  deletes people — not that it cannot display them.
 - **Writes are opt-in and ordered.** `plan` is the default; `apply` needs explicit
   confirmation, protected environments additionally require the env name to be typed (or
   `--confirm-env`), and deletions never happen implicitly.

@@ -27,20 +27,29 @@ const SIGN = process.argv.includes("--sign");
 /**
  * Frontmatter fields this gate reads. The subset is deliberate — no YAML dependency.
  *
- * This parser is strict on purpose: ANY line it does not positively understand is an
- * error, never a skip. A lenient parser here fails in the one direction that matters —
- * a dropped `sources:` entry means the gate passes while the docs are stale, which is
- * exactly the outcome it exists to prevent, and `--sign` would then bake the truncated
- * set in permanently.
+ * Strictness is asymmetric on purpose, because the two directions are not equally bad:
+ *
+ *   - Inside `sources:`, ANY line not positively understood is an error, never a skip.
+ *     A dropped entry means the gate passes while the docs are stale — exactly what it
+ *     exists to prevent — and `--sign` would then bake the truncation in permanently.
+ *   - Under any OTHER key, indented continuation lines are skipped. Those are foreign
+ *     to this gate (`hide:` / `extra:` are ordinary mkdocs-material directives), and
+ *     rejecting them would fail a page for frontmatter that is none of our business.
  */
 function parseFrontmatter(text, page) {
-  if (!text.startsWith("---\n")) throw new Error(`${page}: no frontmatter`);
-  const end = text.indexOf("\n---\n", 4);
+  // Tolerate CRLF so a Windows checkout does not fail every page; `.gitattributes`
+  // pins these files to LF, so this is a belt-and-braces path.
+  const normalized = text.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---\n")) throw new Error(`${page}: no frontmatter`);
+  // Search from 3, not 4: `---\n---\n` is empty-but-terminated frontmatter, and starting
+  // at 4 would step over its closing delimiter and misreport it as unterminated.
+  const end = normalized.indexOf("\n---\n", 3);
   if (end === -1) throw new Error(`${page}: unterminated frontmatter`);
-  const body = text.slice(4, end + 1);
+  const body = normalized.slice(4, end + 1);
 
   const fm = { sources: [] };
   let inSources = false;
+  let inForeignBlock = false;
   for (const [i, line] of body.split("\n").entries()) {
     const where = `${page}:${i + 2}`;
     if (!line.trim()) continue;
@@ -58,8 +67,18 @@ function parseFrontmatter(text, page) {
       inSources = false;
     }
 
-    const kv = line.match(/^([a-z_]+):\s*(.*)$/);
-    if (!kv) throw new Error(`${where}: cannot parse frontmatter line: ${line.trim()}`);
+    // A key we do not read opened a block list or nested mapping; its indented body is
+    // not ours to validate. `sources:` never lands here — it sets inSources instead.
+    if (inForeignBlock && /^\s/.test(line)) continue;
+    inForeignBlock = false;
+
+    const kv = line.match(/^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/);
+    if (!kv) {
+      throw new Error(
+        `${where}: cannot parse frontmatter line: ${line.trim()}\n` +
+          `    (this gate reads flat \`key: value\` pairs plus a \`sources:\` block list)`,
+      );
+    }
     const [, key, rawValue] = kv;
     const value = rawValue.trim().replace(/^["']|["']$/g, "");
 
@@ -75,6 +94,8 @@ function parseFrontmatter(text, page) {
       else throw new Error(`${where}: \`sources:\` must be \`[]\` or a block list`);
       continue;
     }
+    // An empty value on a key we do not read opens a block we should ignore, not police.
+    if (value === "") inForeignBlock = true;
     fm[key] = value;
   }
   return { fm, frontmatterEnd: end + 5 };

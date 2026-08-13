@@ -1,0 +1,10 @@
+# Keep text files LF in the working tree on every platform. The docs staleness gate
+# hashes source-file bytes, so a CRLF checkout would otherwise produce different
+# `sources_hash` values on Windows than the ones CI computes on Linux.
+* text=auto eol=lf
+
+# Never touched by line-ending normalisation.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
