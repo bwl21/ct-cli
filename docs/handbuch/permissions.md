@@ -455,7 +455,7 @@ In bulk mode:
   per-block `WARNING` header stops being a safeguard and becomes something the
   reader scrolls past, so such domains are skipped and listed instead;
 - a role instance blocked by an undeclarable scope dimension is skipped and
-  named, with the dimension to pass to [`preserveUnknown`](#partial-ownership--preserveunknown-opt-in-102).
+  named, with the dimension to pass to [`preserveUnknown`](#partial-ownership-preserveunknown-opt-in-102).
   The single-domain form still emits it, deliberately, one domain at a time;
 - nothing is capped silently — the run prints how many blocks it emitted **and**
   how many it skipped, with the reason for each.

@@ -377,7 +377,7 @@ keeps going after a per-group failure (exiting non-zero).
 > **The scheduler ping is NOT fired by `ct`.** ChurchTools' admin cron page hits
 > `GET https://<host>/?q=cron&standby=true`, which runs **every due scheduled
 > job on the instance** — far beyond auto-groups. It is documented in
-> [`docs/runbook-manual-surface.md`](../runbook-manual-surface.md) as a manual
+> [`docs/runbook-manual-surface.md`](https://github.com/eqrm/ct-cli/blob/main/docs/runbook-manual-surface.md) as a manual
 > escape hatch; `ct` deliberately never calls it.
 
 ## Full example
