@@ -6,9 +6,8 @@ Two audiences, kept apart on purpose (#89).
 
 The **generic ChurchTools reference**: how ChurchTools' own permission model,
 dynamic groups and field definitions behave, independent of any one instance.
-These pages are published into the Handbuch's "ChurchTools-Grundlagen" section
-(eqrm/churchtools-connector#1114), so they carry `sources:` frontmatter and are
-gated by the estate-wide staleness checker.
+These pages are published into a wider ChurchTools Handbuch, so they carry
+`sources:` frontmatter and are gated by the staleness checker (#89).
 
 | Page | About |
 | --- | --- |
@@ -36,10 +35,16 @@ fails the `Docs / staleness` check — the point being that someone re-read the
 page against the new code. Bumping `reviewed:` alone does **not** satisfy it.
 
 The signature is a sha256 over each resolved file's
-`<repo-relative-path>\0<contents>\0`, files sorted, truncated to 16 hex chars —
-the canonical implementation is `App\Services\Docs\SourcesHasher` in
-eqrm/churchtools-connector, and `php artisan docs:sign <page>` in a checkout of
-that repo writes it.
+`<repo-relative-path>\0<contents>\0`, files sorted, truncated to 16 hex chars.
+Check and re-sign locally:
+
+```bash
+node .github/scripts/docs-staleness.mjs          # what CI runs
+node .github/scripts/docs-staleness.mjs --sign   # re-sign, after re-reading
+```
+
+A page with no code behaviour to track declares `sources: []` plus a
+`sources_exempt_reason:` instead.
 
 ## Everything else — developer- and operator-facing, unpublished
 

@@ -11,7 +11,7 @@
 import { readStoredHost } from "./auth/tokenStore.js";
 
 export interface CtConfig {
-  /** Base host, e.g. `https://eqrm.church.tools` (no trailing slash, no `/api`). */
+  /** Base host, e.g. `https://mychurch.church.tools` (no trailing slash, no `/api`). */
   host: string;
 }
 

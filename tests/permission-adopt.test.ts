@@ -5,7 +5,7 @@ import { desiredTuples } from "../src/permissions/plan.js";
 import type { Grant } from "../src/permissions/types.js";
 import type { State } from "../src/state/state.js";
 
-const HOST = "https://eqrm.church.tools";
+const HOST = "https://mychurch.church.tools";
 
 /** A state file with one managed group "kids" at id 99. */
 function stateWithKids(): State {
@@ -244,9 +244,10 @@ describe("emitAdoptedGrants", () => {
   });
 
   it("admin-authored member rights (authId >= 10000) are managed; system/inherited rows excluded (#65)", () => {
-    // eqrm prod, group_type_role 9 (/Struktur): admin-authored churchdb:+… MEMBER rights (authId >=
+    // prod, group_type_role 9 (/Struktur): admin-authored churchdb:+… MEMBER rights (authId >=
     // 10000, isInherited:false, modifiedPid != -1) that CT lets you write — verified live (24 such
-    // rows, modifiedPid 1/3891). They must be adopted as ACTIVE grants and round-trip to a no-op.
+    // rows, each with a real admin's modifiedPid). They must be adopted as ACTIVE grants and
+    // round-trip to a no-op.
     // The self-re-adding system baseline (modifiedPid === -1) and truly-inherited rows must be
     // EXCLUDED by normalizeActual and NEVER show up as `toDelete` (the #65 bug was "0 grant, 24 remove").
     // The reconciliation boundary is inheritance + system-baseline, NOT the authId — hence the

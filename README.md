@@ -169,9 +169,11 @@ ct apply --env prod    # protected env: type the env name to confirm
 | Repo | Contents |
 | --- | --- |
 | **`eqrm/ct-cli`** (this repo) | The tool: CLI, API client, plan/apply engine. Generic, reusable. |
-| **`eqrm/ct-structure`** | Equippers' actual desired-state config + state files. Depends on this tool. |
+| *your config repo* (private) | Your instance's desired-state config + state files. Depends on this tool. |
 
-Like Terraform, the tool never lives in the same repo as the infra config.
+Like Terraform, the tool never lives in the same repo as the infra config — the config
+repo holds an organisation's actual structure and stays private. This repo is the tool
+only; it carries no instance data.
 
 ## Documentation
 
@@ -207,3 +209,18 @@ guardrails → blueprints) are complete. Phase 6 — reproducible instances,
 environments, GitOps — is tracked in
 [#19](https://github.com/eqrm/ct-cli/issues/19); the overall design lives in
 [#1](https://github.com/eqrm/ct-cli/issues/1).
+
+Built against a real ChurchTools instance, so a fair amount of the value here is the
+written-down API archaeology — see [`docs/api-coverage.md`](docs/api-coverage.md) for
+which endpoints actually support which verbs, and
+[`docs/runbook-manual-surface.md`](docs/runbook-manual-surface.md) for what ChurchTools
+gives no API for at all.
+
+## Contributing
+
+Issues and PRs are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md). Security reports
+go through [private vulnerability reporting](SECURITY.md), not a public issue.
+
+## License
+
+[MIT](LICENSE). Not affiliated with or endorsed by ChurchTools.

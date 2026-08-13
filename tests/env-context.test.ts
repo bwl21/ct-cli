@@ -11,9 +11,9 @@ async function writeEnvs(): Promise<void> {
     envsPath,
     JSON.stringify({
       environments: {
-        dev: { host: "https://eqrm-dev.church.tools" },
+        dev: { host: "https://mychurch-dev.church.tools" },
         prod: {
-          host: "https://eqrm.church.tools",
+          host: "https://mychurch.church.tools",
           state: "custom-prod-state.json",
           protected: true,
           tokenEnv: "CT_PROD_TOKEN",
@@ -49,7 +49,7 @@ describe("prepareEnv with --env", () => {
     const env: NodeJS.ProcessEnv = { CT_ENVS: envsPath };
     const result = await prepareEnv({ env: "dev" }, env);
     expect(result).toEqual({ name: "dev", protected: false, statePath: "ct-state.dev.json" });
-    expect(env.CT_HOST).toBe("https://eqrm-dev.church.tools");
+    expect(env.CT_HOST).toBe("https://mychurch-dev.church.tools");
   });
 
   it("uses the profile state override and surfaces the protected flag", async () => {
@@ -61,7 +61,7 @@ describe("prepareEnv with --env", () => {
       protected: true,
       statePath: "custom-prod-state.json",
     });
-    expect(env.CT_HOST).toBe("https://eqrm.church.tools");
+    expect(env.CT_HOST).toBe("https://mychurch.church.tools");
   });
 
   it("copies the profile's tokenEnv value into CT_LOGINTOKEN (CI path) when present", async () => {

@@ -14,8 +14,8 @@ import {
   resetKeychainCache,
 } from "../src/auth/tokenStore.js";
 
-const DEV = "https://eqrm-dev.church.tools";
-const PROD = "https://eqrm.church.tools";
+const DEV = "https://mychurch-dev.church.tools";
+const PROD = "https://mychurch.church.tools";
 
 /** Model a keychain as account → stored blob; wire the `security` CLI mock to read/write it. */
 function mockKeychain(store: Map<string, string>): void {

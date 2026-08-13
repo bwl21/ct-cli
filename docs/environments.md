@@ -1,6 +1,6 @@
 # Environments (dev → prod promotion)
 
-One config repo can drive several ChurchTools instances — e.g. an `eqrm-dev`
+One config repo can drive several ChurchTools instances — e.g. a `dev`
 rehearsal env and the real `prod` — Terraform-workspace-style, with **no file
 edits** when switching.
 
@@ -12,9 +12,9 @@ path; override with `CT_ENVS`):
 ```json
 {
   "environments": {
-    "dev": { "host": "https://eqrm-dev.church.tools" },
+    "dev": { "host": "https://mychurch-dev.church.tools" },
     "prod": {
-      "host": "https://eqrm.church.tools",
+      "host": "https://mychurch.church.tools",
       "state": "ct-state.prod.json",
       "protected": true,
       "tokenEnv": "CT_PROD_TOKEN"

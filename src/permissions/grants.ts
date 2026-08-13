@@ -18,7 +18,7 @@ export type DomainType = "group_role" | "group_type_role" | "status";
 // gated declaration/adoption/diff on the authId. That was too broad — it also excluded the
 // admin-authored `authId >= 10000` group-member rights (e.g. "Add group members" 10107) that CT DOES
 // let you write on a group_type_role domain and that Equippers prod actually curates. Verified live
-// on eqrm prod `group_type_role/9`: 24 such rows carry `isInherited:false` and `modifiedPid` 1/3891.
+// on prod `group_type_role/9`: 24 such rows carry `isInherited:false` and a real admin's `modifiedPid`.
 // The real, verified boundary is inheritance + system-baseline, which normalizeActual already
 // enforces on every path that reads actuals — the #65 no-op guarantee holds without the authId cutoff.)
 

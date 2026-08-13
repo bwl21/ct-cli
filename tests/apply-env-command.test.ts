@@ -43,8 +43,8 @@ vi.mock("../src/engine/backup.js", () => ({ writeBackup: vi.fn(async () => "back
 const { applyCommand } = await import("../src/commands/apply.js");
 const { saveState, emptyState } = await import("../src/state/state.js");
 
-const DEV = "https://eqrm-dev.church.tools";
-const PROD = "https://eqrm.church.tools";
+const DEV = "https://mychurch-dev.church.tools";
+const PROD = "https://mychurch.church.tools";
 const envsPath = join(tmpdir(), `ct-cli-applyenv-envs-${process.pid}.json`);
 const devState = join(tmpdir(), `ct-cli-applyenv-dev-${process.pid}.json`);
 const prodState = join(tmpdir(), `ct-cli-applyenv-prod-${process.pid}.json`);

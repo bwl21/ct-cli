@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { emptyState, loadState, saveState, upsert, findByTypeId, isManaged } from "../src/state/state.js";
 
-const HOST = "https://eqrm.church.tools";
+const HOST = "https://mychurch.church.tools";
 const NOW = "2026-07-07T00:00:00.000Z";
 const LATER = "2026-07-08T00:00:00.000Z";
 

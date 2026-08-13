@@ -1,5 +1,4 @@
-# Mini config for ct-cli's section of the Handbuch (#89, publishing contract in
-# eqrm/churchtools-connector#1114).
+# Mini config for ct-cli's section of a wider ChurchTools Handbuch (#89).
 #
 # A page publishes only if it lives under docs/handbuch/ and is reachable from this
 # nav — everything else in docs/ (api-coverage.md, group-field-decisions.md,
@@ -7,7 +6,7 @@
 # developer- and operator-facing material, not reader-facing reference.
 #
 # These pages are the GENERIC ChurchTools reference — how ChurchTools' own group,
-# permission and dynamic-group model actually works — as opposed to eqrm/ct-structure's
+# permission and dynamic-group model actually works — as opposed to a config repo's
 # docs/, which describe one specific instance. That is why they belong in the Handbuch's
 # "ChurchTools-Grundlagen" section rather than in this repo's README.
 #
@@ -17,8 +16,8 @@
 # least match the page text while the mismatch stands.
 #
 # Built standalone via `mkdocs build -f docs/handbuch/mkdocs.yml --strict`;
-# eqrm/churchtools-connector#1115 replaces that with an `!include` from the root config
-# once mkdocs-monorepo-plugin exists.
+# the consuming site replaces that with an `!include` from its root config once
+# mkdocs-monorepo-plugin exists.
 site_name: ct-cli — ChurchTools-Grundlagen
 site_description: Generic ChurchTools reference — permissions, dynamic groups, field definitions, blueprints
 docs_dir: .

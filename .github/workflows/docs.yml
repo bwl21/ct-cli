@@ -1,19 +1,23 @@
 name: Docs
 
 # Two gates over docs/handbuch/ — the section published into the Handbuch's
-# "ChurchTools-Grundlagen" (#89, publishing contract in eqrm/churchtools-connector#1114):
+# "ChurchTools-Grundlagen" (#89):
 #
 # 1. `build` — mkdocs --strict, so a broken link or a page missing from the nav fails
 #    the PR here rather than silently in the consuming site build.
-# 2. `staleness` — the estate-wide reusable checker (eqrm/churchtools-connector#1120).
-#    It reads each page's `sources:` globs and fails a PR that changes documented code
-#    without re-signing the page. The single implementation lives in the connector repo
-#    on purpose: reimplementing it per language would give us four subtly different gates.
+# 2. `staleness` — reads each page's `sources:` globs and fails a PR that changes
+#    documented code without re-signing the page.
+#
+# The staleness checker is vendored at .github/scripts/docs-staleness.mjs rather than
+# called as the estate-wide reusable workflow: this repo is public and a public repo
+# cannot call a reusable workflow out of a private one. It is a verified port of the
+# canonical `App\Services\Docs\SourcesHasher` and reproduces the hashes that signer
+# wrote, so pages stay signable from either side.
 #
 # Re-signing a page means recomputing `sources_hash` over its `sources:` — a sha256 over
-# each resolved file's `<relative-path>\0<contents>\0`, sorted, truncated to 16 hex chars
-# (see the connector's `App\Services\Docs\SourcesHasher`). Bumping `reviewed:` alone does
-# NOT satisfy the gate; the point is that someone re-read the page against the new code.
+# each resolved file's `<relative-path>\0<contents>\0`, sorted, truncated to 16 hex chars.
+# Bumping `reviewed:` alone does NOT satisfy the gate; the point is that someone re-read
+# the page against the new code.
 
 on:
   push:
@@ -22,11 +26,13 @@ on:
       - "docs/handbuch/**"
       - "src/**"
       - ".github/workflows/docs.yml"
+      - ".github/scripts/docs-staleness.mjs"
   pull_request:
     paths:
       - "docs/handbuch/**"
       - "src/**"
       - ".github/workflows/docs.yml"
+      - ".github/scripts/docs-staleness.mjs"
 
 permissions:
   contents: read
@@ -47,7 +53,11 @@ jobs:
   # `src/**` changed without the matching page re-signed → this fails. Signing is the
   # acknowledgement, not the file appearing in the diff.
   staleness:
-    uses: eqrm/churchtools-connector/.github/workflows/docs-staleness.yml@main
-    with:
-      docs-path: docs/handbuch
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check that documented sources are re-signed
+        run: node .github/scripts/docs-staleness.mjs

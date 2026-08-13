@@ -16,7 +16,7 @@ vi.mock("../src/api/session.js", () => ({
 
 const { adoptCommand } = await import("../src/commands/adopt.js");
 
-const HOST = "https://eqrm.church.tools";
+const HOST = "https://mychurch.church.tools";
 const originalHost = process.env.CT_HOST;
 
 async function run(args: string[]): Promise<void> {

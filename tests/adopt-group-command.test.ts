@@ -113,7 +113,7 @@ const { adoptCommand } = await import("../src/commands/adopt.js");
 const { loadState } = await import("../src/state/state.js");
 const { loadConfig } = await import("../src/config/load.js");
 
-const HOST = "https://eqrm.church.tools";
+const HOST = "https://mychurch.church.tools";
 const originalHost = process.env.CT_HOST;
 const originalCwd = process.cwd();
 

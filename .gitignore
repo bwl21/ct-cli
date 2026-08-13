@@ -8,7 +8,7 @@ dist/
 .env.*
 !.env.example
 
-# Local ChurchTools state / adopted config (belongs in eqrm/ct-structure, never here)
+# Local ChurchTools state / adopted config (belongs in your config repo, never here)
 *.ctstate.json
 ct-state.json
 

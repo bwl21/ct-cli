@@ -14,7 +14,7 @@ const { adoptCommand } = await import("../src/commands/adopt.js");
 const { loadState } = await import("../src/state/state.js");
 
 const statePath = join(tmpdir(), `ct-cli-adopt-${process.pid}.json`);
-const HOST = "https://eqrm.church.tools";
+const HOST = "https://mychurch.church.tools";
 
 async function runAdopt(args: string[]): Promise<void> {
   await adoptCommand().parseAsync(args, { from: "user" });

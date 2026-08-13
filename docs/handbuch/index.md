@@ -22,9 +22,9 @@ each page marks explicitly what was **verified** and what is still an
 
 | Layer | Repo | Example |
 | --- | --- | --- |
-| **Generic ChurchTools behaviour** | `eqrm/ct-cli` `docs/handbuch/` (these pages) | "A `group_type_role` grant reaches every group of that type" |
-| **This instance's structure** | `eqrm/ct-structure` `docs/` | "Which Bereiche exist at Equippers and why" |
-| **Connector-specific how-tos** | `eqrm/churchtools-connector` Handbuch | "How to run check-in" |
+| **Generic ChurchTools behaviour** | `ct-cli` `docs/handbuch/` (these pages) | "A `group_type_role` grant reaches every group of that type" |
+| **One instance's structure** | that organisation's private config repo, `docs/` | "Which Bereiche exist here and why" |
+| **Tool-specific how-tos** | the relevant tool's own Handbuch | "How to run check-in" |
 
 ## The pages
 
