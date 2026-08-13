@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { emitAdoptedGrants } from "../src/permissions/adopt.js";
 import { diffGrants, normalizeActual, type DomainType, type RawPermission } from "../src/permissions/grants.js";
 import { desiredTuples } from "../src/permissions/plan.js";
-import type { Grant } from "../src/permissions/types.js";
+import { resolveScopeRefs } from "../src/permissions/scope.js";
+import { Resolver } from "../src/resolve/resolver.js";
+import type { Grant, ScopeEntry } from "../src/permissions/types.js";
 import type { State } from "../src/state/state.js";
 
 const HOST = "https://mychurch.church.tools";
@@ -20,6 +22,11 @@ function stateWithKids(): State {
 
 function emptyState(): State {
   return { version: 1, host: HOST, resources: {} };
+}
+
+/** A client whose master-data catalogs are empty — every emitted ref must resolve from state. */
+function catalogClient() {
+  return { get: async <T>(): Promise<T> => [] as T };
 }
 
 /**
@@ -42,7 +49,10 @@ function parseEmittedGrants(block: string): Grant[] {
     }
     const m = /^\{ right: ("(?:[^"\\]|\\.)*"), scope: \[(.*)\] \}$/.exec(entry);
     if (!m?.[1] || m[2] == null) throw new Error(`Unparseable emitted grant line: ${line}`);
-    grants.push({ right: JSON.parse(m[1]) as string, scope: JSON.parse(`[${m[2]}]`) as (string | number)[] });
+    // Scope entries are JSON except for a typed logical ref (#98), whose object key is an unquoted
+    // TS identifier (`{ campus: "koblenz" }`) — quote it so the whole array parses as JSON.
+    const scopeJson = m[2].replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3');
+    grants.push({ right: JSON.parse(m[1]) as string, scope: JSON.parse(`[${scopeJson}]`) as ScopeEntry[] });
   }
   return grants;
 }
@@ -290,9 +300,91 @@ describe("emitAdoptedGrants", () => {
     expect(block).toContain("ct adopt group 777");
   });
 
-  it("round trip — every emitted grant passes the real desiredTuples, for any mix of rows", () => {
+  it("campus-dimension scope whose dataId is a MANAGED campus → emits a logical ref, not a number (#98)", () => {
+    // churchdb:view station (authId 124) scopes by cdb_station. Campus ids are host-specific, so an
+    // adopted numeric literal is a misgrant when the block is replayed on the other instance.
     const state = stateWithKids();
+    state.resources.koblenz = { type: "campus", id: 23, key: "koblenz", fields: {}, adoptedAt: "t", updatedAt: "t" };
     const rows: RawPermission[] = [
+      { authId: 124, dataId: 23, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state });
+
+    expect(block).toContain('{ right: "churchdb:view station", scope: [{ campus: "koblenz" }] }');
+    expect(block).not.toContain("scope: [23]");
+    expect(block).not.toContain("WARNING");
+  });
+
+  it("campus-dimension scope on an UNMANAGED campus stays numeric with a NOTE, and is still applicable (#98)", () => {
+    const rows: RawPermission[] = [
+      { authId: 124, dataId: 23, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
+
+    expect(block).toContain('{ right: "churchdb:view station", scope: [23] }');
+    expect(block).toContain("ct adopt campus 23");
+    // A NOTE, not a WARNING: the numeric line IS valid config, just not portable — nothing is at
+    // risk of being revoked, so the block-level "will REVOKE" header must stay off.
+    expect(block).not.toContain("WARNING");
+    expect(block).not.toContain("REVOKE");
+  });
+
+  it("mixes managed (logical) and unmanaged (numeric) campus scopes in one grant", () => {
+    const state = emptyState();
+    state.resources.koblenz = { type: "campus", id: 23, key: "koblenz", fields: {}, adoptedAt: "t", updatedAt: "t" };
+    const rows: RawPermission[] = [
+      { authId: 124, dataId: 23, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+      { authId: 124, dataId: 99, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state });
+    expect(block).toContain('scope: [{ campus: "koblenz" }, 99]');
+  });
+
+  it("a catalog-only dimension gets ONE note — the portable form, not the 'not a group' line", () => {
+    const rows: RawPermission[] = [
+      { authId: 102, dataId: 4, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cdb_bereich
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
+
+    expect(block).toContain('Portable form: { department: "<name>" }');
+    // The numeric-escape-hatch line is for dimensions with NO logical form; emitting it here too
+    // would contradict the portable-form note directly above it.
+    expect(block).not.toContain("not a group");
+    expect(block).toContain('{ right: "churchdb:view alldata", scope: [4] }');
+  });
+
+  it("a dimension with no logical form still gets the numeric-escape-hatch note", () => {
+    const rows: RawPermission[] = [
+      { authId: 125, dataId: 2, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cc_securitylevel
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
+    expect(block).toContain("not a group");
+    expect(block).not.toContain("Portable form");
+  });
+
+  it("names EVERY unmanaged dataId in the adopt hint, not just the first", () => {
+    const rows: RawPermission[] = [
+      { authId: 124, dataId: 23, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+      { authId: 124, dataId: 99, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+      { authId: 124, dataId: 101, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
+    for (const id of [23, 99, 101]) {
+      expect(block).toContain(`ct adopt campus ${id}`);
+    }
+  });
+
+  it("round trip — every emitted grant passes the real desiredTuples, for any mix of rows", async () => {
+    const state = stateWithKids();
+    // A managed campus, so the fixture also covers the #98 typed-ref emission form (`{ campus: … }`)
+    // — without it the round-trip property was only ever exercised on group/numeric scopes, and the
+    // one shape that needs a pre-resolved ScopeRefMap went unchecked.
+    state.resources.koblenz = { type: "campus", id: 23, key: "koblenz", fields: {}, adoptedAt: "t", updatedAt: "t" };
+    const rows: RawPermission[] = [
+      { authId: 124, dataId: 23, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cdb_station, managed → { campus: … }
+      { authId: 124, dataId: 777, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cdb_station, unmanaged → numeric
+      { authId: 102, dataId: 4, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cdb_bereich (catalog-only) → numeric
+      { authId: 125, dataId: 2, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cc_securitylevel (no logical form) → numeric
       { authId: 1, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // known unscoped
       { authId: 1, dataId: 55, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // unscoped w/ dataId (stale catalog)
       { authId: 1104, dataId: 99, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // scoped, managed
@@ -308,9 +400,18 @@ describe("emitAdoptedGrants", () => {
       const block = emitAdoptedGrants({ domainType, domainId: 42, rows, state });
       const grants = parseEmittedGrants(block);
       expect(grants.length).toBeGreaterThan(0); // the property is not vacuous
-      expect(() =>
-        desiredTuples({ key: "adopted", domainType, domainId: 42, grants }, state),
-      ).not.toThrow();
+      const permission = { key: "adopted", domainType, domainId: 42, grants };
+      // The invariant is "passes desiredTuples GIVEN the plan's pre-resolution pass" — a typed scope
+      // ref must be resolved first (buildPermissionPlan always does this), so run the real
+      // resolveScopeRefs here rather than asserting against an empty map.
+      const resolver = new Resolver({ client: catalogClient(), state, desired: [] });
+      const refs = await resolveScopeRefs([permission], resolver, state);
+      expect(() => desiredTuples(permission, state, new Set(), refs)).not.toThrow();
+      // …and the emitted campus ref really did resolve to this host's managed campus id.
+      const campusTuple = desiredTuples(permission, state, new Set(), refs).find(
+        (t) => t.authId === 124 && t.dataId.includes(23),
+      );
+      expect(campusTuple).toBeDefined();
     }
   });
 });

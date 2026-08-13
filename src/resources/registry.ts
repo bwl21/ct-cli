@@ -35,6 +35,16 @@ export interface AdoptableResource {
    */
   createDefaults?: (body: Record<string, unknown>) => Record<string, unknown>;
   /**
+   * Extra teardown risk for this type, shown before `ct destroy` confirms — and, when set, `--force`
+   * does NOT skip the typed confirmation for a run touching it (#99 review).
+   *
+   * Set it only where the DELETE reaches past master data into records this tool otherwise never
+   * touches. `assertNotPeople` guards PATHS, and a type like `person-status` has a perfectly
+   * innocent one (`/statuses/{id}`) while its deletion still mutates every person carrying that
+   * status — a gap no path denylist can close.
+   */
+  destroyWarning?: string;
+  /**
    * DSL function name `configSnippet` emits for this type. Defaults to the camelCase of
    * the type name. Set it when the natural camelCase collides with another DSL surface
    * (e.g. `group-role` → `roleDefinition`, because `groupRole` is the permission function).
@@ -184,6 +194,53 @@ export const RESOURCES: Record<string, AdoptableResource> = {
       nameTranslated: r.nameTranslated,
       degreeNameA: r.degreeNameA,
       degreeNameB: r.degreeNameB,
+    }),
+  }),
+  /**
+   * PERSON statuses (`/statuses` — "0 - First", "3 - Group Active", …), the domain of a `ct.status`
+   * permission declaration (#90). Adoptable so a config that grants ON a status is self-sufficient
+   * across hosts (#96): before this entry the status itself could only be created by hand on every
+   * target instance, which made the whole `status` domain only half-portable — the grant was
+   * declarable, the thing it hangs off was not.
+   *
+   * Not a people surface: a status is master data (the enumeration), never a person or a membership.
+   * `assertNotPeople` still guards every write; `/statuses` does not match its denylist by design.
+   *
+   * The managed set is the WHOLE required PUT contract, deliberately — and this is the one managed
+   * type where a minimal field set would be actively wrong. Live-probed against the instance's own
+   * OpenAPI spec (eqrm prod, CT 3.135.2, 2026-08-13):
+   *
+   *   POST /statuses       required: name, shorty, isMember
+   *   PUT  /statuses/{id}  required: name, shorty, isMember, isSearchable, sortKey, securityLevelId
+   *
+   * That PUT is a FULL REPLACE, and the executor sends the declared field bag as the update body —
+   * so managing a subset would both 400 (missing required fields) and, if it didn't, blank the
+   * fields left out. Every other managed type's PUT has no required fields at all (campus,
+   * age-group, target-group, group-role, group-type — same probe), which is why they can manage a
+   * narrow set; `/statuses` cannot. Hence: no `createDefaults` here. All six are declared, adopted
+   * and diffed, so `ct adopt person-status <id>` emits a config that is valid for both verbs.
+   * A hand-authored declaration that omits one gets CT's own HTTP 400 (#71), never a silent blank.
+   */
+  "person-status": define({
+    collectionPath: "/statuses",
+    updateMethod: "PUT",
+    tier: 0,
+    // The one managed type whose DELETE reaches person RECORDS (#99 review). `/statuses/{id}` is not
+    // a people path, so `assertNotPeople` cannot see the risk: deleting a status makes ChurchTools
+    // re-stamp every person who carries it. Drop the declaration and `ct destroy` would otherwise
+    // take it out behind a plain typed confirmation — or none at all under `--force`.
+    destroyWarning:
+      "deleting a person status MUTATES every person carrying it (ChurchTools re-stamps their " +
+      "status). `ct` never manages people, but this delete reaches them. Verify the status is " +
+      "unused first (`ct get statuses`, then check the status in ChurchTools).",
+    deriveKey: (r) => slug(str(r, "name")),
+    managedFields: (r) => ({
+      name: r.name,
+      shorty: r.shorty,
+      isMember: r.isMember,
+      isSearchable: r.isSearchable,
+      sortKey: r.sortKey,
+      securityLevelId: r.securityLevelId,
     }),
   }),
   "group-role": define({
