@@ -12,7 +12,11 @@ import type { PermissionPlanItem } from "./plan.js";
 import type { GrantTuple } from "./grants.js";
 import { reresolveTuple } from "./scope.js";
 import { pendingRef, refLabel } from "../resolve/refs.js";
-import { reresolvePendingValue } from "../resolve/resolver.js";
+import {
+  reresolvePendingValue,
+  resolvePendingGroupRoleDomain,
+  type GroupRoleRowCache,
+} from "../resolve/resolver.js";
 import { formatError } from "../ui.js";
 
 /** How many permission tuples to write at once. Tuples are independent rows, so a modest fan-out is safe. */
@@ -65,17 +69,18 @@ export interface PermissionApplyResult {
  */
 export async function applyPermissionPlan(
   items: PermissionPlanItem[],
-  client: Pick<CtClient, "request">,
+  client: Pick<CtClient, "request"> & Partial<Pick<CtClient, "get" | "getAll">>,
   state?: State,
 ): Promise<PermissionApplyResult> {
   const ops: WriteOp[] = [];
+  /** Shared across items so several pending group_role domains on one group cost a single fetch. */
+  const roleLists: GroupRoleRowCache = new Map();
   // Concurrent writes are race-free only because evaluateConfig rejects two declarations targeting
   // the same (domainType, domainId) — so all ops for a path come from ONE item's disjoint diff.
   // Programmatic callers bypassing evaluateConfig must uphold that invariant themselves.
   for (const item of items) {
-    // A pending domain (#69) is a group type created THIS run: its numeric id is only known after
-    // executePlan, so re-resolve it against the POST-execute state now — reusing the SAME machinery
-    // that re-resolves resource pending refs (reresolvePendingValue). Requires `state`: a pending
+    // A pending domain (#69) names a resource created THIS run: its numeric id is only known after
+    // executePlan, so complete it against the POST-execute state now. Requires `state`: a pending
     // domain can never be applied statelessly.
     let domainId = item.domainId;
     if (item.pendingDomain) {
@@ -85,7 +90,30 @@ export async function applyPermissionPlan(
             `without post-execute state — it names a resource created in the same run.`,
         );
       }
-      domainId = reresolvePendingValue(pendingRef(item.pendingDomain), state) as number;
+      const site = `${item.domainType} "${item.key}".domainId`;
+      if (item.pendingDomain.kind === "group-role") {
+        // The one pending domain a state lookup cannot finish (#106): a (group, role) PAIRING id is
+        // not the group's id — it lives on the freshly created group's own role list, so completing
+        // it takes a live fetch. Needs a reading client; the real CtClient always has one, and the
+        // failure mode if a caller passes a write-only double is a clear error, not a wrong domain.
+        if (!client.get) {
+          throw new Error(
+            `Pending permission domain ${refLabel(item.pendingDomain)} ("${item.key}") needs to read ` +
+              `the created group's role list, but this client cannot GET. Pass a full CtClient.`,
+          );
+        }
+        domainId = await resolvePendingGroupRoleDomain(
+          item.pendingDomain,
+          state,
+          { get: client.get, getAll: client.getAll },
+          site,
+          roleLists,
+        );
+      } else {
+        // Every other pending domain (group type, person status) IS its resource's own id, so the
+        // SAME machinery that re-resolves resource pending refs finishes it from state alone.
+        domainId = reresolvePendingValue(pendingRef(item.pendingDomain), state) as number;
+      }
     }
     const path = `/permissions/${item.domainType}/${domainId}`;
     assertNotPeople(path);

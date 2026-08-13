@@ -81,6 +81,12 @@ const CATALOG_PATH: Partial<Record<RefKind, string>> = {
   // eqrm prod, CT 3.135.2, 2026-08-13), so a department is resolvable by name on every host yet can
   // never be declared, adopted or created. Rows carry {id, name, nameTranslated, sortKey, shorty}.
   department: "/departments",
+  // Security levels — the `cc_securitylevel` scope dimension (#110). `GET /securitylevels` returns a
+  // flat `[{id, name, sortKey}]` array ("Stufe 1 (Niedrig)" … "Stufe 4 (Sehr hoch)"), live-verified on
+  // eqrm prod, CT 3.135.2, 2026-08-13. Catalog-only, like departments: `ct` resolves a level by name
+  // but never creates one. It exists because the ids are NOT a protocol constant — `cc_securitylevel`
+  // is an editable master-data table, so a hard-coded `scope: [1, 2, 3]` is portable only by convention.
+  "security-level": "/securitylevels",
   "group-type": "/group/grouptypes",
   // PERSON statuses — the domain of a `status` permission declaration (#90). Unlike GROUP statuses
   // (see the note above), these DO have a flat REST catalog: `GET /statuses` returns
@@ -139,6 +145,23 @@ export interface ResolverDeps {
 const GROUP_ROLE_ENDPOINT = (groupId: number): string => `/groups/${groupId}/roles`;
 const GROUP_ROLE_PAIRING_FIELD = "id";
 
+/** Options for one {@link Resolver.resolve} call — what the CALLING POSITION can cope with. */
+export interface ResolveOptions {
+  /**
+   * Allow a `group-role` ref whose group is declared-but-not-yet-created to resolve to a
+   * {@link PendingRef} instead of hard-erroring (#106).
+   *
+   * Off by default, and deliberately opt-in per call site rather than global: a pending group-role
+   * cannot be finished by {@link reresolvePendingValue} the way every other pending ref can — the
+   * pairing id lives on `GET /groups/{id}/roles`, so completing it needs a LIVE FETCH after the group
+   * exists. Only the permission-domain position can do that (`applyPermissionPlan` runs after
+   * `executePlan` and holds a client), so only `resolveDomainIds` passes this. Every other position
+   * (resource id fields, query `var` values) keeps the old fail-fast error, which is still the right
+   * answer there.
+   */
+  pendingGroupRole?: boolean;
+}
+
 export class Resolver {
   private readonly client: Pick<CtClient, "get"> & Partial<Pick<CtClient, "getAll">>;
   private readonly state: State;
@@ -164,8 +187,8 @@ export class Resolver {
   }
 
   /** Resolve one Ref to a numeric id, or a {@link PendingRef} for a same-run-created managed target. */
-  async resolve(r: Ref, site: string): Promise<number | PendingRef> {
-    if (r.kind === "group-role") return this.resolveGroupRole(r, site);
+  async resolve(r: Ref, site: string, opts: ResolveOptions = {}): Promise<number | PendingRef> {
+    if (r.kind === "group-role") return this.resolveGroupRole(r, site, opts);
     if (r.kind === "group-type-role") return this.resolveGroupTypeRole(r, site);
     // (1) managed desired ∪ state by logical key
     const type = REF_KIND_TYPE[r.kind];
@@ -236,43 +259,24 @@ export class Resolver {
   /**
    * Resolve a `group_role` domain by its (group, role) pair to the numeric pairing domainId (#25).
    * See the VERIFIED LIVE block above the {@link GROUP_ROLE_ENDPOINT} constant for the model this
-   * implements and the evidence for it. Returns a number — never a {@link PendingRef}: the pairing id only exists
-   * once the group does, so a same-run-declared (not-yet-created) group is a hard error here (its id
-   * cannot be known at plan time), telling the author to apply the group first or pass a numeric id.
+   * implements and the evidence for it.
+   *
+   * Returns a number, EXCEPT when the group is declared in this config but not yet created AND the
+   * call site opted into {@link ResolveOptions.pendingGroupRole} (#106): then it returns a
+   * {@link PendingRef}, because the pairing id only exists once the group does. The permission-domain
+   * position takes that path — `applyPermissionPlan` finishes it with a live fetch after `executePlan`
+   * (see {@link resolvePendingGroupRoleDomain}). Everywhere else a same-run group stays a hard error,
+   * telling the author to apply the group first or pass a numeric id.
    */
-  private async resolveGroupRole(r: GroupRoleRef, site: string): Promise<number> {
-    const groupId = this.groupIdForRole(r, site);
+  private async resolveGroupRole(
+    r: GroupRoleRef,
+    site: string,
+    opts: ResolveOptions = {},
+  ): Promise<number | PendingRef> {
+    const groupId = this.groupIdForRole(r, site, opts);
+    if (typeof groupId !== "number") return groupId;
     const rows = await this.groupRoleList(groupId);
-    // slug-primary, exact-name secondary — identical matching to resolveFromCatalog, so a role named
-    // e.g. "Leiter" resolves whether the author writes "leiter" (slug) or "Leiter" (exact).
-    const bySlug = rows.filter((row) => typeof row.name === "string" && slug(row.name) === slug(r.role));
-    const matches = bySlug.length >= 1 ? bySlug : rows.filter((row) => row.name === r.role);
-    if (matches.length === 0) {
-      const available = rows
-        .map((row) => (typeof row.name === "string" ? JSON.stringify(row.name) : `#${row.id}`))
-        .join(", ");
-      throw new Error(
-        `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: group #${groupId} has ` +
-          `no role named "${r.role}"${available ? ` (available: ${available})` : ""}. Fix the role name, ` +
-          `or pass a numeric id.`,
-      );
-    }
-    if (matches.length > 1) {
-      const list = matches.map((c) => `${JSON.stringify(c.name)} (#${c.id})`).join(", ");
-      throw new Error(
-        `Ambiguous ${refLabel(r)} referenced at ${site} on ${this.host}: ${matches.length} roles on ` +
-          `group #${groupId} match — ${list}. Rename to disambiguate, or pass a numeric id.`,
-      );
-    }
-    const domainId = matches[0]![GROUP_ROLE_PAIRING_FIELD];
-    if (typeof domainId !== "number") {
-      throw new Error(
-        `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: the matched role row ` +
-          `carries no numeric "${GROUP_ROLE_PAIRING_FIELD}" (the assumed pairing domainId — see #25). ` +
-          `Pass a numeric id.`,
-      );
-    }
-    return domainId;
+    return pickGroupRolePairingId(rows, r, groupId, site, this.host);
   }
 
   /**
@@ -332,11 +336,16 @@ export class Resolver {
     return resolved;
   }
 
-  /** Resolve the group half of a group_role ref to a managed group id (state ∪ declared). */
-  private groupIdForRole(r: GroupRoleRef, site: string): number {
+  /**
+   * Resolve the group half of a group_role ref to a managed group id (state ∪ declared). A group
+   * declared in this run resolves to a {@link PendingRef} when the call site can finish it later
+   * (#106) and stays a hard error otherwise.
+   */
+  private groupIdForRole(r: GroupRoleRef, site: string, opts: ResolveOptions): number | PendingRef {
     const managed = this.state.resources[r.group];
     if (managed && managed.type === "group") return managed.id;
     if (this.declaredByType.get("group")?.has(r.group)) {
+      if (opts.pendingGroupRole) return pendingRef(r);
       throw new Error(
         `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: group "${r.group}" is ` +
           `declared in this config but not yet created — its (group, role) pairing id only exists once ` +
@@ -352,13 +361,7 @@ export class Resolver {
   private groupRoleList(groupId: number): Promise<CatalogRecord[]> {
     let p = this.groupRoleLists.get(groupId);
     if (!p) {
-      // Paginated for the same reason as `catalog()` above: a group with more than CT's default page
-      // of roles would otherwise hide its later ones behind "group #N has no role named …".
-      const path = GROUP_ROLE_ENDPOINT(groupId);
-      const rows = this.client.getAll
-        ? this.client.getAll<CatalogRecord>(path).then((page) => page.data)
-        : this.client.get<CatalogRecord[]>(path);
-      p = rows.then((r) => (Array.isArray(r) ? r : []));
+      p = fetchGroupRoleRows(this.client, groupId);
       this.groupRoleLists.set(groupId, p);
     }
     return p;
@@ -378,15 +381,16 @@ export class Resolver {
     }
     const catalog = CATALOG_PATH[r.kind];
     // A catalog-only kind has no managed resource type, so "Declare/adopt it" is advice the tool
-    // cannot honour (#96's exact complaint about the old person-status message). Departments are
-    // read-only in ChurchTools — GET /departments exists, no write verb does — so the only real
-    // fixes are correcting the name or falling back to a numeric id.
+    // cannot honour (#96's exact complaint about the old person-status message). The message says
+    // what `ct` does — reads this catalog, never writes it — rather than claiming ChurchTools makes
+    // it impossible: departments and security levels ARE writable through the legacy master-data
+    // endpoint the admin UI uses, just not through anything `ct` drives today (#108/#109/#111).
     if (catalog && REF_KIND_TYPE[r.kind] === undefined) {
       return new Error(
         `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: no live ${r.kind} at ` +
-          `${catalog} matches key "${r.key}". ${r.kind}s are a read-only catalog in ChurchTools — they ` +
-          `cannot be declared or adopted, so fix the key/name (list them with \`ct get ${r.kind}s\`) or ` +
-          `use a numeric id.`,
+          `${catalog} matches key "${r.key}". ct reads ${r.kind}s but does not manage them, so it cannot ` +
+          `create this one — fix the key/name (list them with \`ct get ${r.kind}s\`), create it in the ` +
+          `ChurchTools admin UI, or use a numeric id.`,
       );
     }
     const where = catalog
@@ -405,6 +409,104 @@ export class Resolver {
         `${r.kind}s match — ${list}. Rename to disambiguate, or use a numeric id.`,
     );
   }
+}
+
+/** The client shape both the plan-time resolver and the apply-time group-role completion need. */
+type RoleListReader = Pick<CtClient, "get"> & Partial<Pick<CtClient, "getAll">>;
+
+/** Per-group role-list cache, so several pending group_role domains on one group share one fetch. */
+export type GroupRoleRowCache = Map<number, Promise<CatalogRecord[]>>;
+
+/**
+ * Read one group's role list. Paginated for the same reason as `Resolver.catalog()`: a group with
+ * more than CT's default page of roles would otherwise hide its later ones behind "group #N has no
+ * role named …". `getAll` is optional only so `{ get }` test doubles stay usable.
+ */
+function fetchGroupRoleRows(client: RoleListReader, groupId: number): Promise<CatalogRecord[]> {
+  const path = GROUP_ROLE_ENDPOINT(groupId);
+  const rows = client.getAll
+    ? client.getAll<CatalogRecord>(path).then((page) => page.data)
+    : client.get<CatalogRecord[]>(path);
+  return rows.then((r) => (Array.isArray(r) ? r : []));
+}
+
+/**
+ * Pick the (group, role) pairing domainId out of a group's role list. Shared by the plan-time path
+ * (group already exists) and the apply-time path (#106: group created in this run), so the matching
+ * rules and — importantly — the error messages are identical whichever side a config lands on.
+ * slug-primary, exact-name secondary, matching every other catalog lookup in this file.
+ */
+function pickGroupRolePairingId(
+  rows: CatalogRecord[],
+  r: GroupRoleRef,
+  groupId: number,
+  site: string,
+  host: string,
+): number {
+  const bySlug = rows.filter((row) => typeof row.name === "string" && slug(row.name) === slug(r.role));
+  const matches = bySlug.length >= 1 ? bySlug : rows.filter((row) => row.name === r.role);
+  if (matches.length === 0) {
+    const available = rows
+      .map((row) => (typeof row.name === "string" ? JSON.stringify(row.name) : `#${row.id}`))
+      .join(", ");
+    throw new Error(
+      `Cannot resolve ${refLabel(r)} referenced at ${site} on ${host}: group #${groupId} has ` +
+        `no role named "${r.role}"${available ? ` (available: ${available})` : ""}. Fix the role name, ` +
+        `or pass a numeric id.`,
+    );
+  }
+  if (matches.length > 1) {
+    const list = matches.map((c) => `${JSON.stringify(c.name)} (#${c.id})`).join(", ");
+    throw new Error(
+      `Ambiguous ${refLabel(r)} referenced at ${site} on ${host}: ${matches.length} roles on ` +
+        `group #${groupId} match — ${list}. Rename to disambiguate, or pass a numeric id.`,
+    );
+  }
+  const domainId = matches[0]![GROUP_ROLE_PAIRING_FIELD];
+  if (typeof domainId !== "number") {
+    throw new Error(
+      `Cannot resolve ${refLabel(r)} referenced at ${site} on ${host}: the matched role row ` +
+        `carries no numeric "${GROUP_ROLE_PAIRING_FIELD}" (the assumed pairing domainId — see #25). ` +
+        `Pass a numeric id.`,
+    );
+  }
+  return domainId;
+}
+
+/**
+ * Finish a PENDING `group_role` domain at apply time (#106).
+ *
+ * This is the one pending ref {@link reresolvePendingValue} cannot complete from state alone: the
+ * (group, role) pairing id is not the group's id, it lives on `GET /groups/{id}/roles` and only
+ * exists once ChurchTools has created the group. So completion is a two-step — look the freshly
+ * created group up in POST-execute state, then fetch ITS role list and match the declared role name —
+ * and it is necessarily async, which is why it sits here rather than in `reresolvePendingValue`.
+ *
+ * A role name the created group does not have is a hard error listing the available roles, exactly as
+ * at plan time (shared {@link pickGroupRolePairingId}). `cache` dedupes the fetch when several pending
+ * domains name the same group.
+ */
+export async function resolvePendingGroupRoleDomain(
+  r: GroupRoleRef,
+  state: State,
+  client: RoleListReader,
+  site: string,
+  cache?: GroupRoleRowCache,
+): Promise<number> {
+  const managed = state.resources[r.group];
+  if (!managed || managed.type !== "group") {
+    throw new Error(
+      `Pending ${refLabel(r)} did not resolve after apply — "${r.group}" is not a managed group in ` +
+        `state. The resource tier creates groups before permissions are applied, so this usually means ` +
+        `the group's create failed earlier in this run.`,
+    );
+  }
+  let rows = cache?.get(managed.id);
+  if (!rows) {
+    rows = fetchGroupRoleRows(client, managed.id);
+    cache?.set(managed.id, rows);
+  }
+  return pickGroupRolePairingId(await rows, r, managed.id, site, state.host);
 }
 
 /**
@@ -427,9 +529,15 @@ export function reresolvePendingValue(value: unknown, state: State): unknown {
 
 function pendingIdFromState(r: Ref, state: State): number {
   if (r.kind === "group-role") {
-    // A group_role ref resolves to a concrete pairing id at plan time (never a PendingRef — a
-    // same-run group is rejected up front), so a pending one should never reach apply.
-    throw new Error(`Pending ${refLabel(r)} reached apply — group_role refs never go pending (#25).`);
+    // A pending group_role IS legal now (#106), but it cannot be completed from state alone: the
+    // pairing id lives on GET /groups/{id}/roles, so it needs a live fetch. `applyPermissionPlan`
+    // routes it through `resolvePendingGroupRoleDomain` instead. Reaching HERE means a pending
+    // group-role turned up in a value-shaped position (a resource id field, a query var), which the
+    // resolver only ever produces for the permission-domain call site — so it is a wiring bug.
+    throw new Error(
+      `Pending ${refLabel(r)} reached the state-only re-resolver — a group_role pairing id needs a ` +
+        `live /groups/{id}/roles fetch, so it can only be completed by applyPermissionPlan (#106).`,
+    );
   }
   if (r.kind === "group-type-role") {
     // A group-type-role ref resolves to a concrete /group/roles id at plan time (the catalog id exists

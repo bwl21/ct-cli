@@ -5,7 +5,7 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: 050a604ccb2391c8
+sources_hash: e3b937247ebebc2a
 reviewed: 2026-08-13
 ---
 
@@ -57,9 +57,10 @@ reference or a numeric `id`:
   - `ct.groupRole` — `group: "<key>", role: "<name>"` resolves the (group,
     role) pair to its pairing domainId per host (#25), or `id: <domainId>`
     targets one directly. The group must be **managed** (declared via `ct.group`
-    or adopted into state) and already created — a same-run group is rejected
-    (its pairing id is only known once it exists; pass a numeric `id` there).
-    Declaring both a logical form and a numeric `id` is a conflict and throws.
+    or adopted into state); it need not exist on the host yet — a group declared
+    in the same config plans as a pending domain and is granted later in that same
+    `ct apply`, once it exists (#106). Declaring both a logical form and a numeric
+    `id` is a conflict and throws.
     See "domainId semantics" for how the pairing id is resolved.
   - `ct.status` — `personStatus: "<name>"` resolves against the live
     `/statuses` catalog per host, or `id: <statusId>` targets one directly.
@@ -255,14 +256,27 @@ handled as a **pending domain** rather than aborting the plan:
   genuine unresolvable) is reserved for references that resolve to **nothing**:
   a key absent from the config, state, and the live catalog (a typo).
 
-**`group_role` is deliberately NOT symmetric here.** A `group_role` domain id is
+**`group_role` behaves the same way since #106.** A `group_role` domain id is
 the (group, role) **pairing** id, which only exists on
-`GET /groups/{groupId}/roles` — re-resolving it needs a _live fetch_ after the
-group exists, not just a post-execute state lookup. So a `group_role` domain
-referencing a same-run-created **group** still fails fast with its own
-actionable message ("apply the group first, or pass a numeric id"). Its harder
-deferral is out of scope for #69 (which targets the #23 `group_type_role`
-scenario).
+`GET /groups/{groupId}/roles` — so completing it needs a _live fetch_ after the
+group exists, not just a post-execute state lookup. `ct apply` does exactly
+that: `executePlan` creates the group, then permission reconciliation reads the
+new group's own role list, matches the declared `role` name, and grants on the
+resulting pairing id — one run, no second merge.
+
+- `ct plan` renders the domain as
+  `<group-role(group=<key>, role=<name>) (created this apply)>`, the same
+  pending marker every other deferred reference uses.
+- A `role` name the created group turns out not to have is still a **hard
+  error**, listing the roles it does have — the same message you would get at
+  plan time on a host where the group already exists.
+- Nothing changes on a host where the group already exists: the domain resolves
+  to a concrete pairing id at plan time, exactly as before.
+
+Until #106 this was a hard error, and that made a config **non-portable by
+construction**: declaring a group and a grant on its own role planned clean on
+prod (where the group existed) and exited 1 on dev (where it did not), so one
+logical change had to be split across two merges.
 
 ## Scope resolution
 
@@ -321,12 +335,13 @@ ct.groupRole({
 `{ campus: "koblenz" }` is sugar for `ref.campus("koblenz")` — the same `Ref`
 the rest of the DSL uses — so both spellings are interchangeable.
 
-| `scopeField`     | Reference form                            | Resolved against                                   |
-| ---------------- | ----------------------------------------- | -------------------------------------------------- |
-| `cdb_gruppe`     | `{ group: "<key>" }` (or the bare string) | managed groups                                     |
-| `cdb_station`    | `{ campus: "<key>" }`                     | managed campuses, then `GET /campuses`             |
-| `cdb_gruppentyp` | `{ groupType: "<key>" }`                  | managed group types, then `GET /group/grouptypes`  |
-| `cdb_bereich`    | `{ department: "<name-slug>" }`           | `GET /departments` **only** — read-only, see below |
+| `scopeField`       | Reference form                            | Resolved against                                  |
+| ------------------ | ----------------------------------------- | ------------------------------------------------- |
+| `cdb_gruppe`       | `{ group: "<key>" }` (or the bare string) | managed groups                                    |
+| `cdb_station`      | `{ campus: "<key>" }`                     | managed campuses, then `GET /campuses`            |
+| `cdb_gruppentyp`   | `{ groupType: "<key>" }`                  | managed group types, then `GET /group/grouptypes` |
+| `cdb_bereich`      | `{ department: "<name-slug>" }`           | `GET /departments` **only** — see below           |
+| `cc_securitylevel` | `{ securityLevel: "<name-slug>" }`        | `GET /securitylevels` **only** — see below (#110) |
 
 **Why this matters:** campus ids are host-specific — Mainz is `0` on eqrm prod
 and `6` on eqrm dev. A campus-scoped grant written as a numeric literal is
@@ -347,37 +362,58 @@ Three things are hard errors at **plan** time, never a guessed `dataId`:
 
 - a reference whose dimension does not match the right's `scopeField` —
   e.g. `{ groupType: … }` on `churchdb:view station` (a `cdb_station` right);
-- a reference on a dimension that has **no** logical form (`cc_securitylevel`,
-  `ccm_data_category`, `oauth_client`, … — values that are not resources at
-  all) — the message points at the numeric escape hatch;
+- a reference on a dimension that has **no** logical form yet
+  (`cdb_comment_viewer`, `ccm_data_category`, `oauth_client`, … — values `ct`
+  has no host-independent way to name today) — the message points at the numeric
+  escape hatch;
 - a **bare string** on a non-group dimension. A string always means "managed
   group", so on e.g. a `cdb_station` right it would either fail confusingly or —
   worse — match an unrelated group that happens to carry that key.
 
-### Departments are referenceable, never declarable
+### Departments and security levels: referenceable, not declarable
 
-`cdb_bereich` (Bereiche) is the one dimension with a **read-only** catalog.
-Live-probed against the instance's own OpenAPI spec (eqrm prod, CT 3.135.2,
-2026-08-13): `GET /departments` exists, and **no** `POST`/`PUT`/`DELETE` on
-`/departments` does.
+`cdb_bereich` (Bereiche) and `cc_securitylevel` (Sicherheitslevel) are the two
+dimensions `ct` **reads but does not manage**. Neither has a REST write verb —
+live-probed against the instance's own OpenAPI spec (eqrm prod, CT 3.135.2,
+2026-08-13): `GET /departments` and `GET /securitylevels` exist; no
+`POST`/`PUT`/`DELETE` on either does.
 
-So a department reference resolves by name on every host — which is what makes
-`churchdb:view alldata` ("Personen eines Bereiches sehen") declarable at all —
-but there is no `ct.department` resource, no `ct adopt department`, and a name
-that matches nothing is a **hard error** rather than a create:
+That is a fact about the REST API and about what this tool drives — **not** a
+claim that ChurchTools cannot create them. Both are rows in CT's editable
+master-data registry, which the admin UI writes through a legacy endpoint that
+appears in no OpenAPI spec. Making them declarable is tracked in
+[#108](https://github.com/eqrm/ct-cli/issues/108) /
+[#109](https://github.com/eqrm/ct-cli/issues/109).
+
+So a reference of either kind resolves by name on every host — which is what
+makes `churchdb:view alldata` ("Personen eines Bereiches sehen") and
+`churchdb:+see persons` declarable at all — but there is no `ct.department` /
+`ct.securityLevel` resource, no `ct adopt` for them, and a name that matches
+nothing is a **hard error** rather than a create:
 
 ```
 Cannot resolve department:nope referenced at … : no live department at
-/departments matches key "nope". departments are a read-only catalog in
-ChurchTools — they cannot be declared or adopted, so fix the key/name
-(list them with `ct get departments`) or use a numeric id.
+/departments matches key "nope". ct reads departments but does not manage
+them, so it cannot create this one — fix the key/name (list them with
+`ct get departments`), create it in the ChurchTools admin UI, or use a
+numeric id.
 ```
 
-Discover the names with `ct get departments`. Because the id always comes from
-the live catalog, a department scope is never "pending" and is never re-resolved
-at apply time — it is host-correct the moment it resolves. A managed resource
-that happens to share the key does **not** shadow it (that would be exactly the
-misgrant this feature exists to prevent).
+Discover the names with `ct get departments` / `ct get security-levels`. Because
+the id always comes from the live catalog, such a scope is never "pending" and is
+never re-resolved at apply time — it is host-correct the moment it resolves. A
+managed resource that happens to share the key does **not** shadow it (that would
+be exactly the misgrant this feature exists to prevent).
+
+**Why security levels got a reference form (#110).** They were previously treated
+as _numeric-universal_: `scope: [1, 2, 3]` was considered portable because the ids
+"mean the same thing on every instance". They do — by convention. `cc_securitylevel`
+is an admin-editable master-data table with an auto-increment id and a `sortkey`,
+so someone adding or reordering a level on one host silently changes what a
+hard-coded `[1, 2, 3]` grants there, with a green plan. Numerics still work
+everywhere; the trade-off is that level names are localised German strings
+(`"Stufe 3 (Hoch)"` → `stufe_3_hoch`), so a **rename** breaks a reference where a
+number would have survived. Pick per config which risk you would rather carry.
 
 ### Numeric scope escape hatch (#49)
 
@@ -392,9 +428,13 @@ e.g.:
 "cc_securitylevel"`
 
 For these, a `dataId` like `1`, `2`, `3` names a security level or a
-comment-viewer bucket — **not** a group — so `GET /groups/{1,2,3}` 404s and
-there is no logical/managed key to reference it by. A `scope` array entry may
-therefore be a plain number instead of a string:
+comment-viewer bucket — **not** a group — so `GET /groups/{1,2,3}` 404s. A
+`scope` array entry may therefore be a plain number instead of a string:
+
+(Security levels gained a name-based form in #110 — see
+[Departments and security levels](#departments-and-security-levels-referenceable-not-declarable).
+Numerics keep working there; `cdb_comment_viewer` and friends still have nothing
+but numerics.)
 
 ```ts
 { right: "churchdb:security level view own data", scope: [1, 2, 3, 5] },
@@ -487,7 +527,12 @@ to be accepted by `ct plan` (the round trip is locked by tests):
     clearly-marked placeholder comment telling you to `ct adopt group <id>`
     first — scope keys must be state keys (see [Scope
     resolution](#scope-resolution)).
-  - **Any other scope dimension** (`cc_securitylevel`, `cdb_comment_viewer`,
+  - **A catalog dimension `ct` reads but does not manage** (`cdb_bereich`,
+    `cc_securitylevel`): the emitter is pure — no client, no fetch — so it cannot
+    turn the id into a name. It emits the number plus a `NOTE` giving the portable
+    form (`{ department: "<name>" }` / `{ securityLevel: "<name>" }`) to write by
+    hand.
+  - **Any other scope dimension** (`cdb_comment_viewer`, `oauth_client`,
     …): there is no group to adopt, so the `dataId`(s) are emitted directly
     as a numeric `scope: [1, 2, 3]` — always an active line, with a comment
     naming the right's actual scope dimension. `ct adopt group <id>` is never
@@ -643,9 +688,8 @@ routinely has two declarable roles and one blocked one, and group granularity
 would hide exactly that. A role instance is declarable when every authored grant
 is either unscoped, uses the `-1` ALL sentinel, scopes by a dimension with a
 [logical reference form](#scope-resolution) (`cdb_gruppe`, `cdb_station`,
-`cdb_gruppentyp`, `cdb_bereich`), or scopes by a numeric-but-host-independent
-dimension (`cc_securitylevel`). Anything else is module data with no resource
-behind it, and is named as the blocker.
+`cdb_gruppentyp`, `cdb_bereich`, `cc_securitylevel`). Anything else scopes by a
+dimension `ct` cannot yet name portably, and is named as the blocker.
 
 ## Example
 

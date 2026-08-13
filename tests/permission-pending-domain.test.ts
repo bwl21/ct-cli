@@ -14,6 +14,7 @@ import { renderPermissionPlan } from "../src/permissions/render.js";
 import { executePlan } from "../src/engine/execute.js";
 import { emptyState, type State } from "../src/state/state.js";
 import { ref } from "../src/resolve/refs.js";
+import { Resolver } from "../src/resolve/resolver.js";
 import type { Plan, DesiredResource } from "../src/engine/types.js";
 import type { DesiredPermission } from "../src/permissions/types.js";
 import type { CtClient } from "../src/api/ctClient.js";
@@ -165,26 +166,136 @@ describe("pending domain: prod-like scenario (type already in state) is unchange
   });
 });
 
-describe("group_role symmetry: a same-run group is NOT made pending — it stays a hard error (#69/#25)", () => {
-  it("keeps the specific 'apply the group first' message for a group_role domain on a declared-not-created group", async () => {
-    // A group_role domainId is the (group, role) PAIRING id, exposed only on GET /groups/{id}/roles —
-    // so re-resolution needs a LIVE fetch after the group exists, not just a state lookup. That is a
-    // materially harder case than group_type_role (whose domainId is the group type's OWN id, present
-    // in post-execute state). So group_role deliberately does NOT go pending: it fails fast at
-    // resolve time with its own actionable message, unchanged by this fix.
-    const declaredGroup: DesiredResource[] = [
-      { type: "group", key: "kids_area", fields: { name: "Kids" }, dependsOn: [] },
-    ];
-    const grPerm: DesiredPermission = {
-      key: "kids_lead",
-      domainType: "group_role",
-      domainId: ref.groupRole("kids_area", "Leiter"),
-      grants: [],
-    };
-    const { client } = mockClient();
-    await expect(buildPermissionPlan(client, emptyState(HOST), [grPerm], declaredGroup)).rejects.toThrow(
-      /group "kids_area" is declared in this config but not yet created/,
+describe("group_role symmetry: a same-run group DOES go pending and completes in one apply (#106)", () => {
+  // The domain half of #29's deadlock. A group_role domainId is the (group, role) PAIRING id, exposed
+  // only on GET /groups/{id}/roles — so it cannot be completed from post-execute state alone the way a
+  // group_type_role domain can. It is completed with a live fetch inside applyPermissionPlan instead.
+  // Before #106 this was a hard error, which made the very same config plan clean on prod (group
+  // exists) and exit 1 on dev (group does not) — non-portable by construction.
+  const GROUP_ID = 4711;
+  const PAIRING_ID = 44675;
+
+  const declaredGroup: DesiredResource[] = [
+    { type: "group", key: "kids_area", fields: { name: "Kids" }, dependsOn: [] },
+  ];
+  const grPerm: DesiredPermission = {
+    key: "kids_lead",
+    domainType: "group_role",
+    domainId: ref.groupRole("kids_area", "Leiter"),
+    grants: ["churchgroup:administer groups"],
+  };
+  const createGroupPlan: Plan = {
+    items: [
+      {
+        type: "group",
+        key: "kids_area",
+        id: null,
+        action: "create",
+        changes: [{ field: "name", from: undefined, to: "Kids" }],
+      },
+    ],
+  };
+
+  /** Like `mockClient`, but POST /groups mints GROUP_ID and the group's role list is readable. */
+  function groupClient(roles: unknown[] = [{ id: PAIRING_ID, name: "Leiter", groupTypeRoleId: 12 }]) {
+    const calls: { method: string; path: string; body?: unknown }[] = [];
+    const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+      calls.push({ method, path, body });
+      if (method === "POST" && path === "/groups") return { id: GROUP_ID };
+      return {};
+    });
+    const get = vi.fn(async (path: string) => (path === `/groups/${GROUP_ID}/roles` ? roles : []));
+    return { client: { request, get } as unknown as CtClient, calls, get };
+  }
+
+  it("plans from EMPTY state as a pending domain instead of the old hard error", async () => {
+    const { client, get } = groupClient();
+    const { items, fetchErrors } = await buildPermissionPlan(
+      client,
+      emptyState(HOST),
+      [grPerm],
+      declaredGroup,
     );
+
+    expect(fetchErrors).toEqual([]);
+    expect(items[0]?.domainId).toBeNull();
+    expect(items[0]?.pendingDomain).toEqual(ref.groupRole("kids_area", "Leiter"));
+    expect(items[0]?.diff.toPut).toEqual([{ authId: 1113, dataId: [], type: "grant" }]);
+    // Nothing is fetched at plan time — the group does not exist yet, so neither does its role list.
+    expect(get).not.toHaveBeenCalled();
+    expect(renderPermissionPlan(items)).toContain(
+      "<group-role(group=kids_area, role=Leiter) (created this apply)>",
+    );
+  });
+
+  it("applies in ONE run — create the group, read its roles, grant on the pairing id", async () => {
+    const { client, calls, get } = groupClient();
+    const state = emptyState(HOST);
+    const { items } = await buildPermissionPlan(client, state, [grPerm], declaredGroup);
+
+    await executePlan(createGroupPlan, { client, state, statePath: "unused", save: async () => {} });
+    expect(state.resources.kids_area?.id).toBe(GROUP_ID);
+
+    const res = await applyPermissionPlan(items, client, state);
+    expect(res.granted).toBe(1);
+    expect(res.failed).toEqual([]);
+    // The role list is read from the FRESHLY created group, and the pairing id — not the group id —
+    // is what lands in the write path.
+    expect(get).toHaveBeenCalledWith(`/groups/${GROUP_ID}/roles`);
+    const put = calls.find((c) => c.method === "PUT");
+    expect(put?.path).toBe(`/permissions/group_role/${PAIRING_ID}`);
+    expect(put?.body).toEqual({ authId: 1113, type: "grant" });
+  });
+
+  it("still hard-errors on a role the created group does not have, listing what it does have", async () => {
+    const { client } = groupClient([
+      { id: PAIRING_ID, name: "Mitglied" },
+      { id: PAIRING_ID + 1, name: "Organisator" },
+    ]);
+    const state = emptyState(HOST);
+    const { items } = await buildPermissionPlan(client, state, [grPerm], declaredGroup);
+    await executePlan(createGroupPlan, { client, state, statePath: "unused", save: async () => {} });
+
+    await expect(applyPermissionPlan(items, client, state)).rejects.toThrow(
+      /group #4711 has no role named "Leiter" \(available: "Mitglied", "Organisator"\)/,
+    );
+  });
+
+  it("is unchanged on a host where the group already exists — concrete domain, no pending path", async () => {
+    const { client, get } = groupClient();
+    const state: State = {
+      version: 1,
+      host: HOST,
+      resources: {
+        kids_area: {
+          type: "group",
+          id: GROUP_ID,
+          key: "kids_area",
+          fields: { name: "Kids" },
+          adoptedAt: "t",
+          updatedAt: "t",
+        },
+      },
+    };
+    const { items, fetchErrors } = await buildPermissionPlan(client, state, [grPerm], declaredGroup);
+    expect(fetchErrors).toEqual([]);
+    expect(items[0]?.pendingDomain).toBeUndefined();
+    expect(items[0]?.domainId).toBe(PAIRING_ID);
+    // Resolved at PLAN time here, from the already-existing group's role list.
+    expect(get).toHaveBeenCalledWith(`/groups/${GROUP_ID}/roles`);
+  });
+
+  it("keeps the fail-fast message where a pending group_role can NOT be completed (query var)", async () => {
+    // Only the permission-domain position opts into pending group-roles, because only it gets a live
+    // fetch after the group exists. A group-role ref anywhere else keeps the old actionable error.
+    const resolver = new Resolver({
+      client: { get: async () => [] } as unknown as CtClient,
+      state: emptyState(HOST),
+      desired: declaredGroup,
+    });
+    await expect(
+      resolver.resolve(ref.groupRole("kids_area", "Leiter"), 'dynamic group "x" var'),
+    ).rejects.toThrow(/group "kids_area" is declared in this config but not yet created/);
   });
 });
 

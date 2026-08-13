@@ -14,17 +14,23 @@ import type { Ref } from "../resolve/refs.js";
  * (see `normalizeScopeEntry` in src/permissions/scope.ts), so `ref.campus("koblenz")` is identical.
  */
 export type ScopeSugar =
-  { group: string } | { campus: string } | { groupType: string } | { department: string };
+  | { group: string }
+  | { campus: string }
+  | { groupType: string }
+  | { department: string }
+  | { securityLevel: string };
 
 /**
  * One entry of a scoped grant's `scope`:
  *
  * - a **logical group key** (`string`) — a group managed by this tool. Group dimension only.
  * - a **typed logical ref** ({@link ScopeSugar} / {@link Ref}, #98) — the portable form for the other
- *   dimensions this tool can name by key: campuses (`cdb_station`), group types (`cdb_gruppentyp`)
- *   and departments (`cdb_bereich`, a read-only catalog — referenceable but never declarable).
- * - a **raw numeric dataId** (`number`, #49 escape hatch) — the only form for dimensions whose values
- *   are not resources at all (`cc_securitylevel`, `ccm_data_category`, `oauth_client`, …).
+ *   dimensions this tool can name by key: campuses (`cdb_station`), group types (`cdb_gruppentyp`),
+ *   departments (`cdb_bereich`) and security levels (`cc_securitylevel`, #110). The last two are
+ *   catalogs `ct` reads but does not manage: referenceable by name on any host, never declarable.
+ * - a **raw numeric dataId** (`number`, #49 escape hatch) — still supported everywhere, and the only
+ *   form for dimensions this tool cannot yet address by a host-independent name
+ *   (`ccm_data_category`, `cdb_comment_viewer`, `oauth_client`, …).
  */
 export type ScopeEntry = string | number | Ref | ScopeSugar;
 

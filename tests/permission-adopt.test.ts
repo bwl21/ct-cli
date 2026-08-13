@@ -345,8 +345,10 @@ describe("emitAdoptedGrants", () => {
     ];
     const state = stateWithKids();
     const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 9, rows, state });
-    // the admin-authored member rights are emitted as ACTIVE grants, never NOTE comments
-    expect(block).not.toContain("NOTE:");
+    // the admin-authored member rights are emitted as ACTIVE grants, never as omitted WARNINGs. The
+    // security-level-scoped ones carry a portable-form NOTE (#110) — advice, not an omission — so the
+    // assertion is about what is DECLARED, which `parseEmittedGrants` below reads back in full.
+    expect(block).not.toContain("WARNING:");
     expect(block).toContain("churchdb:+add person");
     const grants = parseEmittedGrants(block);
 
@@ -443,9 +445,20 @@ describe("emitAdoptedGrants", () => {
     expect(block).toContain('{ right: "churchdb:view alldata", scope: [4] }');
   });
 
-  it("a dimension with no logical form still gets the numeric-escape-hatch note", () => {
+  it("a security-level scope gets the portable-form note, not the numeric-escape-hatch one (#110)", () => {
     const rows: RawPermission[] = [
       { authId: 125, dataId: 2, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cc_securitylevel
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
+    expect(block).toContain('Portable form: { securityLevel: "<name>" }');
+    expect(block).not.toContain("not a group");
+    expect(block).toContain('{ right: "churchdb:security level person", scope: [2] }');
+  });
+
+  it("a dimension with no logical form still gets the numeric-escape-hatch note", () => {
+    const rows: RawPermission[] = [
+      // cdb_comment_viewer — master data with names, but no ref kind here yet (#109 tracks it).
+      { authId: 113, dataId: 2, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
     const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
     expect(block).toContain("not a group");

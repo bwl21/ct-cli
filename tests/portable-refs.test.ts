@@ -225,7 +225,10 @@ describe("permission domainId resolution", () => {
     expect(items[0]?.diff.toPut).toEqual([{ authId: 1113, dataId: [], type: "grant" }]);
   });
 
-  it("still rejects a group_role reference to a not-yet-created group (pass a numeric id) (#25)", async () => {
+  it("carries a group_role reference to a not-yet-created group as a PENDING domain (#106)", async () => {
+    // Was a hard error until #106. The pairing id only exists once the group does, so the domain plans
+    // pending and is completed with a live /groups/{id}/roles fetch inside applyPermissionPlan —
+    // which is what makes this config plannable on a fresh host as well as on one where it exists.
     const { permissions } = await evaluateConfig((ct) => {
       ct.group({ key: "kids", name: "Kids", groupTypeId: 2 });
       ct.groupRole({ key: "p", group: "kids", role: "Leiter", grants: ["churchgroup:administer groups"] });
@@ -233,9 +236,10 @@ describe("permission domainId resolution", () => {
     const client = { get: async <T>(): Promise<T> => [] as T };
     // `desired` includes the same-run group, so the resolver knows it is declared-but-pending.
     const desired = [{ type: "group", key: "kids", fields: {}, dependsOn: [] }];
-    await expect(buildPermissionPlan(client, emptyState("h"), permissions, desired)).rejects.toThrow(
-      /declared in this config but not yet created.*pass a numeric id/is,
-    );
+    const { items } = await buildPermissionPlan(client, emptyState("h"), permissions, desired);
+    expect(items[0]?.domainId).toBeNull();
+    expect(items[0]?.pendingDomain).toEqual(ref.groupRole("kids", "Leiter"));
+    expect(items[0]?.diff.toPut).toEqual([{ authId: 1113, dataId: [], type: "grant" }]);
   });
 });
 

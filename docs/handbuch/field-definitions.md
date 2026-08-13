@@ -3,7 +3,7 @@ title: Field definitions & security levels
 sources:
   - src/commands/get.ts
   - src/api/ctClient.ts
-sources_hash: 16a6283b7ce1d982
+sources_hash: 93ba678d9f747e3c
 reviewed: 2026-08-13
 ---
 
@@ -40,6 +40,7 @@ _definitions only_; none of them read or write a per-record field value.
 
 ```bash
 ct get person-masterdata   # the person master-data model incl. the security-level enumeration
+ct get security-levels     # just the security levels, as a flat list
 ct get data-fields         # all data-field definitions (person + group), one row per field
 ```
 
@@ -47,9 +48,13 @@ ct get data-fields         # all data-field definitions (person + group), one ro
   paged list) — the versionable person master-data model. It carries the
   security-level enumeration (`securityLevels`), which is the model the churchdb
   permission scopes reference (`cc_securitylevel`; see [`permissions.md`](permissions.md)).
-  This is where **security levels** are surfaced — ChurchTools has no dedicated
-  standalone security-levels REST resource; the Persons/Groups master-data module
-  is where they are defined, and `/person/masterdata` is its download.
+- `ct get security-levels` → `GET /securitylevels` (#110). The same levels as a
+  flat `[{id, name, sortKey}]` list — the catalog a
+  `scope: [{ securityLevel: "<name-slug>" }]` reference resolves against. (An
+  earlier version of this page said no standalone security-levels resource
+  existed; it does, live-verified 2026-08-13 on CT 3.135.2.) Reading it per host
+  is also how you check whether the usual ids `1..4` really hold there — they are
+  editable master-data rows, not protocol constants.
 - `ct get data-fields` → `GET /dbfields` (auto-paginated). The **unified**
   data-field definition catalog. Person master-data fields **and** group custom
   fields live in the same list, discriminated per-row by `fieldCategory`
@@ -100,13 +105,20 @@ out of bounds. If a future CT release adds REST write endpoints on `/dbfields`
 resource then — add a `src/resources/registry.ts` entry + DSL + tests — and move
 the row out of the read-only section here and in the runbook.
 
+Note that "never write the legacy surface" is a **decision**, not a capability
+limit, and [#109](https://github.com/eqrm/ct-cli/issues/109) reopens it for the
+master-data registry specifically (a self-describing set of editable tables the
+admin UI writes through `saveMasterData`). If that lands, this paragraph needs
+re-deciding rather than merely re-reading.
+
 ## Endpoint reference
 
-| Purpose                                    | Path                                                                           | Methods (this CT) | `ct` surface               |
-| ------------------------------------------ | ------------------------------------------------------------------------------ | ----------------- | -------------------------- |
-| Person master-data model + security levels | `/person/masterdata`                                                           | GET (read-only)   | `ct get person-masterdata` |
-| Data-field definitions (person + group)    | `/dbfields`, `/dbfields/{id}`                                                  | GET (read-only)   | `ct get data-fields`       |
-| Field-definition **mutation**              | legacy `churchdb` AJAX (`db_insertfields`/`db_updatefields`/`db_deletefields`) | non-REST          | **not managed — manual**   |
+| Purpose                                    | Path                                                                           | Methods (this CT)   | `ct` surface               |
+| ------------------------------------------ | ------------------------------------------------------------------------------ | ------------------- | -------------------------- |
+| Person master-data model + security levels | `/person/masterdata`                                                           | GET (read-only)     | `ct get person-masterdata` |
+| Security levels, standalone                | `/securitylevels`                                                              | GET (no REST write) | `ct get security-levels`   |
+| Data-field definitions (person + group)    | `/dbfields`, `/dbfields/{id}`                                                  | GET (read-only)     | `ct get data-fields`       |
+| Field-definition **mutation**              | legacy `churchdb` AJAX (`db_insertfields`/`db_updatefields`/`db_deletefields`) | non-REST            | **not managed — manual**   |
 
 All paths verified against public CT client libraries + CT Academy docs, **not**
 against this repo's (git-ignored, ungenerated) `src/api/schema.d.ts`.

@@ -56,23 +56,26 @@ export const GROUP_SCOPE_FIELD = "cdb_gruppe";
  *  - `cdb_gruppentyp`  → group types (`/group/grouptypes`)
  *  - `cdb_bereich`     → departments (`/departments`) — Bereiche, e.g. `churchdb:view alldata`
  *                        ("Personen eines Bereiches sehen")
+ *  - `cc_securitylevel` → security levels (`/securitylevels`, #110) — e.g. `churchdb:+see persons`
  *
- * `managed` is what separates the last one from the rest. Groups, campuses and group types are
+ * `managed` is what separates the last two from the rest. Groups, campuses and group types are
  * MANAGED resource kinds: a scope target can be declared in the same config (resolving pending, then
- * re-resolved at apply time) and a state-backed id is worth re-resolving. Departments are a READ-ONLY
- * ref catalog — `GET /departments` exists, but no POST/PUT/DELETE does (live-probed against the
- * instance's own OpenAPI spec, eqrm prod CT 3.135.2, 2026-08-13) — so a department reference always
- * resolves by NAME against the live catalog and hard-errors when the name is absent, which is
- * strictly better than a silent numeric misgrant but is never a create.
+ * re-resolved at apply time) and a state-backed id is worth re-resolving. Departments and security
+ * levels are catalogs `ct` READS but does not manage, so a reference always resolves by NAME against
+ * the live catalog and hard-errors when the name is absent — strictly better than a silent numeric
+ * misgrant, but never a create. (Neither has a REST write verb; both ARE writable through the legacy
+ * master-data endpoint the admin UI uses, which `ct` does not drive yet — #108/#109.)
  *
- * Every other scoped dimension (`cc_securitylevel`, `ccm_data_category`, `oauth_client`, …) stays
- * numeric-only by nature rather than by omission: its values are not resources at all.
+ * The remaining scoped dimensions (`ccm_data_category`, `cdb_comment_viewer`, `oauth_client`, …) stay
+ * numeric-only because this tool has no way to address their values by a host-independent name today —
+ * an omission to revisit (#109), not a proof that they are "not resources".
  */
 export const SCOPE_REF_KIND: Readonly<Record<string, { kind: RefKind; type: string; managed: boolean }>> = {
   [GROUP_SCOPE_FIELD]: { kind: "group", type: "group", managed: true },
   cdb_station: { kind: "campus", type: "campus", managed: true },
   cdb_gruppentyp: { kind: "group-type", type: "group-type", managed: true },
   cdb_bereich: { kind: "department", type: "department", managed: false },
+  cc_securitylevel: { kind: "security-level", type: "security-level", managed: false },
 };
 
 /** The DSL's object sugar for a typed scope ref: exactly one dimension field, e.g. `{ campus: "koblenz" }`. */
@@ -81,6 +84,7 @@ const SCOPE_SUGAR: Readonly<Record<string, (key: string) => Ref>> = {
   campus: ref.campus,
   groupType: ref.groupType,
   department: ref.department,
+  securityLevel: ref.securityLevel,
 };
 
 /**
@@ -254,8 +258,8 @@ function expectedDimension(
  *   pre-resolved for this host by {@link resolveScopeRefs} and read out of `refs` here. This is what
  *   makes a campus-scoped grant portable: campus ids differ per host (dev Mainz = 6, prod Mainz = 0).
  * - a **raw numeric dataId** (`number`, #49) — an escape hatch that passes straight through with no
- *   lookup at all. Still the only form for dimensions whose values are not resources this tool can
- *   name (`cc_securitylevel`, `cdb_bereich`, `oauth_client`, …).
+ *   lookup at all. Still the only form for dimensions whose values this tool cannot yet address by a
+ *   host-independent name (`ccm_data_category`, `cdb_comment_viewer`, `oauth_client`, …).
  *
  * A logical key that names a managed resource in state resolves to its id. A logical key that names a
  * resource DECLARED in this config but not yet in state (`declaredGroupKeys` for the string form; the
