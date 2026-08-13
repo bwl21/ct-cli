@@ -18,7 +18,7 @@ import type { Plan, DesiredResource } from "../src/engine/types.js";
 import type { DesiredPermission } from "../src/permissions/types.js";
 import type { CtClient } from "../src/api/ctClient.js";
 
-const HOST = "https://eqrm.church.tools";
+const HOST = "https://mychurch.church.tools";
 const STRUKTUR_TYPE_ID = 9;
 
 // The #23 config, in miniature: declare a group type AND a group_type_role permission domain that

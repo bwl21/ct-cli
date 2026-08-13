@@ -5,7 +5,7 @@ import { desiredTuples } from "../src/permissions/plan.js";
 import type { Grant } from "../src/permissions/types.js";
 import type { State } from "../src/state/state.js";
 
-const HOST = "https://eqrm.church.tools";
+const HOST = "https://mychurch.church.tools";
 
 /** A state file with one managed group "kids" at id 99. */
 function stateWithKids(): State {

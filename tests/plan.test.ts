@@ -3,7 +3,7 @@ import { computePlan } from "../src/engine/plan.js";
 import type { DesiredResource } from "../src/engine/types.js";
 import type { State, ManagedResource } from "../src/state/state.js";
 
-const HOST = "https://eqrm.church.tools";
+const HOST = "https://mychurch.church.tools";
 
 function desired(
   key: string,

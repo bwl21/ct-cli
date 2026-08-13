@@ -63,7 +63,7 @@ const { applyCommand } = await import("../src/commands/apply.js");
 const { loadState, saveState, emptyState } = await import("../src/state/state.js");
 
 const statePath = join(tmpdir(), `ct-cli-apply-refresh-${process.pid}.json`);
-const HOST = "https://eqrm.church.tools";
+const HOST = "https://mychurch.church.tools";
 
 async function runApply(args: string[]): Promise<void> {
   await applyCommand().parseAsync(args, { from: "user" });

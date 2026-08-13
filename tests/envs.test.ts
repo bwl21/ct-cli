@@ -38,14 +38,14 @@ describe("loadEnvProfile", () => {
   it("resolves a named profile with a normalized host and defaulted state path", async () => {
     await writeEnvs({
       environments: {
-        dev: { host: "https://eqrm-dev.church.tools/" },
-        prod: { host: "https://eqrm.church.tools", state: "ct-state.prod.json", protected: true },
+        dev: { host: "https://mychurch-dev.church.tools/" },
+        prod: { host: "https://mychurch.church.tools", state: "ct-state.prod.json", protected: true },
       },
     });
     const dev = await loadEnvProfile("dev", envsPath);
     expect(dev).toEqual({
       name: "dev",
-      host: "https://eqrm-dev.church.tools", // trailing slash stripped
+      host: "https://mychurch-dev.church.tools", // trailing slash stripped
       statePath: "ct-state.dev.json", // convention default
       protected: false,
       tokenEnv: undefined,
@@ -53,7 +53,7 @@ describe("loadEnvProfile", () => {
     const prod = await loadEnvProfile("prod", envsPath);
     expect(prod).toMatchObject({
       name: "prod",
-      host: "https://eqrm.church.tools",
+      host: "https://mychurch.church.tools",
       statePath: "ct-state.prod.json",
       protected: true,
     });
@@ -61,7 +61,7 @@ describe("loadEnvProfile", () => {
 
   it("carries a tokenEnv reference when present", async () => {
     await writeEnvs({
-      environments: { prod: { host: "https://eqrm.church.tools", tokenEnv: "CT_PROD_TOKEN" } },
+      environments: { prod: { host: "https://mychurch.church.tools", tokenEnv: "CT_PROD_TOKEN" } },
     });
     expect((await loadEnvProfile("prod", envsPath)).tokenEnv).toBe("CT_PROD_TOKEN");
   });

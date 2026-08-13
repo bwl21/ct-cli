@@ -23,7 +23,7 @@ describe("CtClient", () => {
       .mockResolvedValueOnce(jsonResponse({ data: "csrf-123" }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = new CtClient({ host: "https://eqrm.church.tools" });
+    const client = new CtClient({ host: "https://mychurch.church.tools" });
     const me = await client.authenticate("tok");
 
     expect(me).toEqual({ id: 7, firstName: "Ada" });
@@ -33,7 +33,7 @@ describe("CtClient", () => {
   });
 
   it("refuses requests before authentication", async () => {
-    const client = new CtClient({ host: "https://eqrm.church.tools" });
+    const client = new CtClient({ host: "https://mychurch.church.tools" });
     await expect(client.get("/campuses")).rejects.toBeInstanceOf(CtApiError);
   });
 
@@ -45,7 +45,7 @@ describe("CtClient", () => {
       .mockResolvedValueOnce(jsonResponse({ data: { id: 99 } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = new CtClient({ host: "https://eqrm.church.tools" });
+    const client = new CtClient({ host: "https://mychurch.church.tools" });
     await client.authenticate("tok");
     await client.request("POST", "/campuses", { name: "Mainz" });
 
@@ -61,7 +61,7 @@ describe("CtClient", () => {
       .mockResolvedValueOnce(jsonResponse({ data: { id: 1 } }, { setCookie: "s=1; Path=/" }))
       .mockResolvedValueOnce(jsonResponse({ data: "csrf" }));
     vi.stubGlobal("fetch", fetchMock);
-    const client = new CtClient({ host: "https://eqrm.church.tools" });
+    const client = new CtClient({ host: "https://mychurch.church.tools" });
     await client.authenticate("tok");
     return { client, fetchMock };
   }

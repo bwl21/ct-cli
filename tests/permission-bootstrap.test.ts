@@ -15,7 +15,7 @@ import type { Plan, DesiredResource } from "../src/engine/types.js";
 import type { DesiredPermission } from "../src/permissions/types.js";
 import type { CtClient } from "../src/api/ctClient.js";
 
-const HOST = "https://eqrm.church.tools";
+const HOST = "https://mychurch.church.tools";
 
 // churchgroup:view group — authId 1104, scoped (scopeField cdb_gruppe).
 const scopedPerm: DesiredPermission = {

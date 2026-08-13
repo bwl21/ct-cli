@@ -44,7 +44,7 @@ const { destroyCommand } = await import("../src/commands/destroy.js");
 const { saveState, loadState, emptyState } = await import("../src/state/state.js");
 
 const statePath = join(tmpdir(), `ct-cli-destroy-cmd-${process.pid}.json`);
-const HOST = "https://eqrm.church.tools";
+const HOST = "https://mychurch.church.tools";
 const originalHost = process.env.CT_HOST;
 
 function group(key: string, id: number, extra: Record<string, unknown> = {}) {

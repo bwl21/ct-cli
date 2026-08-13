@@ -46,7 +46,7 @@ vi.mock("../src/permissions/plan.js", () => ({
 const { planCommand } = await import("../src/commands/plan.js");
 const { saveState, emptyState } = await import("../src/state/state.js");
 
-const HOST = "https://eqrm.church.tools";
+const HOST = "https://mychurch.church.tools";
 const statePath = join(tmpdir(), `ct-cli-plan-detailed-exitcode-${process.pid}.json`);
 const originalHost = process.env.CT_HOST;
 

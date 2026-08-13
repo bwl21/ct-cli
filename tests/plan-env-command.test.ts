@@ -16,8 +16,8 @@ import type { Plan } from "../src/engine/types.js";
 const plan: Plan = { items: [] };
 
 const versionByHost: Record<string, string> = {
-  "https://eqrm-dev.church.tools": "3.100.0",
-  "https://eqrm.church.tools": "3.123.0",
+  "https://mychurch-dev.church.tools": "3.100.0",
+  "https://mychurch.church.tools": "3.123.0",
 };
 
 // authedSession is mocked, but resolveConfig (real) has already read CT_HOST that prepareEnv wired,
@@ -46,8 +46,8 @@ vi.mock("../src/permissions/plan.js", () => ({
 const { planCommand } = await import("../src/commands/plan.js");
 const { saveState, emptyState } = await import("../src/state/state.js");
 
-const DEV = "https://eqrm-dev.church.tools";
-const PROD = "https://eqrm.church.tools";
+const DEV = "https://mychurch-dev.church.tools";
+const PROD = "https://mychurch.church.tools";
 const envsPath = join(tmpdir(), `ct-cli-planenv-envs-${process.pid}.json`);
 const devState = join(tmpdir(), `ct-cli-planenv-dev-${process.pid}.json`);
 const prodState = join(tmpdir(), `ct-cli-planenv-prod-${process.pid}.json`);

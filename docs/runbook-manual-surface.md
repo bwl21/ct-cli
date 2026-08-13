@@ -23,11 +23,10 @@ Every item below falls into exactly one of three buckets:
 | Meeting points (Treffpunkte)   | A group's meeting-location master data                                                               | No endpoint at all — zero matches for `treffpunkt`/`meetingpoint` anywhere in the OpenAPI spec ([`docs/api-coverage.md`](api-coverage.md) #11)                                             | Group admin → meeting point field on a group                               | No API verification possible; visually confirm in the UI. (Do not confuse with _meeting templates_ `/group/meetingtemplates` or _group meetings_ `/groups/{id}/meetings`, both full CRUD but different concepts — confirm with product if "meeting point" was meant to be one of those instead) |
 | Permission name↔authId catalog | The mapping from human-readable `module:right` names to the numeric `authId` the API actually writes | Not exposed by the REST API at all; only servable via the legacy `POST /index.php?q=churchauth/ajax&func=getMasterData` call ([`src/permissions/README.md`](../src/permissions/README.md)) | Permission editor (any role's right-picker enumerates the live set)        | Regeneration procedure below (**Permission catalog lifecycle**)                                                                                                                                                                                                                                 |
 
-**Expected values for our instance(s):** left blank here deliberately — this
+**Expected values for a given instance:** left blank here deliberately — this
 runbook is generic (part of `ct-cli`, the tool repo). The per-instance
 expected/desired values (which member statuses, which meeting points) belong
-in `eqrm/ct-structure`'s own runbook once #23 creates that repo, following
-this doc's structure.
+in that instance's own config repo, in a runbook following this doc's structure.
 
 ## Not yet implemented — API supports it, `ct` doesn't drive it yet
 
@@ -153,8 +152,8 @@ in where they'd otherwise be silently skipped:
 
 - The exact expected/desired **values** (which member statuses, which
   meeting points, which campus-per-group assignments) are instance-specific
-  and deliberately not enumerated here — they belong in `eqrm/ct-structure`
-  once #23 creates that repo. This runbook only tracks _what category_ of
+  and deliberately not enumerated here — they belong in the instance's own
+  private config repo. This runbook only tracks _what category_ of
   manual step exists and _how to verify_ it, not the target values for any
   particular ChurchTools instance.
 - "Meeting point" (Treffpunkt) has no confirmed CT concept mapping — `docs/api-coverage.md`

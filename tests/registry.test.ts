@@ -172,7 +172,7 @@ describe("write specs", () => {
     expect(RESOURCES["age-group"]?.itemPath(3)).toBe("/group/agegroups/3");
   });
 
-  // Field sets verified live against eqrm.church.tools (2026-07-08).
+  // Field sets verified live against mychurch.church.tools (2026-07-08).
   it("snapshots real relationship-type degree fields (degreeNameA/B, not degreeForward/Reverse)", () => {
     const raw = {
       name: "relationship.couple",

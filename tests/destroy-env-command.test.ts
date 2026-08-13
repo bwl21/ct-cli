@@ -23,7 +23,7 @@ vi.mock("../src/engine/backup.js", () => ({ writeBackup: vi.fn(async () => "back
 const { destroyCommand } = await import("../src/commands/destroy.js");
 const { saveState, loadState, emptyState } = await import("../src/state/state.js");
 
-const PROD = "https://eqrm.church.tools";
+const PROD = "https://mychurch.church.tools";
 const envsPath = join(tmpdir(), `ct-cli-destroyenv-envs-${process.pid}.json`);
 const prodState = join(tmpdir(), `ct-cli-destroyenv-prod-${process.pid}.json`);
 const backupDir = join(tmpdir(), `ct-cli-destroyenv-backups-${process.pid}`);

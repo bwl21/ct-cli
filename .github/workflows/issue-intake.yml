@@ -18,7 +18,9 @@ permissions:
 jobs:
   triage:
     if: github.event.issue.milestone == null
-    runs-on: [self-hosted, eqrm-ci]
+    # GitHub-hosted on purpose: self-hosted runners on a public repo are a standing
+    # risk, and this job only shells out to `gh issue edit`.
+    runs-on: ubuntu-latest
     steps:
       - name: Mark as untriaged
         env:

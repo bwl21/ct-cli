@@ -10,8 +10,8 @@
  * ```json
  * {
  *   "environments": {
- *     "dev":  { "host": "https://eqrm-dev.church.tools" },
- *     "prod": { "host": "https://eqrm.church.tools", "protected": true, "tokenEnv": "CT_PROD_TOKEN" }
+ *     "dev":  { "host": "https://mychurch-dev.church.tools" },
+ *     "prod": { "host": "https://mychurch.church.tools", "protected": true, "tokenEnv": "CT_PROD_TOKEN" }
  *   }
  * }
  * ```

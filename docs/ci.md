@@ -20,7 +20,7 @@ Skip the keychain with two env vars (see
 [`src/auth/tokenStore.ts`](https://github.com/eqrm/ct-cli/blob/main/src/auth/tokenStore.ts)):
 
 ```bash
-export CT_HOST=https://eqrm.church.tools
+export CT_HOST=https://mychurch.church.tools
 export CT_LOGINTOKEN=<personal login token — from a CI secret>
 ct plan
 ```
