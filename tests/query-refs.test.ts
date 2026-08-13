@@ -8,7 +8,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import { VAR_REF_KINDS, portablizeRuleset, type RoleCatalogEntry } from "../src/config/query-refs.js";
+import {
+  VAR_REF_KINDS,
+  formatPortablizeWarnings,
+  portablizeRuleset,
+  scanUnportablized,
+  type RoleCatalogEntry,
+} from "../src/config/query-refs.js";
 import { q, churchQuery } from "../src/config/query.js";
 import { normalizeRuleset } from "../src/engine/dynamic.js";
 import { deepMapRefs, refKey, type Ref, type RefKind } from "../src/resolve/refs.js";
@@ -65,24 +71,33 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
     ]);
   });
 
-  it("leaves an unmanaged id numeric and collects a { var, id } warning", () => {
+  it("leaves an unmanaged id numeric and collects a warning naming the reason (#101)", () => {
     const ruleset = { query: churchQuery(q.oneof("ctgroup.id", [148, 999])) };
     const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
       idToKeyByKind: { group: new Map([[148, "jugend-mainz"]]) },
     });
     const filter = (out.query as { params: { filter: { oneof: unknown[] } } }).params.filter;
     expect(filter.oneof[1]).toEqual([{ __ctRef: true, kind: "group", key: "jugend-mainz" }, 999]);
-    expect(warnings).toEqual([{ var: "ctgroup.id", id: 999 }]);
+    expect(warnings).toEqual([
+      {
+        var: "ctgroup.id",
+        id: 999,
+        reason: "unmanaged",
+        detail: "group #999 is not under management — `ct adopt group 999` (then re-adopt) makes it portable",
+      },
+    ]);
   });
 
-  it("never touches a catalog-less var (groupStatusId) — no rewrite, no warning", () => {
+  it("never REWRITES a catalog-less var (groupStatusId), but does report it left numeric (#101)", () => {
     const ruleset = { query: churchQuery(q.oneof("ctgroup.groupStatusId", [1, 2, 4])) };
     const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
       idToKeyByKind: { group: new Map([[1, "nope"]]) },
     });
     const filter = (out.query as { params: { filter: { oneof: unknown[] } } }).params.filter;
-    expect(filter.oneof[1]).toEqual([1, 2, 4]);
-    expect(warnings).toEqual([]);
+    expect(filter.oneof[1]).toEqual([1, 2, 4]); // never rewritten — no logical form exists
+    // …but silence here is what #101 was filed about: the ids ARE host-specific, so they are reported.
+    expect(warnings.map((w) => w.id)).toEqual([1, 2, 4]);
+    expect(new Set(warnings.map((w) => w.reason))).toEqual(new Set(["no-ref-kind"]));
   });
 
   it("does not mutate its input ruleset", () => {
@@ -128,7 +143,33 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
         { __ctRef: true, kind: "group-type-role", groupType: "local_lead", role: "Leiter" },
         999, // not in roleCatalog → numeric
       ]);
-      expect(warnings).toEqual([{ var: "role.id", id: 999 }]);
+      expect(warnings).toEqual([
+        {
+          var: "role.id",
+          id: 999,
+          reason: "role-unknown",
+          detail: "no /group/roles row carries groupTypeRoleId 999 on this host",
+        },
+      ]);
+    });
+
+    it("distinguishes 'role unknown' from 'role's group type unmanaged' (#101)", () => {
+      const ruleset = { query: churchQuery(q.oneof("role.id", [84])) };
+      const { warnings } = portablizeRuleset(ruleset, {
+        idToKeyByKind: {},
+        roleCatalog, // 84 → group type 12 …
+        groupTypeIdToKey: new Map(), // … which is NOT managed here
+      });
+      expect(warnings).toEqual([
+        {
+          var: "role.id",
+          id: 84,
+          reason: "role-group-type-unmanaged",
+          detail:
+            'role "Leiter" belongs to group type #12, which is not managed — ' +
+            "adopt that group type to make the (group-type, role) pair portable",
+        },
+      ]);
     });
 
     it("leaves role.id numeric (with a warning) when no roleCatalog is supplied at all", () => {
@@ -136,7 +177,14 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
       const { ruleset: out, warnings } = portablizeRuleset(ruleset, { idToKeyByKind: {} });
       const filter = (out.query as { params: { filter: { oneof: unknown[] } } }).params.filter;
       expect(filter.oneof[1]).toEqual([84]);
-      expect(warnings).toEqual([{ var: "role.id", id: 84 }]);
+      expect(warnings).toEqual([
+        {
+          var: "role.id",
+          id: 84,
+          reason: "role-unknown",
+          detail: "no /group/roles row carries groupTypeRoleId 84 on this host",
+        },
+      ]);
     });
   });
 
@@ -176,7 +224,14 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
       const hm = (out.process as { queryResultOnly: { none: { handleMembership: Record<string, unknown> } } })
         .queryResultOnly.none.handleMembership;
       expect(hm.groupTypeRoleId).toBe(4242);
-      expect(warnings).toEqual([{ var: "groupTypeRoleId", id: 4242 }]);
+      expect(warnings).toEqual([
+        {
+          var: "groupTypeRoleId",
+          id: 4242,
+          reason: "role-unknown",
+          detail: "no /group/roles row carries groupTypeRoleId 4242 on this host",
+        },
+      ]);
     });
   });
 
@@ -238,13 +293,29 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
       expect(back).toEqual(normalized);
     });
 
-    it("leaves the unmanaged group id (1246) and the groupStatusId lists numeric, warning only for 1246", () => {
+    it("leaves the unmanaged group id (1246) and the groupStatusId lists numeric, and reports BOTH (#101)", () => {
       const { ruleset: portable, warnings } = portablizeRuleset(normalized, opts);
       const json = JSON.stringify(portable);
       expect(json).toContain("1246"); // unmanaged group id survives numeric
-      expect(warnings).toEqual([{ var: "ctgroup.id", id: 1246 }]); // exactly the one escape-hatch id
-      // groupStatusId oneof ([1]) is never a candidate → never rewritten, never warned.
-      expect(warnings.some((w) => w.id === 1)).toBe(false);
+      expect(warnings).toContainEqual({
+        var: "ctgroup.id",
+        id: 1246,
+        reason: "unmanaged",
+        detail: "group #1246 is not under management — `ct adopt group 1246` (then re-adopt) makes it portable",
+      });
+      // groupStatusId is never REWRITTEN (no catalog exists) but is still a host-specific id in a
+      // cross-host file, so #101 reports it rather than letting the capture look fully portable.
+      expect(warnings.filter((w) => w.var === "ctgroup.groupStatusId").every((w) => w.reason === "no-ref-kind")).toBe(true);
+      expect(warnings.some((w) => w.var === "ctgroup.groupStatusId")).toBe(true);
+    });
+
+    it("scanUnportablized reports the same ids from the ALREADY-PORTABLIZED file (#101 plan-time check)", () => {
+      const { ruleset: portable } = portablizeRuleset(normalized, opts);
+      const left = scanUnportablized(portable);
+      // Every marker-rewritten id is gone from the report; the numeric leftovers remain.
+      expect(left.some((w) => w.var === "ctgroup.id" && w.id === 1246)).toBe(true);
+      expect(left.some((w) => w.id === 112 || w.id === 8)).toBe(false); // now `{ __ctRef }` markers
+      expect(formatPortablizeWarnings(left).some((l) => l.startsWith("ctgroup.id: 1246 left numeric"))).toBe(true);
     });
   });
 });

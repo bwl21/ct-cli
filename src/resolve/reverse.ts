@@ -56,22 +56,27 @@ export interface RoleCatalogEntry {
 }
 
 export class ReverseResolver {
-  private readonly client: Pick<CtClient, "get">;
+  private readonly client: Pick<CtClient, "getAll">;
   /** id → logical key, per catalog path, fetched at most once. A failed fetch caches an empty map. */
   private readonly catalogs = new Map<string, Promise<Map<number, string>>>();
   /** groupTypeRoleId → {groupTypeId, name} from `/group/roles`, fetched at most once (#76). */
   private roleCatalog?: Promise<Map<number, RoleCatalogEntry>>;
 
-  constructor(client: Pick<CtClient, "get">) {
+  constructor(client: Pick<CtClient, "getAll">) {
     this.client = client;
   }
 
   private index(path: string): Promise<Map<number, string>> {
     let p = this.catalogs.get(path);
     if (!p) {
+      // `getAll`, never a plain `get` (#101): these catalogs are LIST endpoints, so a plain GET
+      // returns only CT's default first page (10 rows). That silently truncated every reverse map —
+      // on eqrm prod `/group/roles` has 46 rows, so 36 roles had no id→key entry and every ruleset
+      // `role.id` pointing at one was left as a host-specific number with a vague warning. The
+      // forward Resolver was fixed for exactly this; the reverse side had the same bug.
       p = this.client
-        .get<CatalogRecord[]>(path)
-        .then((rows) => {
+        .getAll<CatalogRecord>(path)
+        .then(({ data: rows }) => {
           const map = new Map<number, string>();
           if (Array.isArray(rows)) {
             for (const row of rows) {
@@ -116,8 +121,8 @@ export class ReverseResolver {
   async roleGroupTypeCatalog(): Promise<Map<number, RoleCatalogEntry>> {
     if (!this.roleCatalog) {
       this.roleCatalog = this.client
-        .get<CatalogRecord[]>("/group/roles")
-        .then((rows) => {
+        .getAll<CatalogRecord>("/group/roles")
+        .then(({ data: rows }) => {
           const map = new Map<number, RoleCatalogEntry>();
           if (Array.isArray(rows)) {
             for (const row of rows) {

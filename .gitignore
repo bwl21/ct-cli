@@ -15,8 +15,9 @@ ct-state.json
 # Generated typed client (regenerated from the live OpenAPI spec)
 src/api/schema.d.ts
 
-# Test/coverage output
-coverage/
+# Test/coverage output — ROOT-anchored: a bare `coverage/` also matches `src/coverage/`
+# (the `ct coverage` report module, #103) and would silently drop it from every commit.
+/coverage/
 .vitest/
 
 # MkDocs output for docs/handbuch/ (built by .github/workflows/docs.yml, never committed)

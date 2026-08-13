@@ -15,6 +15,7 @@ import { deepEqual } from "./plan.js";
 import { mapConcurrent } from "../util/concurrency.js";
 import { info, warn, formatError } from "../ui.js";
 import { normalizeDynamic, normalizeRuleset, putRulesetBody, resolveRulesetRef } from "./dynamic.js";
+import { formatPortablizeWarnings, scanUnportablized } from "../config/query-refs.js";
 import type { DynamicStatus } from "./types.js";
 
 /** How many dynamic groups to fetch (ruleset + status) from ChurchTools at once. Mirrors build.ts. */
@@ -162,10 +163,23 @@ const dynamicField: SyntheticField = {
       // ({ status: "none", ruleset: {} }). The docs tell users to KEEP the dynamic block when
       // demoting, so their authored ruleset is still present here — but folding it would diff
       // forever against the sentinel actual. Collapsing both sides makes a demoted group converge.
-      const dynamic =
-        d.dynamic.status === "none"
-          ? { status: "none" as DynamicStatus, ruleset: {} }
-          : normalizeDynamic({ status: d.dynamic.status, ruleset: resolveRulesetRef(d.dynamic.ruleset, configDir, d.key) });
+      if (d.dynamic.status === "none") {
+        return { ...d, fields: { ...d.fields, dynamic: { status: "none" as DynamicStatus, ruleset: {} } } };
+      }
+      const resolvedRuleset = resolveRulesetRef(d.dynamic.ruleset, configDir, d.key);
+      // Un-portablized ids report at PLAN time too (#101), not only at adoption. A ruleset carrying
+      // another host's ids round-trips byte-identically against the host it was written for, so the
+      // plan is green and the damage — an auto-group collecting the wrong people — is invisible until
+      // someone notices the membership. Warn, never fail: the numeric form stays a valid escape hatch.
+      const unportable = scanUnportablized(resolvedRuleset);
+      if (unportable.length > 0) {
+        warn(
+          `dynamic group "${d.key}": ruleset carries ${unportable.length} host-specific id(s) — ` +
+            `not portable to another instance:`,
+        );
+        for (const line of formatPortablizeWarnings(unportable)) info(`    ${line}`);
+      }
+      const dynamic = normalizeDynamic({ status: d.dynamic.status, ruleset: resolvedRuleset });
       return { ...d, fields: { ...d.fields, dynamic } };
     });
     return { desired: augmented, errors };

@@ -101,11 +101,13 @@ commands.
 ct auth login --host https://mychurch.church.tools --token <personal-login-token>
 ct auth status                # who am I?
 
-ct get groups                 # JSON to stdout — pipe into jq
+ct get groups                 # JSON to stdout — pipe into jq (every page, not just the first)
 ct adopt campus 0             # bring ONE existing resource under management
+ct coverage                   # what the instance has that the config does not manage
 ct state list                 # what is managed
 ct plan                       # diff the config against ChurchTools (read-only)
 ct apply                      # create + update in dependency order (confirm + backup first)
+ct refresh --group <key>      # make ChurchTools re-evaluate one auto-group now
 ```
 
 `apply` reconciles **creates and updates** only, saving state after each action
@@ -132,7 +134,13 @@ schema in scope, per-record values never. See
 
 References are logical throughout: `groupType: "ministry_team"` resolves to that
 instance's id at plan time, so the same config drives a dev and a prod instance
-unchanged. Numeric ids remain an escape hatch everywhere.
+unchanged. Numeric ids remain an escape hatch everywhere — and where one is left
+in place, `ct` says so rather than letting a host-specific id travel silently to
+another instance.
+
+`ct coverage` answers the other direction: what exists on the instance that the
+config does not manage, and which of it could be declared today (per group *and*
+role, with the blocking scope dimension named). `--json` makes it a CI gate.
 
 ## Environments and CI
 

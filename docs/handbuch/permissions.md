@@ -5,7 +5,7 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: 03c3ae24524afcc9
+sources_hash: 755e1575996e49dc
 reviewed: 2026-08-13
 ---
 
@@ -100,25 +100,48 @@ The catalog (`src/permissions/catalog.json`) is a snapshot of one instance's
 permission master data, captured at a specific ChurchTools version. Two things
 keep it honest:
 
-**Regeneration — one command.** Point it at a live instance and it rewrites
-`catalog.json` (rights + a fresh `$meta` provenance stamp):
+**Refresh it for YOUR instance — `ct permissions catalog --refresh` (#105).**
+This is the one to reach for from a consumer repo. It captures the catalog from
+the instance you are targeting and writes it beside your config:
+
+```bash
+ct permissions catalog --refresh --env prod   # → .ct/permission-catalog.<host>.json
+ct permissions catalog --env prod             # show which catalog is active, and where it came from
+```
+
+**Commit that file.** Every subsequent `ct plan` / `ct apply` against that host
+loads it in preference to the catalog bundled with the `ct` release, and says so
+in its header (`permission catalog: .ct/permission-catalog.<host>.json`). A repo
+that never runs the refresh is unaffected — the bundled catalog stays the
+fallback.
+
+This exists because the bundled catalog is a snapshot of **one** instance's
+ChurchTools version, and the staleness warning below used to tell you to run a
+script that only exists in the ct-cli repo. A consumer repo could not act on its
+own warning short of opening a PR upstream and waiting for a release.
+
+**Regenerating the BUNDLED catalog (ct-cli maintainers).** Inside this repo, to
+move the shipped default forward:
 
 ```bash
 CT_HOST=https://your.church.tools CT_LOGINTOKEN=<token> npm run regenerate:permission-catalog
 ```
 
-It logs in, calls the legacy `POST /index.php?q=churchauth/ajax` `func=getMasterData`
-endpoint (the only source of the name↔authId map — see
-`src/permissions/README.md`), records the instance's CT version, and writes the
-file. It performs a single **read**; it never writes to the instance. Review
-the `git diff` before committing.
+Both paths read the same source: the legacy `POST /index.php?q=churchauth/ajax`
+`func=getMasterData` endpoint, the only place the name↔authId map is exposed
+(see `src/permissions/README.md`). Both perform a single **read**; neither
+writes to the instance. Review the `git diff` before committing either file.
 
 **Staleness & unknown rights — `ct plan` warns (never fails).** `$meta.ctVersion`
 records the version the catalog was captured from. On every `plan`/`apply`:
 
 - If the live instance's CT version differs from `$meta.ctVersion`, `ct plan`
-  prints a warning — right names/authIds/scopeFields may have drifted;
-  regenerate to be sure.
+  prints a warning — right names/authIds/scopeFields may have drifted; capture
+  one for this instance to be sure. **This warning is suppressed once a
+  per-instance catalog is loaded** (#105): a capture taken from the host you are
+  planning against is authoritative for it, and a warning that fires on every
+  single plan is one nobody reads — including on the plan where a moved authId
+  would actually matter.
 - If a **live grant carries an `authId` the catalog cannot name** (a stale or
   foreign right), `ct plan` names the `authId` + domain and **leaves the grant
   untouched** — it is deliberately kept *out* of the diff so `ct apply` never
@@ -409,6 +432,36 @@ them, read the live rows and emit a paste-ready config block:
 ct adopt grants group_type_role 42   # or: group_role / status, and the hyphenated group-type-role
 ```
 
+### Bulk adoption (#104)
+
+Adopting a whole instance one domain at a time meant dozens of invocations and
+dozens of pastes, each needing its `key` renamed and its emitted numeric `id:`
+swapped for the portable `group` + `role` pair — the two edits a human forgets
+on the 30th paste. So:
+
+```bash
+ct adopt grants --group kids                  # every role instance of one group
+ct adopt grants --all-declarable              # every declarable role instance on the host
+ct adopt grants --all-declarable --write config/grants.ts   # append instead of printing
+```
+
+In bulk mode:
+
+- the **portable domain form** is emitted whenever the group is managed —
+  `group: "kids"` + `role: "Leiter"` instead of the host-specific pairing
+  `id:` — and the key is derived as `<group key>_<role slug>` (`kids_leiter`).
+  An unmanaged group falls back to `id:` with a comment saying why;
+- a block that would **revoke live grants** is never emitted. In bulk the
+  per-block `WARNING` header stops being a safeguard and becomes something the
+  reader scrolls past, so such domains are skipped and listed instead;
+- a role instance blocked by an undeclarable scope dimension is skipped and
+  named, with the dimension to pass to [`preserveUnknown`](#partial-ownership--preserveunknown-opt-in-102).
+  The single-domain form still emits it, deliberately, one domain at a time;
+- nothing is capped silently — the run prints how many blocks it emitted **and**
+  how many it skipped, with the reason for each.
+
+### The single-domain form
+
 It fetches `GET /permissions/<domainType>/<domainId>`, runs the rows through the
 **same** normalization the planner uses (`normalizeActual`), and prints a
 `ct.groupRole` / `ct.groupTypeRole` block whose every emitted grant is guaranteed
@@ -516,6 +569,82 @@ one `DELETE` per `toDelete` tuple against
 `/permissions/{domainType}/{domainId}`. Re-running `ct apply` against an
 unchanged instance diffs to empty and issues no requests — the reconciliation
 is idempotent.
+
+## Partial ownership — `preserveUnknown` (opt-in, #102)
+
+A declaration **owns its whole domain**: any live grant absent from `grants` is
+revoked. That is the right default, and it does not move. But it also means one
+unmanageable grant makes an entire role instance undeclarable — and on a real
+instance the blocker is almost always module data (an HTML template, a calendar
+category, a wiki category) sitting next to perfectly expressible structural
+grants. On eqrm prod that cost 403 of 590 authored grants, several of them
+blocked by a *single* `cc_html_template` row on a 41-grant role.
+
+`preserveUnknown` is the deliberate way out:
+
+```ts
+ct.groupRole({
+  key: "team_office_leiter",
+  group: "team_office",
+  role: "Leiter",
+  // Own the structural grants; leave anything on these dimensions alone. This role also carries
+  // cc_html_template grants that this scaffold has no business owning.
+  preserveUnknown: ["cc_html_template"],
+  grants: [ /* the 40 structural ones */ ],
+});
+```
+
+- **Opt-in per declaration.** There is no global switch, and no default change.
+- **`true` preserves everything undeclared**; a **list of scope dimensions** is
+  the form to prefer — it keeps the escape hatch's blast radius to the
+  dimensions you consciously excluded, so a genuinely unexpected new grant on a
+  dimension you *do* manage still shows up as drift rather than being swallowed.
+- A dimension list never widens to **unscoped** rights: you named dimensions to
+  leave alone, and "no dimension" is not one of them.
+- A dimension no right in the catalog scopes by is an **eval-time error**, not a
+  silent no-op — a typo that preserves nothing would otherwise read exactly like
+  "there was nothing to preserve", right up until an apply revokes 41 grants.
+- **Never invisible.** The plan renders every preserved grant and counts them
+  separately from the change totals, so "I forgot one" and "I deliberately left
+  the module grants alone" cannot look alike:
+
+```
+  group_role #44675 (team_office_leiter): +0 grant(s), -0 remove(s), ~2 preserved
+      ~ authId=17 scope=[3] (grant) (preserved, not managed — preserveUnknown)
+
+Permission plan: 0 to grant, 0 to remove, 2 preserved (not managed).
+```
+
+`ct coverage` (below) names the exact dimensions blocking each role instance —
+those are the strings to pass here.
+
+## What is declarable — `ct coverage` (#103)
+
+To ask an instance "what exists here that I am not managing, and could I manage
+it?":
+
+```bash
+ct coverage --env prod                 # totals, per-type table, declarability verdict
+ct coverage --env prod --blocked       # only the role instances something blocks, and what
+ct coverage --env prod --json          # for a CI gate
+```
+
+It joins `/groups?include[]=roles`, `/dynamicgroups` and
+`/permissions/group_role` against your state file. Two details it gets right
+that a hand-rolled audit easily does not: `?include[]=roles` turns one role
+lookup per group into a handful of paged calls, and **inherited rows are
+excluded** from the authored counts (forgetting that inflated one real audit
+from 590 to 714 grants and made several role instances look unmanageable that
+were not).
+
+Declarability is reported per **(group, role)**, not per group — one group
+routinely has two declarable roles and one blocked one, and group granularity
+would hide exactly that. A role instance is declarable when every authored grant
+is either unscoped, uses the `-1` ALL sentinel, scopes by a dimension with a
+[logical reference form](#scope-resolution) (`cdb_gruppe`, `cdb_station`,
+`cdb_gruppentyp`, `cdb_bereich`), or scopes by a numeric-but-host-independent
+dimension (`cc_securitylevel`). Anything else is module data with no resource
+behind it, and is named as the blocker.
 
 ## Example
 

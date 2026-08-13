@@ -266,3 +266,60 @@ describe("dynamic { ref } ruleset — resolved relative to the config file", () 
       .rejects.toThrow(/group "g".*cannot read.*missing\.json/is);
   });
 });
+
+describe("dynamic synthetic field — un-portablized ruleset reporting (#101)", () => {
+  /**
+   * A ruleset carrying another host's ids round-trips byte-identically against the host it was
+   * written for, so the plan is green and the auto-group quietly collects the wrong people on the
+   * other host. Plan time is the only place a config author sees this before it matters.
+   */
+  it("warns at plan time, naming the dimension, the ids and why they stayed numeric", async () => {
+    const state: State = { version: 1, host: "h",
+      resources: { g: { type: "group", id: 5, key: "g", fields: { name: "G" }, adoptedAt: "t", updatedAt: "t" } } };
+    const actual = new Map<string, Record<string, unknown>>([["g", { name: "G" }]]);
+    const ruleset = {
+      description: "x",
+      query: { and: [{ oneof: [{ var: "ctgroup.id" }, [1246]] }] },
+      process: {},
+    };
+    const desired: DesiredResource[] = [
+      { type: "group", key: "g", fields: { name: "G" }, dependsOn: [], dynamic: { status: "active", ruleset } },
+    ];
+    const client = { get: vi.fn(async (p: string) =>
+      p.endsWith("/ruleset") ? ruleset : { dynamicGroupStatus: "active" }) };
+    const errs: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((s) => { errs.push(String(s)); return true; });
+    try {
+      await dynamicField().fold({ client: getClient(client), state, desired, actual });
+    } finally {
+      spy.mockRestore();
+    }
+    const out = errs.join("");
+    expect(out).toContain('dynamic group "g": ruleset carries 1 host-specific id(s)');
+    expect(out).toMatch(/ctgroup\.id: 1246 left numeric/);
+  });
+
+  it("stays silent for a fully portable ruleset — the warning must mean something", async () => {
+    const state: State = { version: 1, host: "h",
+      resources: { g: { type: "group", id: 5, key: "g", fields: { name: "G" }, adoptedAt: "t", updatedAt: "t" } } };
+    const actual = new Map<string, Record<string, unknown>>([["g", { name: "G" }]]);
+    const ruleset = {
+      description: "x",
+      query: { and: [{ oneof: [{ var: "ctgroup.id" }, [{ __ctRef: true, kind: "group", key: "other" }]] }] },
+      process: {},
+    };
+    const desired: DesiredResource[] = [
+      { type: "group", key: "g", fields: { name: "G" }, dependsOn: [], dynamic: { status: "active", ruleset } },
+    ];
+    const client = { get: vi.fn(async (p: string) =>
+      p.endsWith("/ruleset") ? ruleset : { dynamicGroupStatus: "active" }) };
+    const errs: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((s) => { errs.push(String(s)); return true; });
+    try {
+      await dynamicField().fold({ client: getClient(client), state, desired, actual });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(errs.join("")).not.toContain("host-specific");
+  });
+});

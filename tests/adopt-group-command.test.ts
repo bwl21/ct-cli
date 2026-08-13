@@ -381,28 +381,59 @@ describe("ct adopt group --with-dynamic --portable-rulesets (#76 Stage 3)", () =
     expect(and[3]!.oneof![1]).toEqual([1, 2]);
   });
 
-  it("warns once naming the file for the unmanaged id it left numeric (escape hatch)", async () => {
+  it("names every dimension it left numeric, with the reason (#101)", async () => {
     const errs: string[] = [];
     const spy = vi.spyOn(process.stderr, "write").mockImplementation((s) => {
       errs.push(String(s));
       return true;
     });
     try {
-      await adoptWithManagedGroup(["--portable-rulesets"]);
+      await adoptWithManagedGroup([]);
     } finally {
       spy.mockRestore();
     }
     const warned = errs.join("");
-    expect(warned).toMatch(/left 1 unmanaged id\(s\) numeric in portable_dynamic\.json/);
-    expect(warned).toContain("escape hatch");
+    // The whole point of #101: not "left N ids numeric", but WHICH dimension, WHICH ids, and WHY.
+    expect(warned).toContain("rulesets/portable_dynamic.json keeps");
+    expect(warned).toContain("NOT portable to another host");
+    expect(warned).toMatch(/ctgroup\.id: 999 left numeric — group #999 is not under management/);
+    expect(warned).toMatch(/ctgroup\.groupStatusId: 1, 2 left numeric — group statuses have no REST catalog/);
   });
 
-  it("is OFF by default: a plain --with-dynamic capture keeps raw numeric ids (no markers)", async () => {
-    await adoptWithManagedGroup([]); // no --portable-rulesets
+  it("is ON by default since #101: a plain --with-dynamic capture emits ref markers", async () => {
+    await adoptWithManagedGroup([]); // no flag at all
+    const written = JSON.parse(await readFile(join(workDir, "rulesets", "portable_dynamic.json"), "utf8"));
+    const and = (written.query as { and: Array<Record<string, unknown[]>> }).and;
+    expect(and[0]!.oneof![1]).toEqual([{ __ctRef: true, kind: "group", key: "area_a" }, 999]);
+  });
+
+  it("--no-portable-rulesets opts out, keeping raw numeric ids — and says the capture is host-specific", async () => {
+    const errs: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((s) => {
+      errs.push(String(s));
+      return true;
+    });
+    try {
+      await adoptWithManagedGroup(["--no-portable-rulesets"]);
+    } finally {
+      spy.mockRestore();
+    }
     const written = JSON.parse(await readFile(join(workDir, "rulesets", "portable_dynamic.json"), "utf8"));
     const and = (written.query as { and: Array<Record<string, unknown[]>> }).and;
     expect(and[0]!.oneof![1]).toEqual([10, 999]); // raw ids, no rewrite
     expect(JSON.stringify(written)).not.toContain("__ctRef");
+    expect(errs.join("")).toContain("captured verbatim (--no-portable-rulesets)");
+  });
+
+  it("--strict-rulesets refuses to write a ruleset that still carries a host-specific id", async () => {
+    await run(["group", "10", "--state", statePath]);
+    await expect(
+      run(["group", "33", "--with-dynamic", "--strict-rulesets", "--state", statePath]),
+    ).rejects.toThrow(/--strict-rulesets/);
+    // Nothing was written — the refusal must not leave a half-portable file behind.
+    await expect(
+      readFile(join(workDir, "rulesets", "portable_dynamic.json"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("--dry-run --portable-rulesets writes no file", async () => {

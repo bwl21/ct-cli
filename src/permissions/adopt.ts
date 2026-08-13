@@ -90,13 +90,41 @@ function collapse(tuples: GrantTuple[]): CollapsedGrant[] {
  * the state, returns the block text (comments and all). The command wrapper handles the fetch and
  * prints the result — this stays fully unit-testable without a network.
  */
-export function emitAdoptedGrants(args: {
+export interface AdoptGrantsArgs {
   domainType: DomainType;
   domainId: number;
   rows: RawPermission[];
   state: State;
-}): string {
-  const { domainType, domainId, rows, state } = args;
+  /**
+   * The PORTABLE domain form (#104): the managed group's logical key + the role name, which the
+   * resolver maps back to this host's pairing domainId at plan time. Emitted instead of the numeric
+   * `id:` whenever the group is managed — the numeric id is host-specific, so it is exactly the edit a
+   * human forgets on the 30th paste. Absent ⇒ fall back to `id:`.
+   */
+  domain?: { group: string; role: string };
+  /** Logical key for the emitted block. Defaults to `<domainType>_<domainId>` (the pre-#104 shape). */
+  key?: string;
+}
+
+/** What {@link buildAdoptedGrants} produced, so a BULK caller can decide whether it is safe to emit. */
+export interface AdoptedGrantsBlock {
+  block: string;
+  /**
+   * How many LIVE grants were left as comments. Non-zero means applying the block as-is would REVOKE
+   * them — the one outcome the WARNING footer exists to prevent, and the reason bulk mode skips such
+   * blocks instead of printing 44 of them and hoping every comment gets read.
+   */
+  omitted: number;
+  /** Pre-existing deny rows on this domain; preserved by the reconciler, never emitted. */
+  revokes: number;
+}
+
+export function emitAdoptedGrants(args: AdoptGrantsArgs): string {
+  return buildAdoptedGrants(args).block;
+}
+
+export function buildAdoptedGrants(args: AdoptGrantsArgs): AdoptedGrantsBlock {
+  const { domainType, domainId, rows, state, domain, key } = args;
   const normalized = normalizeActual(rows);
   const grants = normalized.filter((t) => t.type === "grant");
   const revokes = normalized.filter((t) => t.type !== "grant");
@@ -105,8 +133,18 @@ export function emitAdoptedGrants(args: {
   const body: string[] = [];
   let omitted = 0;
   body.push(`${DSL_FN[domainType]}({`);
-  body.push(`  key: "${domainType}_${domainId}", // a logical key, unique across the config — rename to taste`);
-  body.push(`  id: ${domainId},`);
+  if (key !== undefined) {
+    body.push(`  key: ${JSON.stringify(key)},`);
+  } else {
+    body.push(`  key: "${domainType}_${domainId}", // a logical key, unique across the config — rename to taste`);
+  }
+  if (domain) {
+    // Portable form: resolved per host at plan time, so the same block applies to dev and prod.
+    body.push(`  group: ${JSON.stringify(domain.group)},`);
+    body.push(`  role: ${JSON.stringify(domain.role)},`);
+  } else {
+    body.push(`  id: ${domainId}, // host-specific — adopt the group to emit the portable group + role form`);
+  }
 
   if (grants.length === 0) {
     body.push("  grants: [], // no user-authored grants on this domain (baseline/inherited rows excluded)");
@@ -144,7 +182,7 @@ export function emitAdoptedGrants(args: {
     lines.push("// config is not supported yet (see issue #25 stretch goal).");
   }
 
-  return lines.join("\n");
+  return { block: lines.join("\n"), omitted, revokes: revokes.length };
 }
 
 /** The lines emitted for one collapsed grant, plus whether a LIVE grant was left as a comment

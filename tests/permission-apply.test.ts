@@ -10,7 +10,7 @@ describe("applyPermissionPlan", () => {
       diff: {
         toPut: [{ authId: 1104, dataId: [42], type: "grant" }, { authId: 1101, dataId: [], type: "grant" }],
         toDelete: [{ authId: 2000, dataId: [], type: "grant" }],
-        preserved: [],
+        preserved: [], preservedUnknown: [],
       },
     }], { request } as never);
     expect(res).toEqual({ granted: 2, deleted: 1, failed: [] });
@@ -34,7 +34,7 @@ describe("applyPermissionPlan", () => {
           { authId: 1101, dataId: [], type: "grant" },
         ],
         toDelete: [{ authId: 2000, dataId: [], type: "grant" }],
-        preserved: [],
+        preserved: [], preservedUnknown: [],
       },
     }], { request } as never);
     expect(res.granted).toBe(1); // only the 1101 PUT succeeded
@@ -55,7 +55,7 @@ describe("applyPermissionPlan", () => {
       diff: {
         toPut: [{ authId: 1104, dataId: [42], type: "grant" }],
         toDelete: [],
-        preserved: [],
+        preserved: [], preservedUnknown: [],
       },
     }], { request } as never);
     expect(res.failed).toHaveLength(1);

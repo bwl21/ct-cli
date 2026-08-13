@@ -1,8 +1,15 @@
 import { Command } from "commander";
 import { authedSession } from "../api/session.js";
+import {
+  hasMorePages,
+  hasOwnPageParams,
+  withPageParams,
+  type CtClient,
+  type CtMeta,
+} from "../api/ctClient.js";
 import { prepareEnvHost } from "../env/context.js";
 import { CATALOG } from "../permissions/catalog.js";
-import { info, out } from "../ui.js";
+import { info, out, warn } from "../ui.js";
 
 interface ResourceSpec {
   path: string;
@@ -93,13 +100,97 @@ export function getCommand(): Command {
 
   cmd
     .command("raw <path>")
-    .description("GET an arbitrary API path, e.g. `ct get raw /groups/42`")
+    .description("GET an arbitrary API path, e.g. `ct get raw /groups/42` (list endpoints are paginated)")
     .option("-e, --env <name>", "environment profile from ct.envs.json (targets that host)")
-    .action(async (path: string, opts: { env?: string }) => {
+    .option(
+      "--no-paginate",
+      "issue exactly one request instead of following pagination (warns if rows were left behind)",
+    )
+    .option("--page <n>", "fetch exactly this page (implies --no-paginate)")
+    .action(async (path: string, opts: RawOptions) => {
       await prepareEnvHost(opts); // #22: wire the env's host/token before authenticating
       const { client } = await authedSession();
-      out(await client.get(path.startsWith("/") ? path : `/${path}`));
+      const target = path.startsWith("/") ? path : `/${path}`;
+      await getRaw(client, target, opts);
     });
 
   return cmd;
+}
+
+interface RawOptions {
+  env?: string;
+  /** Commander's negatable `--no-paginate`: true unless the flag was passed. */
+  paginate?: boolean;
+  page?: string;
+}
+
+/**
+ * `ct get raw <path>` (#100). Before this, raw issued ONE plain request and printed whatever came
+ * back — which for any CT list endpoint is its default first page (10 rows) with no hint that the
+ * rest exist. That made raw disagree with the typed commands by hundreds of rows on the same path,
+ * and the output (a valid-looking JSON array) gave the reader no reason to doubt it.
+ *
+ * So raw now follows pagination like the typed commands, while staying an honest escape hatch:
+ *
+ *  - a probe request runs FIRST, with no paging params added. A non-array body (`/groups/42`,
+ *    `/whoami`) is printed as-is — paging params are never appended to an endpoint that isn't a
+ *    list, so no path can start 400ing because raw got clever.
+ *  - an array body whose `meta.pagination` says more rows exist is re-read through `getAll`.
+ *  - `--no-paginate` / `--page <n>` / a caller-supplied `page=`/`limit=` in the path keep the
+ *    single-request behaviour for deliberate probing — and then a dropped-rows WARNING is loud,
+ *    because silence is the one thing this must never do again.
+ */
+export async function getRaw(
+  client: Pick<CtClient, "getRaw" | "getAll">,
+  target: string,
+  opts: RawOptions,
+): Promise<void> {
+  let page: number | undefined;
+  if (opts.page !== undefined) {
+    if (!/^\d+$/.test(String(opts.page).trim()) || Number.parseInt(String(opts.page), 10) < 1) {
+      throw new Error(`Invalid --page "${opts.page}" — expected a positive integer.`);
+    }
+    page = Number.parseInt(String(opts.page), 10);
+  }
+  // A path that already carries page/limit is the caller hand-rolling their own paging: honour it
+  // verbatim rather than appending a second, conflicting pair.
+  const single = opts.paginate === false || page !== undefined || hasOwnPageParams(target);
+
+  if (single) {
+    const path = page !== undefined ? withPageParams(target, page, DEFAULT_RAW_PAGE_LIMIT) : target;
+    const { data, meta } = await client.getRaw(path);
+    out(data);
+    reportRows(data, meta);
+    return;
+  }
+
+  const probe = await client.getRaw(target);
+  if (!Array.isArray(probe.data) || !hasMorePages(probe.meta, probe.data.length)) {
+    out(probe.data);
+    reportRows(probe.data, probe.meta);
+    return;
+  }
+  const all = await client.getAll(target);
+  out(all.data);
+  reportRows(all.data, all.meta);
+}
+
+/** Page size for `--page <n>`, matching the client's own default so page N means the same thing. */
+const DEFAULT_RAW_PAGE_LIMIT = 100;
+
+/** Echo the row count on stderr, and WARN whenever rows were left behind (never silent — #100). */
+function reportRows(data: unknown, meta: CtMeta | undefined): void {
+  if (!Array.isArray(data)) {
+    return; // single object — pagination does not apply
+  }
+  const total = meta?.pagination?.total;
+  if (hasMorePages(meta, data.length)) {
+    warn(
+      `INCOMPLETE: returned ${data.length} of ${total ?? "more"} row(s) — this endpoint is paginated ` +
+        `and only part of it was fetched. Drop --page/--no-paginate (or the page=/limit= in the path) ` +
+        `to fetch every page.`,
+    );
+    return;
+  }
+  info(total !== undefined && total !== data.length ? `${data.length} of ${total} total` : `${data.length} total`);
 }

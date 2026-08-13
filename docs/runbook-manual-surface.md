@@ -51,10 +51,49 @@ in that instance's own config repo, in a runbook following this doc's structure.
 | Module-level settings, i18n                                                                                          | Out of tool scope by design — global instance configuration, not per-resource declarative structure                                                                                                                                                                                                                                       |
 | Custom field / master-data field **VALUES on individual person/group records**                                                      | People/record data is the permanent people boundary (`assertNotPeople`). Note: the field **DEFINITIONS** (schema) are **no longer out of scope** — they moved to read-only supported above (#47/#48, [`docs/handbuch/field-definitions.md`](handbuch/field-definitions.md)); only the per-record *values* stay out of scope. |
 
+## Forcing ChurchTools to evaluate auto-groups now
+
+**Supported path — `ct refresh` (#105).** `ct apply` writes the ruleset and flips
+the status; ChurchTools materializes membership on its **own schedule**, so a
+freshly created auto-group is legitimately empty right after a green apply.
+
+```bash
+ct refresh --env prod --group <key>   # POST /dynamicgroups/{id}/refresh for one managed group
+ct refresh --env prod --all           # …for every managed dynamic group
+```
+
+**Manual escape hatch — the legacy scheduler ping. `ct` deliberately never fires
+this.** ChurchTools' admin cron page hits:
+
+```bash
+curl -s -o /dev/null "https://<host>/?q=cron&standby=true"   # returns a 1×1 image
+```
+
+That runs **every due scheduled job on the instance**, not just auto-group
+evaluation — calendar syncs, mailings, whatever else is due. Its blast radius is
+the whole instance, which is exactly why it stayed out of the tool: `ct refresh`
+targets one auto-group at a time and only ever touches groups the config manages.
+Reach for the curl only when you need CT's scheduler itself to tick, and know
+what else is due when you do.
+
 ## Permission catalog lifecycle (regeneration procedure)
 
-**Scripted (#25) — the normal path.** Regenerate `src/permissions/catalog.json`
-from a live instance with one command:
+**From a consumer repo (#105) — the normal path.** Capture the catalog for the
+instance you actually target, and commit it:
+
+```bash
+ct permissions catalog --refresh --env prod   # → .ct/permission-catalog.<host>.json
+ct permissions catalog --env prod             # which catalog is active, and where it came from
+```
+
+Every `ct plan`/`ct apply` against that host then uses it in preference to the
+catalog bundled with the `ct` release (and the version-skew warning goes quiet,
+since a capture from the target host is authoritative for it). Before this, the
+warning told you to run a script that only exists in the ct-cli repo — so it was
+unactionable exactly where it was printed, and printed on every single plan.
+
+**In the ct-cli repo (#25) — moving the shipped default forward.** Regenerate
+`src/permissions/catalog.json` from a live instance with one command:
 
 ```bash
 CT_HOST=https://your.church.tools CT_LOGINTOKEN=<token> npm run regenerate:permission-catalog

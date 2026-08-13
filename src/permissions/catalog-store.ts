@@ -1,0 +1,138 @@
+/**
+ * The per-instance permission catalog (#105).
+ *
+ * The name↔authId catalog is not exposed by the REST API, so it ships as a JSON snapshot captured
+ * from ONE ChurchTools version. Every plan against an instance on a different version printed:
+ *
+ *   ! Permission catalog was captured from ChurchTools 3.134.0 but this instance runs 3.135.2.
+ *     … regenerate it with `npm run regenerate:permission-catalog`
+ *
+ * …naming a script that lives in the ct-cli repo. A consumer repo could not act on it short of
+ * opening a PR here and waiting for a release, so the warning was unactionable exactly where it was
+ * printed, and it printed on every single plan — which trains people to ignore it, including on the
+ * plans where a stale authId would actually matter.
+ *
+ * The fix is to let a consumer repo capture the catalog for ITS OWN host and commit the result:
+ * `ct permissions catalog --refresh` writes `.ct/permission-catalog.<host>.json`, and every
+ * plan/apply against that host loads it in preference to the bundled snapshot. The bundled catalog
+ * stays the fallback, so nothing changes for a repo that never runs the refresh.
+ */
+import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { CtClient } from "../api/ctClient.js";
+import { useCatalog, type CatalogEntry } from "./catalog.js";
+
+/** Directory a consumer repo commits its per-instance captures into, beside the config/state files. */
+export const CATALOG_DIR = ".ct";
+
+/** Host → filename component. Keeps one file per instance, so dev and prod captures coexist. */
+export function hostSlug(host: string): string {
+  return host
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+export function hostCatalogPath(host: string, dir: string = CATALOG_DIR): string {
+  return join(dir, `permission-catalog.${hostSlug(host)}.json`);
+}
+
+/**
+ * Load the per-instance catalog for `host`, if one has been committed, and make it the active one.
+ * Returns the path it loaded, or `null` when there is none (the bundled catalog stays active).
+ *
+ * A malformed file THROWS rather than silently falling back: a repo that committed a capture is
+ * relying on it, and quietly planning against a different catalog than the author thinks is in use is
+ * the failure mode this whole feature exists to remove.
+ */
+export async function loadHostCatalog(host: string, dir: string = CATALOG_DIR): Promise<string | null> {
+  const path = hostCatalogPath(host, dir);
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (err) {
+    if ((err as { code?: string }).code === "ENOENT") return null;
+    throw err;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Malformed permission catalog ${path}: not valid JSON (${(err as Error).message}).`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Malformed permission catalog ${path}: expected a JSON object at the top level.`);
+  }
+  useCatalog(parsed, { perInstance: true });
+  return path;
+}
+
+/** The legacy master-data shape (`auth_table[module][right]`) — see `capturePermissionCatalog`. */
+interface RawRight {
+  id: number;
+  datenfeld?: string | null;
+  bezeichnung?: string | null;
+  isRevocable?: boolean | number;
+}
+interface MasterData {
+  data?: { auth_table?: Record<string, Record<string, RawRight>> };
+  auth_table?: Record<string, Record<string, RawRight>>;
+}
+
+/**
+ * Capture the catalog from a live instance and return it in `catalog.json`'s exact schema.
+ *
+ * The data comes from the legacy AJAX endpoint the permission editor itself uses — the catalog is
+ * genuinely absent from the REST API, so there is no cleaner source. Any authenticated session that
+ * can open Settings → Permissions can call it, which is why a consumer repo can now do this for
+ * itself. One read; it never writes to the instance.
+ */
+export async function capturePermissionCatalog(
+  client: Pick<CtClient, "legacyPostForm" | "host" | "version">,
+): Promise<Record<string, unknown>> {
+  const master = (await client.legacyPostForm("churchauth/ajax", { func: "getMasterData" })) as MasterData;
+  const authTable = master?.data?.auth_table ?? master?.auth_table;
+  if (!authTable || typeof authTable !== "object") {
+    throw new Error(
+      "Unexpected response from churchauth/ajax getMasterData: no data.auth_table. The legacy endpoint " +
+        "or its shape may have changed — the bundled catalog is still in use.",
+    );
+  }
+  const rights: Record<string, CatalogEntry> = {};
+  for (const [moduleName, moduleRights] of Object.entries(authTable)) {
+    for (const [rightName, raw] of Object.entries(moduleRights)) {
+      const field = raw.datenfeld;
+      rights[`${moduleName}:${rightName}`] = {
+        authId: raw.id,
+        scopeField: field && String(field).length > 0 ? String(field) : null,
+        revocable: Boolean(raw.isRevocable),
+        desc: raw.bezeichnung ? String(raw.bezeichnung) : "",
+      };
+    }
+  }
+  const host = client.host.replace(/^https?:\/\//, "");
+  return {
+    // Reserved provenance key, split off by catalog.ts and never seen as a right.
+    $meta: {
+      capturedFrom: host,
+      ctVersion: client.version ?? "unknown",
+      capturedAt: new Date().toISOString().slice(0, 10),
+      rightCount: Object.keys(rights).length,
+      source: "POST /index.php?q=churchauth/ajax  func=getMasterData",
+      regenerate: `ct permissions catalog --refresh (writes ${hostCatalogPath(client.host)})`,
+    },
+    ...rights,
+  };
+}
+
+/** Write a capture to this host's per-instance path, creating `.ct/` if needed. Returns the path. */
+export async function writeHostCatalog(
+  host: string,
+  catalog: Record<string, unknown>,
+  dir: string = CATALOG_DIR,
+): Promise<string> {
+  await mkdir(dir, { recursive: true });
+  const path = hostCatalogPath(host, dir);
+  await writeFile(path, `${JSON.stringify(catalog, null, 1)}\n`, "utf8");
+  return path;
+}

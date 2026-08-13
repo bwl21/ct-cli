@@ -20,7 +20,7 @@ import type { DynamicStatus } from "../engine/types.js";
 import { RESOURCES, configSnippet, fromInformation, slug } from "../resources/registry.js";
 import { ReverseResolver, type RoleCatalogEntry } from "../resolve/reverse.js";
 import type { RefKind } from "../resolve/refs.js";
-import { portablizeRuleset } from "../config/query-refs.js";
+import { formatPortablizeWarnings, portablizeRuleset, scanUnportablized } from "../config/query-refs.js";
 import { loadState, saveState, upsert, type State } from "../state/state.js";
 import { success, info, warn, out } from "../ui.js";
 
@@ -32,7 +32,9 @@ interface AdoptGroupOptions {
   type?: string;
   childrenOf?: string;
   withDynamic?: boolean;
+  /** Commander's negatable `--no-portable-rulesets`: true unless the flag was passed (#101). */
   portableRulesets?: boolean;
+  strictRulesets?: boolean;
 }
 
 const GROUP_SPEC = RESOURCES.group!;
@@ -184,8 +186,17 @@ export function adoptGroupCommand(): Command {
     )
     .option(
       "--portable-rulesets",
-      "when capturing rulesets (--with-dynamic), rewrite managed entity ids in the query into portable " +
-        "logical ref markers; unmanaged ids stay numeric with a warning (opt-in; #76)",
+      "(deprecated — this is the default since #101) rewrite managed entity ids into portable logical refs",
+    )
+    .option(
+      "--no-portable-rulesets",
+      "capture rulesets verbatim: keep this host's numeric entity ids instead of rewriting the managed " +
+        "ones into portable logical ref markers (#76/#101 — portablization is the default)",
+    )
+    .option(
+      "--strict-rulesets",
+      "refuse to write a ruleset that still contains an unportablized (host-specific) id, instead of " +
+        "writing it with a warning (#101)",
     )
     .action(async (ids: string[], _localOpts: AdoptGroupOptions, command: Command) => {
       // `adopt` (the parent) also declares `-k/--key`, `-s/--state`, `-e/--env`, and `--dry-run` —
@@ -254,10 +265,14 @@ export function adoptGroupCommand(): Command {
       // NOT a simple id→key map — a `role.id`/`groupTypeRoleId` is group-type-scoped and role names are
       // not globally unique, so we fetch the (groupTypeId, name) catalog plus the group-type id→key map
       // and let portablizeRuleset emit (group-type, role-name) markers (fixes #86's `role-def` mapping).
+      //
+      // Portablization is ON by default since #101 (`--no-portable-rulesets` opts out): leaving a
+      // capture host-specific fails SILENTLY on the next host — CT does not validate the ids inside a
+      // ruleset, so the auto-group just collects the wrong people while `ct plan` stays green.
       const portableCatalogMaps: Partial<Record<RefKind, Map<number, string>>> = {};
       let roleCatalog: Map<number, RoleCatalogEntry> | undefined;
       let groupTypeIdToKey: Map<number, string> | undefined;
-      if (opts.withDynamic && opts.portableRulesets) {
+      if (opts.withDynamic && opts.portableRulesets !== false) {
         portableCatalogMaps.campus = await reverse.idToKeyByKind("campus");
         portableCatalogMaps["group-type"] = await reverse.idToKeyByKind("group-type");
         groupTypeIdToKey = portableCatalogMaps["group-type"];
@@ -282,7 +297,7 @@ export function adoptGroupCommand(): Command {
           if (captured) {
             const relPath = `rulesets/${key}.json`;
             let rulesetToWrite = captured.normalizedRuleset;
-            if (opts.portableRulesets) {
+            if (opts.portableRulesets !== false) {
               // Managed group ids come from state (no catalog for `group`), including any group this
               // same run already adopted; the master-data kinds come from the catalog maps above.
               const groupMap = new Map<number, string>();
@@ -295,10 +310,35 @@ export function adoptGroupCommand(): Command {
                 groupTypeIdToKey,
               });
               rulesetToWrite = ruleset;
+              // Report every dimension left numeric, with its reason (#101). The old output said only
+              // "left N unmanaged id(s) numeric", which named neither the dimension nor the fix — so a
+              // capture that silently froze prod's ids into a cross-host file looked like a clean run.
               if (warnings.length > 0) {
+                const lines = formatPortablizeWarnings(warnings);
+                if (opts.strictRulesets) {
+                  throw new Error(
+                    `--strict-rulesets: ${relPath} would contain ${warnings.length} unportablized ` +
+                      `(host-specific) id(s), so nothing was written:\n` +
+                      lines.map((l) => `    ${l}`).join("\n"),
+                  );
+                }
+                warn(`${relPath} keeps ${warnings.length} host-specific id(s) — NOT portable to another host:`);
+                for (const line of lines) info(`    ${line}`);
+              }
+            } else {
+              // Verbatim capture (--no-portable-rulesets): every entity id in the file is this host's.
+              // Say so once per ruleset rather than let the opt-out quietly imply the ids are fine.
+              const left = scanUnportablized(captured.normalizedRuleset);
+              if (left.length > 0) {
+                if (opts.strictRulesets) {
+                  throw new Error(
+                    `--strict-rulesets with --no-portable-rulesets: ${relPath} would contain ` +
+                      `${left.length} host-specific id(s) and nothing would rewrite them.`,
+                  );
+                }
                 warn(
-                  `left ${warnings.length} unmanaged id(s) numeric in ${key}.json — ` +
-                    `operational/unmanaged refs, not portable (escape hatch)`,
+                  `${relPath} captured verbatim (--no-portable-rulesets): ${left.length} host-specific ` +
+                    `id(s) kept as-is — NOT portable to another host.`,
                 );
               }
             }

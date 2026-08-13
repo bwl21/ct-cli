@@ -13,6 +13,7 @@ import { writeBackup } from "../engine/backup.js";
 import { renderPlan } from "../engine/render.js";
 import { summarize } from "../engine/types.js";
 import { buildPermissionPlan } from "../permissions/plan.js";
+import { loadHostCatalog } from "../permissions/catalog-store.js";
 import { renderPermissionPlan } from "../permissions/render.js";
 import { applyPermissionPlan } from "../permissions/apply.js";
 import { confirm, confirmEnv } from "../ui/prompt.js";
@@ -61,6 +62,10 @@ export function applyCommand(): Command {
       const statePath = cmdEnv.statePath;
       const { resources: desired, permissions, configDir } = await loadConfig(configPath);
       const state = await loadState(statePath, config.host);
+      // A per-instance permission catalog this repo committed for THIS host wins over the bundled
+      // one (#105) — same precedence as `ct plan`, so the two never disagree about what a right is.
+      const hostCatalog = await loadHostCatalog(config.host);
+      if (hostCatalog) info(`permission catalog: ${hostCatalog}`);
 
       const { client } = await authedSession();
       // One shared resolver (#20) across both concurrent plans — see commands/plan.ts.
@@ -163,6 +168,21 @@ export function applyCommand(): Command {
 
       if (opts.refresh) {
         await runPostApplyHooks(plan, state, client);
+      } else {
+        // The auto-group model is the single most surprising thing about a green apply (#105): the
+        // ruleset is written and activated, but ChurchTools computes membership on its own schedule,
+        // so a freshly created auto-group is legitimately EMPTY right now. Saying so costs one line
+        // and removes the "did it work?" that otherwise follows every first apply.
+        const dynamicKeys = plan.items
+          .filter((i) => i.action !== "no-op" && i.action !== "delete" && i.changes.some((c) => c.field === "dynamic"))
+          .map((i) => i.key);
+        if (dynamicKeys.length > 0) {
+          info(
+            `${dynamicKeys.length} dynamic group(s) written and activated — ChurchTools materializes their ` +
+              `membership on its own schedule, so they may be empty for now. Force it with ` +
+              `\`ct refresh --group ${dynamicKeys[0]}\` (or re-run apply with --refresh).`,
+          );
+        }
       }
     });
 }

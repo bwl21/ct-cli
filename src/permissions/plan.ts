@@ -8,11 +8,25 @@ import type { CtClient } from "../api/ctClient.js";
 import { CtApiError } from "../api/ctClient.js";
 import type { State } from "../state/state.js";
 import type { DesiredResource } from "../engine/types.js";
-import { resolveAuthId, CATALOG_META, KNOWN_AUTH_IDS } from "./catalog.js";
+import {
+  resolveAuthId,
+  CATALOG_META,
+  CATALOG_IS_PER_INSTANCE,
+  KNOWN_AUTH_IDS,
+  SCOPE_FIELD_BY_AUTH_ID,
+} from "./catalog.js";
 import { compareVersions } from "../api/version.js";
 import { resolveScope, resolveScopeRefs, type ScopeRefMap } from "./scope.js";
-import { normalizeActual, diffGrants, type GrantTuple, type GrantDiff, type DomainType, type RawPermission } from "./grants.js";
-import type { DesiredPermission } from "./types.js";
+import {
+  normalizeActual,
+  diffGrants,
+  type GrantTuple,
+  type GrantDiff,
+  type DomainType,
+  type PreservePredicate,
+  type RawPermission,
+} from "./grants.js";
+import type { DesiredPermission, PreserveUnknown } from "./types.js";
 import { Resolver } from "../resolve/resolver.js";
 import { isPendingRef, refKey, refLabel, type Ref } from "../resolve/refs.js";
 
@@ -79,6 +93,27 @@ export function desiredTuples(
 }
 
 /**
+ * Turn a declaration's `preserveUnknown` (#102) into the predicate `diffGrants` applies to every live
+ * grant the declaration does not mention. `undefined` ⇒ no predicate ⇒ the strict default (revoke).
+ *
+ * The dimension of a live grant comes from its authId via the catalog. A grant whose authId the
+ * catalog cannot name never reaches here — `buildPermissionPlan` already excludes those from the diff
+ * entirely (they are warned about and left untouched, never revoked).
+ */
+export function preservePredicateFor(preserveUnknown: PreserveUnknown | undefined): PreservePredicate | undefined {
+  if (preserveUnknown === undefined || preserveUnknown === false) return undefined;
+  if (preserveUnknown === true) return () => true;
+  const dimensions = new Set<string>(preserveUnknown);
+  return (t) => {
+    const scopeField = SCOPE_FIELD_BY_AUTH_ID.get(t.authId);
+    // An UNSCOPED right (scopeField null) is never covered by a dimension list: the author named
+    // dimensions to leave alone, and "no dimension" is not one of them. Preserving it would silently
+    // widen the escape hatch past what was asked for.
+    return scopeField != null && dimensions.has(scopeField);
+  };
+}
+
+/**
  * A permission whose domainId has been resolved. Either a concrete numeric domain, or — when the
  * domain is a group type created in this same run (#69) — a `pendingDomain` Ref with `domainId: null`,
  * re-resolved at apply time.
@@ -113,7 +148,14 @@ async function resolveDomainIds(
     const site = `${p.domainType} "${p.key}".domainId`;
     const res = await resolver.resolve(p.domainId, site);
     if (isPendingRef(res)) {
-      resolved.push({ key: p.key, domainType: p.domainType, grants: p.grants, domainId: null, pendingDomain: res.__pendingRef });
+      resolved.push({
+        key: p.key,
+        domainType: p.domainType,
+        grants: p.grants,
+        preserveUnknown: p.preserveUnknown,
+        domainId: null,
+        pendingDomain: res.__pendingRef,
+      });
       continue;
     }
     resolved.push({ ...p, domainId: res });
@@ -143,14 +185,26 @@ export async function buildPermissionPlan(
   const items: PermissionPlanItem[] = [];
   const fetchErrors: string[] = [];
   const warnings: string[] = [];
-  // Catalog staleness (#25): the catalog is a snapshot captured against one CT version. If the live
-  // instance reports a different version, right names/authIds/scopeFields may have drifted — warn
-  // (never fail) so the diff is trusted-but-verified and the fix (regenerate) is one command away.
-  if (permissions.length > 0 && instanceVersion && CATALOG_META && compareVersions(instanceVersion, CATALOG_META.ctVersion) !== 0) {
+  // Catalog staleness (#25/#105): the catalog is a snapshot captured against one CT version. If the
+  // live instance reports a different version, right names/authIds/scopeFields may have drifted —
+  // warn (never fail) so the diff is trusted-but-verified.
+  //
+  // Two narrowings since #105, both aimed at the same failure: a warning that fires on every plan is
+  // a warning nobody reads, including on the plan where a moved authId would actually matter.
+  //  1. A catalog captured FROM THIS HOST is authoritative for it, so a version delta against the
+  //     BUNDLED catalog is the only thing worth mentioning.
+  //  2. The remediation now names a command a consumer repo can actually run.
+  if (
+    permissions.length > 0 &&
+    instanceVersion &&
+    CATALOG_META &&
+    !CATALOG_IS_PER_INSTANCE &&
+    compareVersions(instanceVersion, CATALOG_META.ctVersion) !== 0
+  ) {
     warnings.push(
       `Permission catalog was captured from ChurchTools ${CATALOG_META.ctVersion} but this instance ` +
-        `runs ${instanceVersion}. Right names/authIds may be stale — regenerate it with ` +
-        `\`npm run regenerate:permission-catalog\` (see docs/handbuch/permissions.md).`,
+        `runs ${instanceVersion}. Right names/authIds may be stale — capture one for this instance ` +
+        `with \`ct permissions catalog --refresh\` (see docs/handbuch/permissions.md).`,
     );
   }
   // Resolve logical domainIds (#20) up front. Shares the command layer's resolver so master-data
@@ -224,7 +278,16 @@ export async function buildPermissionPlan(
           `(\`npm run regenerate:permission-catalog\`) if this right should be manageable.`,
       );
     }
-    items.push({ key: p.key, domainType: p.domainType, domainId: p.domainId, diff: diffGrants(desiredTuples(p, state, declaredGroupKeys, scopeRefs), knownActual) });
+    items.push({
+      key: p.key,
+      domainType: p.domainType,
+      domainId: p.domainId,
+      diff: diffGrants(
+        desiredTuples(p, state, declaredGroupKeys, scopeRefs),
+        knownActual,
+        preservePredicateFor(p.preserveUnknown),
+      ),
+    });
   }
   return { items, fetchErrors, warnings };
 }

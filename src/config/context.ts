@@ -15,7 +15,8 @@ import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DesiredResource, DynamicSpec, DynamicStatus } from "../engine/types.js";
 import type { DomainType } from "../permissions/grants.js";
-import type { DesiredPermission, Grant } from "../permissions/types.js";
+import type { DesiredPermission, Grant, PreserveUnknown } from "../permissions/types.js";
+import { KNOWN_SCOPE_FIELDS } from "../permissions/catalog.js";
 import { GROUP_STATUS_NO_CATALOG, isRef, ref, refKey, type Ref } from "../resolve/refs.js";
 import { normalizeScopeEntry } from "../permissions/scope.js";
 import { conventionalRulesetRef, knownFields } from "../resources/registry.js";
@@ -130,6 +131,12 @@ export interface PermissionInput {
   /** `status`: the PERSON status by name/key (`/statuses`) — sugars into a Ref-valued domainId (#90). */
   personStatus?: string;
   grants: Grant[];
+  /**
+   * Opt in to keeping live grants this declaration does not mention, instead of revoking them (#102).
+   * `true` for all of them, or a list of scope dimensions (`["cc_html_template"]`) to keep the escape
+   * hatch's blast radius to the dimensions you consciously excluded. See {@link PreserveUnknown}.
+   */
+  preserveUnknown?: PreserveUnknown;
 }
 
 /** Logical id-field sugar for declarations: a named string field → a Ref-valued numeric id field.
@@ -204,6 +211,43 @@ function resolveDomainInput(domainType: DomainType, input: PermissionInput): num
     );
   }
   return input.id;
+}
+
+/**
+ * Validate and normalise `preserveUnknown` (#102). Every failure is an eval-time error, because the
+ * whole feature is an escape hatch from a destructive default: a typo'd dimension that silently
+ * preserves nothing is indistinguishable from "nothing needed preserving" — right up until an apply
+ * revokes 41 live grants. `undefined` (the strict default) passes straight through.
+ */
+function normalizePreserveUnknown(
+  domainType: DomainType,
+  input: PermissionInput,
+): PreserveUnknown | undefined {
+  const value = input.preserveUnknown;
+  if (value === undefined || value === false) return undefined; // false ≡ the default; don't carry it
+  if (value === true) return true;
+  if (!Array.isArray(value) || value.some((d) => typeof d !== "string" || d.length === 0)) {
+    throw new Error(
+      `${domainType} "${input.key}": "preserveUnknown" must be true or an array of scope dimension ` +
+        `names (e.g. ["cc_html_template"]).`,
+    );
+  }
+  if (value.length === 0) {
+    throw new Error(
+      `${domainType} "${input.key}": "preserveUnknown: []" preserves nothing — omit it for the strict ` +
+        `default, or name the dimensions to leave alone.`,
+    );
+  }
+  const unknown = value.filter((d) => !KNOWN_SCOPE_FIELDS.has(d));
+  if (unknown.length > 0) {
+    throw new Error(
+      `${domainType} "${input.key}": "preserveUnknown" names ${unknown.length === 1 ? "a scope dimension" : "scope dimensions"} ` +
+        `no right in the permission catalog scopes by: ${unknown.join(", ")}. A dimension that matches ` +
+        `nothing would preserve nothing and read exactly like "there was nothing to preserve" — check ` +
+        `the spelling against \`ct get permissions-catalog\`.`,
+    );
+  }
+  return [...new Set(value)];
 }
 
 export interface ConfigContext {
@@ -466,7 +510,8 @@ export function createContext(): {
       );
     }
     seenDomains.set(domainKey, input.key);
-    permissions.push({ key: input.key, domainType, domainId, grants });
+    const preserveUnknown = normalizePreserveUnknown(domainType, input);
+    permissions.push({ key: input.key, domainType, domainId, grants, preserveUnknown });
   };
   const definePermission =
     (domainType: DomainType) =>
