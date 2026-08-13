@@ -5,8 +5,8 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: 49ef267c4843eeb4
-reviewed: 2026-08-10
+sources_hash: ffcfe8dc0516ccf3
+reviewed: 2026-08-13
 ---
 
 # Permissions (`ct.groupRole` / `ct.groupTypeRole` / `ct.status`)
