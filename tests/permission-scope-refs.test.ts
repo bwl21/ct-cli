@@ -304,9 +304,11 @@ describe("department scopes are a read-but-not-managed ref catalog (cdb_bereich,
     ]);
   });
 
-  it("hard-errors on an unknown department, and does NOT advise declaring it", async () => {
+  it("hard-errors on an unknown department, and NOW advises declaring it (#108)", async () => {
+    // Before #108 this said departments could not be declared or adopted. They can: `ct.department`
+    // creates one through the legacy master-data endpoint, so the generic advice is correct again.
     await expect(tuplesFor(perm("nope"), emptyState(HOST), [], client)).rejects.toThrow(
-      /no live department at \/departments matches key "nope".*ct reads departments but does not manage them/s,
+      /no managed resource and no live department at \/departments matches key "nope".*Declare\/adopt it/s,
     );
   });
 

@@ -56,6 +56,10 @@ const REF_KIND_TYPE: Partial<Record<RefKind, string>> = {
   // status declared in the same config usable as a permission domain (it resolves to a PendingRef,
   // which buildPermissionPlan carries as a pending domain, #69).
   "person-status": "person-status",
+  // Bereiche became a managed resource in #108 (writes go through the legacy master-data endpoint,
+  // reads stay `GET /departments`), so a `{ department: "…" }` ref resolves from managed state first
+  // and only falls back to the catalog for a Bereich this config does not own.
+  department: "department",
   // Security levels became a managed resource in #110, so — exactly like person statuses above — a
   // `{ securityLevel: "…" }` ref resolves from managed state / this run's declarations FIRST and only
   // falls through to the `/securitylevels` catalog for a level this config does not own. That

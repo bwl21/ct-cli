@@ -13,7 +13,7 @@ import { CtApiError } from "../api/ctClient.js";
 import type { ManagedResource, State } from "../state/state.js";
 import { upsert, saveState } from "../state/state.js";
 import type { FieldChange, Plan, PlanItem } from "./types.js";
-import { RESOURCES } from "../resources/registry.js";
+import { RESOURCES, type CtWriteClient } from "../resources/registry.js";
 import { assertNotPeople } from "./guard.js";
 import { isSyntheticField, syntheticField } from "./synthetic.js";
 import { reresolvePendingValue } from "../resolve/resolver.js";
@@ -165,10 +165,19 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         // collection — `createPath` reads it out of the body. Everything else posts to the collection.
         const createTarget = spec.createPath ? spec.createPath(createBody) : spec.collectionPath;
         assertNotPeople(createTarget);
-        const res = await client.request<{ id: number }>("POST", createTarget, createBody);
-        if (typeof res.id !== "number") {
-          throw new Error(`create returned no numeric id (got ${JSON.stringify(res.id)})`);
+        // A type whose writes are not REST (#108: Bereiche, via the legacy master-data endpoint)
+        // supplies its own writer and returns the new id itself. Everything else POSTs.
+        let newId: number;
+        if (spec.writer) {
+          newId = await spec.writer.create({ client: client as CtWriteClient, body: createBody });
+        } else {
+          const res = await client.request<{ id: number }>("POST", createTarget, createBody);
+          newId = res.id;
         }
+        if (typeof newId !== "number") {
+          throw new Error(`create returned no numeric id (got ${JSON.stringify(newId)})`);
+        }
+        const res = { id: newId };
         // A "recreate" create item (resource vanished from CT but still in state) leaves the
         // stale entry — with the *old* id — under this key. upsert would read the new id as a
         // key collision and throw, so the just-created resource never lands in state and every
@@ -192,12 +201,19 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         const snapshot = snapshotFromChanges(actualFields, changes);
         const hasFieldChange = changes.some((c) => !isSyntheticField(c.field));
         if (hasFieldChange) {
-          // PATCH resources take only the changed fields (unchanged/drifted siblings are left alone);
-          // PUT resources replace the whole object, so send actual ∪ changes to preserve those siblings.
-          const body = spec.updateMethod === "PATCH" ? snapshotFromChanges({}, changes) : snapshot;
           const path = spec.itemPath(id);
           assertNotPeople(path);
-          await client.request(spec.updateMethod, path, body);
+          if (spec.writer) {
+            // Non-REST write path (#108). Always handed the FULL snapshot, never just the changed
+            // fields: the legacy master-data endpoint writes the columns it is given and is closer to
+            // a PUT than a PATCH, so sending a subset would blank the untouched ones.
+            await spec.writer.update({ client: client as CtWriteClient, body: snapshot, id });
+          } else {
+            // PATCH resources take only the changed fields (unchanged/drifted siblings are left alone);
+            // PUT resources replace the whole object, so send actual ∪ changes to preserve those siblings.
+            const body = spec.updateMethod === "PATCH" ? snapshotFromChanges({}, changes) : snapshot;
+            await client.request(spec.updateMethod, path, body);
+          }
         }
         upsert(state, { type: item.type, id, key: item.key, fields: snapshot }, now());
         mirrorPreventDestroy(state.resources[item.key]!, item.preventDestroy);

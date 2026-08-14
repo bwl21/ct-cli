@@ -285,6 +285,20 @@ export interface ConfigContext {
    * `destroyWarning`: a delete reaches every person field and grant referencing the level.
    */
   securityLevel(input: ResourceInput): void;
+  /**
+   * A BEREICH / department (`/departments`), #108 — the `cdb_bereich` scope dimension of
+   * `churchdb:view alldata` ("Personen eines Bereiches sehen").
+   *
+   * ```ts
+   * ct.department({ key: "equippers_koblenz", name: "Equippers Koblenz", shorty: "EQKO" });
+   * ```
+   *
+   * The one managed type ChurchTools has no REST write for: reads come from `GET /departments`,
+   * writes go through the legacy master-data endpoint the admin UI uses. Declaring Bereiche is what
+   * lets a config stand up a fresh host — before this, a Bereich-scoped grant only planned where
+   * someone had already created the Bereich by hand.
+   */
+  department(input: ResourceInput): void;
   /** Master-data group role (`/group/roles`). Named `roleDefinition` to avoid colliding
    *  with the `groupRole` permission function below. */
   roleDefinition(input: ResourceInput): void;
@@ -564,6 +578,7 @@ export function createContext(): {
     relationshipType: define("relationship-type"),
     personStatus: define("person-status"),
     securityLevel: define("security-level"),
+    department: define("department"),
     roleDefinition: define("group-role"),
     groupRole: definePermission("group_role"),
     groupTypeRole: definePermission("group_type_role"),

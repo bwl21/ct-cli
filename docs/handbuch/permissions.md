@@ -5,7 +5,7 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: afcc2dc8de2d4ee1
+sources_hash: e6d4211dd673a741
 reviewed: 2026-08-13
 ---
 
@@ -340,7 +340,7 @@ the rest of the DSL uses — so both spellings are interchangeable.
 | `cdb_gruppe`         | `{ group: "<key>" }` (or the bare string) | managed groups                                             |
 | `cdb_station`        | `{ campus: "<key>" }`                     | managed campuses, then `GET /campuses`                     |
 | `cdb_gruppentyp`     | `{ groupType: "<key>" }`                  | managed group types, then `GET /group/grouptypes`          |
-| `cdb_bereich`        | `{ department: "<name-slug>" }`           | `GET /departments` **only** — see below                    |
+| `cdb_bereich`        | `{ department: "<name-slug>" }`           | managed Bereiche, then `GET /departments` (#108)           |
 | `cc_securitylevel`   | `{ securityLevel: "<name-slug>" }`        | managed security levels, then `GET /securitylevels` (#110) |
 | `cdb_comment_viewer` | `{ commentViewer: "<name-slug>" }`        | `GET /person/commentviewers` **only** (#102)               |
 
@@ -373,44 +373,66 @@ Three things are hard errors at **plan** time, never a guessed `dataId`:
 
 ### Catalog dimensions: referenceable, not declarable
 
-`cdb_bereich` (Bereiche) and `cdb_comment_viewer` (Kommentare-Viewer) are the
-dimensions `ct` **reads but does not manage**. Neither is unmanaged because
-"ChurchTools cannot do it":
+`cdb_comment_viewer` (Kommentare-Viewer) is the one remaining dimension `ct`
+**reads but does not manage**, and not because ChurchTools cannot do it:
 
-- **Bereiche** genuinely have no REST write path — live-probed against the
-  instance's own OpenAPI spec (eqrm prod CT 3.135.2, 2026-08-13; re-probed on
-  eqrm-dev 2026-08-14): `GET /departments` exists, nothing else on that path
-  does. The admin UI creates them through the legacy master-data endpoint, which
-  appears in no OpenAPI spec and which `ct` does not drive
-  ([#108](https://github.com/eqrm/ct-cli/issues/108) /
-  [#109](https://github.com/eqrm/ct-cli/issues/109)).
 - **Comment viewers have plain REST CRUD** — `/person/commentviewers` plus
   `POST`/`PUT`/`DELETE` on the item path, which would fit the resource registry
   unchanged. They are catalog-only purely because nothing has needed to declare
   one yet ([#102](https://github.com/eqrm/ct-cli/issues/102)).
 
-So a reference of either kind resolves by name on every host — which is what
-makes `churchdb:view alldata` ("Personen eines Bereiches sehen") and
-`churchdb:view comments` declarable at all — but there is no `ct.department` /
-`ct.commentViewer` resource, no `ct adopt` for them, and a name that matches
-nothing is a **hard error** rather than a create:
+So the reference resolves by name on every host — which is what makes
+`churchdb:view comments` declarable at all — but there is no `ct.commentViewer`
+resource, no `ct adopt` for it, and a name that matches nothing is a **hard
+error** rather than a create:
 
-(Security levels were in this list until #110. They are a managed resource now —
-see the next section.)
+(Security levels left this list in #110 and Bereiche in #108. Both are managed
+resources now — see below.)
 
 ```
-Cannot resolve department:nope referenced at … : no live department at
-/departments matches key "nope". ct reads departments but does not manage
-them, so it cannot create this one — fix the key/name (list them with
-`ct get departments`), create it in the ChurchTools admin UI, or use a
-numeric id.
+Cannot resolve comment-viewer:nope referenced at … : no managed resource and
+no live comment-viewer at /person/commentviewers matches key "nope".
+Declare/adopt it, fix the key/name, or use a numeric id.
 ```
 
-Discover the names with `ct get departments` or `ct get comment-viewers`. Because
+Discover the names with `ct get comment-viewers`. Because
 the id always comes from the live catalog, such a scope is never "pending" and is
 never re-resolved at apply time — it is host-correct the moment it resolves. A
 managed resource that happens to share the key does **not** shadow it (that would
 be exactly the misgrant this feature exists to prevent).
+
+### Bereiche: managed, but written through a non-REST endpoint (#108)
+
+Bereiche have **no REST write verb** — live-probed against the instance's own
+OpenAPI spec (eqrm prod CT 3.135.2, 2026-08-13; re-probed on eqrm-dev
+2026-08-14): `GET /departments` exists, nothing else on that path does. The CT
+admin UI creates them through the legacy master-data endpoint
+(`POST /index.php?q=churchdb/ajax`, `func=saveMasterData`), which appears in no
+OpenAPI spec — which is exactly why an OpenAPI-only audit concluded for months
+that a Bereich "can never be created" (#111).
+
+`ct` drives that endpoint now, for this one table:
+
+```ts
+ct.department({ key: "equippers_koblenz", name: "Equippers Koblenz", shorty: "EQKO" });
+```
+
+- **Reads stay REST.** `GET /departments` remains the only read path — cleaner,
+  paginated, already wired. Only writes take the legacy route.
+- **Columns are validated against the instance's own schema.** The registry
+  describes each table's columns, and a declared field the instance does not
+  report is a hard error. This matters because the legacy endpoint does not 400
+  on an unknown column — it ignores it, so an unvalidated write would look like a
+  success and silently drop the field.
+- **`ct apply` never deletes**, as everywhere else. `ct destroy` can, and warns:
+  a Bereich delete reaches every person assigned to it and every grant scoped to
+  it.
+
+This is the only table `ct` writes through the legacy endpoint. A live
+classification of all 24 tables in the registry (eqrm-dev, 2026-08-14) found 15
+with a REST write path — REST stays authoritative for every one of them — and of
+the 9 without, 8 are person master data or field option lists outside this tool's
+mandate. Bereiche were the only table both in-mandate and REST-less.
 
 ### Security levels: a managed resource with a declared id (#110)
 

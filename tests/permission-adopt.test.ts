@@ -434,14 +434,25 @@ describe("emitAdoptedGrants", () => {
 
   it("a catalog-only dimension gets ONE note — the portable form, not the 'not a group' line", () => {
     const rows: RawPermission[] = [
-      { authId: 102, dataId: 4, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cdb_bereich
+      // cdb_comment_viewer — a catalog ct reads but does not manage (#102). Bereiche used to be the
+      // example here; they became a managed resource in #108, so they now take the adopt-hint path.
+      { authId: 113, dataId: 4, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
     const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
 
-    expect(block).toContain('Portable form: { department: "<name>" }');
+    expect(block).toContain('Portable form: { commentViewer: "<name>" }');
     // The numeric-escape-hatch line is for dimensions with NO logical form; emitting it here too
     // would contradict the portable-form note directly above it.
     expect(block).not.toContain("not a group");
+    expect(block).toContain('{ right: "churchdb:view comments", scope: [4] }');
+  });
+
+  it("points an unmanaged Bereich scope at `ct adopt department` now that Bereiche are managed (#108)", () => {
+    const rows: RawPermission[] = [
+      { authId: 102, dataId: 4, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cdb_bereich
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
+    expect(block).toContain("ct adopt department 4");
     expect(block).toContain('{ right: "churchdb:view alldata", scope: [4] }');
   });
 

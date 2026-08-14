@@ -80,7 +80,7 @@ export const SCOPE_REF_KIND: Readonly<Record<string, { kind: RefKind; type: stri
   [GROUP_SCOPE_FIELD]: { kind: "group", type: "group", managed: true },
   cdb_station: { kind: "campus", type: "campus", managed: true },
   cdb_gruppentyp: { kind: "group-type", type: "group-type", managed: true },
-  cdb_bereich: { kind: "department", type: "department", managed: false },
+  cdb_bereich: { kind: "department", type: "department", managed: true },
   cc_securitylevel: { kind: "security-level", type: "security-level", managed: true },
   cdb_comment_viewer: { kind: "comment-viewer", type: "comment-viewer", managed: false },
 };
