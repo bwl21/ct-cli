@@ -5,7 +5,7 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: e6d4211dd673a741
+sources_hash: 5c881a7bede7e01a
 reviewed: 2026-08-13
 ---
 
@@ -459,7 +459,9 @@ because the config now owns the ids:
 ct.securityLevel({ key: "stufe_3_hoch", id: 3, name: "Stufe 3 (Hoch)" });
 ```
 
-`id` is **required** here and it is the only declaration where you choose the id.
+`id` is **required** here — a declaration without one, or with a string `"3"`
+instead of the number `3`, is rejected when the config is evaluated, before any
+request goes out — and it is the only declaration where you choose the id.
 ChurchTools creates a level with `POST /securitylevels/{id}` — the client picks
 the id, CT 409s if it is taken — precisely so a level is reproducible rather than
 whatever a fresh instance auto-increments to. Live-probed on eqrm-dev 2026-08-14:
