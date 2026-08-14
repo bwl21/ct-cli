@@ -32,6 +32,8 @@ const SCOPE_SUGAR_FIELD: Readonly<Record<string, string>> = {
   campus: "campus",
   "group-type": "groupType",
   department: "department",
+  "security-level": "securityLevel",
+  "comment-viewer": "commentViewer",
 };
 
 interface ReverseEntry {
@@ -258,7 +260,7 @@ function grantLines(g: CollapsedGrant, rev: Map<number, ReverseEntry>, state: St
       if (dimension && !dimension.managed) {
         const field = SCOPE_SUGAR_FIELD[dimension.type] ?? dimension.type;
         out.push(
-          `    // NOTE: "${entry.name}" scopes by "${entry.scopeField}" (${dimension.type}), a read-only catalog —`,
+          `    // NOTE: "${entry.name}" scopes by "${entry.scopeField}" (${dimension.type}), a catalog ct reads but does not manage —`,
         );
         out.push(
           `    //       the id below is host-specific. Portable form: { ${field}: "<name>" } (\`ct get ${dimension.type}s\`).`,

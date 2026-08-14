@@ -142,11 +142,17 @@ type ResolvedPermission =
 /**
  * Resolve every permission's domainId (#20). A numeric domainId passes straight through; a Ref
  * (e.g. `groupType: "…"`) resolves against managed state ∪ the live catalog. A domainId that
- * resolves to a same-run-created group type (PendingRef) is NOT rejected (#69): it is carried as a
+ * resolves to a same-run-created resource (PendingRef) is NOT rejected (#69): it is carried as a
  * `pendingDomain` and re-resolved against post-execute state at apply time — this is what lets a
- * fresh-instance plan render the create-set + pending grants instead of aborting. A group_role ref
- * resolves to its concrete (group, role) pairing id in the resolver and never goes pending — the
- * pairing id needs a live `/groups/{id}/roles` fetch, so a same-run group is a hard error there (#25).
+ * fresh-instance plan render the create-set + pending grants instead of aborting.
+ *
+ * That now includes a `group_role` domain on a group declared in this same config (#106). Its pairing
+ * id needs a live `/groups/{id}/roles` fetch rather than a bare state lookup, so it is completed by
+ * `applyPermissionPlan` (via `resolvePendingGroupRoleDomain`) instead of `reresolvePendingValue` — but
+ * from the planner's side it is the same pending domain as any other. Before #106 it was a hard error,
+ * which made any config declaring a group AND its own group-role plan on prod (where the group exists)
+ * and fail on dev (where it does not) — non-portable by construction.
+ *
  * The hard error remains ONLY for genuinely unresolvable references (key not in config/state at all).
  *
  * After resolution, the authoritative duplicate-target guard runs on the resolved identities (concrete
@@ -164,7 +170,10 @@ async function resolveDomainIds(
       continue;
     }
     const site = `${p.domainType} "${p.key}".domainId`;
-    const res = await resolver.resolve(p.domainId, site);
+    // `pendingGroupRole` is opt-in per position (#106): this is the ONLY call site that can finish a
+    // pending group_role, because `applyPermissionPlan` runs after `executePlan` and holds a client to
+    // fetch the freshly created group's role list with.
+    const res = await resolver.resolve(p.domainId, site, { pendingGroupRole: true });
     if (isPendingRef(res)) {
       resolved.push({
         key: p.key,
@@ -257,11 +266,11 @@ export async function buildPermissionPlan(
   }
   for (const p of resolved) {
     if (p.pendingDomain !== undefined) {
-      // The domain (a group type) is created THIS run (#69), so it has no live grants yet: the
-      // actual set is empty and every desired grant lands in toPut as a pending grant block. Its
-      // numeric domainId is unknown until the resource tier applies — the pending marker is
-      // re-resolved against post-execute state at apply time (applyPermissionPlan). Rendered with a
-      // `<groupType:x (created this apply)>` marker consistent with resource pending refs.
+      // The domain (a group type, a person status, or the group behind a group_role — #106) is created
+      // THIS run (#69), so it has no live grants yet: the actual set is empty and every desired grant
+      // lands in toPut as a pending grant block. Its numeric domainId is unknown until the resource
+      // tier applies — the pending marker is completed at apply time (applyPermissionPlan). Rendered
+      // with a `<groupType:x (created this apply)>` marker consistent with resource pending refs.
       items.push({
         key: p.key,
         domainType: p.domainType,

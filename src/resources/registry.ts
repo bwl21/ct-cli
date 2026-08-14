@@ -7,9 +7,86 @@
  * matrix (docs/api-coverage.md). Adding a type = adding an entry here.
  */
 
+/** What a custom {@link AdoptableResource.writer} is handed to perform one write. */
+export interface ResourceWriteContext {
+  /** The full authenticated client — REST plus the legacy `ajax` channel. */
+  client: CtWriteClient;
+  /** The managed field bag to write (create: the declared fields; update: actual ∪ changes). */
+  body: Record<string, unknown>;
+}
+
+/**
+ * The client surface a custom writer may use. Deliberately a structural subset rather than the whole
+ * {@link CtClient}, so the engine's test doubles stay small and a writer cannot reach for anything
+ * the executor does not already guarantee.
+ */
+export interface CtWriteClient {
+  request<T = unknown>(method: string, path: string, body?: unknown): Promise<T>;
+  ajax?<T = unknown>(module: string, params: Record<string, string>): Promise<T>;
+  getAll?<T = unknown>(path: string, options?: { limit?: number }): Promise<{ data: T[] }>;
+  get?<T = unknown>(path: string): Promise<T>;
+}
+
 export interface AdoptableResource {
-  /** Collection path: `POST` here creates. */
+  /** Collection path: `POST` here creates, unless {@link createPath} overrides the target. */
   collectionPath: string;
+  /**
+   * POST target for a CREATE, when it is not {@link collectionPath} (#110).
+   *
+   * Exists for ChurchTools' one CALLER-ASSIGNED-ID resource: a security level is created with
+   * `POST /securitylevels/{id}` — the client picks the id, and CT 409s if it is taken. That is the
+   * opposite of every other type here, where CT mints the id and the tool records the mapping. The
+   * hook receives the create body (which for such a type carries the declared `id`) and returns the
+   * path to POST to. Types whose create is a plain collection POST omit it.
+   */
+  createPath?: (body: Record<string, unknown>) => string;
+  /**
+   * Read ONE resource by id when `GET {itemPath}` does not exist (#108).
+   *
+   * Bereiche have no `/departments/{id}` path at all — only the collection — so the default read
+   * 404s, which every caller correctly interprets as "vanished in ChurchTools". The visible symptom
+   * is a plan that proposes creating the same Bereich on every run: apply creates it, the next plan
+   * cannot read it back, and proposes creating it again. Caught by a live dev apply, not by any unit
+   * test, because a mock happily answers whatever path it is asked for.
+   *
+   * Returning `null` means genuinely absent (the caller treats it as a 404).
+   */
+  fetchOne?: (client: CtWriteClient, id: number) => Promise<Record<string, unknown> | null>;
+  /**
+   * True when the resource's id is chosen by the CONFIG, not minted by ChurchTools (#110).
+   *
+   * For these, the id is not an opaque handle but part of the resource's meaning — security level 3
+   * IS "Stufe 3", referenced by `securityLevelId` on person fields and by `cc_securitylevel` grant
+   * scopes across the whole instance. Two consequences the engine has to respect:
+   *  - CREATE must send the declared id (see {@link createPath}), and
+   *  - CHANGING it is a RENUMBER, not a field update. CT models that as `PATCH` with `newid` +
+   *    `forcereorder`, which rewrites what every existing numeric grant on that dimension means.
+   *    The planner refuses it rather than emitting a wrong-shaped PATCH (see `computePlan`).
+   */
+  callerAssignedId?: boolean;
+  /**
+   * Override the WRITE path for a type whose reads are REST but whose writes are not (#108).
+   *
+   * Exactly one type needs this: Bereiche/departments. `GET /departments` is a normal REST catalog,
+   * but no REST write verb exists for it on any probed version — the admin UI writes Bereiche through
+   * the legacy `saveMasterData` endpoint instead. Rather than teach the executor about that endpoint,
+   * the type supplies its own create/update, and everything else in the engine (planning, diffing,
+   * state, tiers, `preventDestroy`) is unchanged.
+   *
+   * `create` returns the new id, because the legacy endpoint does not: it answers
+   * `{"status":"success","data":null}`, so the implementation re-reads the REST catalog to find the
+   * row it just wrote. Reads therefore stay REST-only, which is what #108 asked for.
+   */
+  writer?: {
+    create(ctx: ResourceWriteContext): Promise<number>;
+    update(ctx: ResourceWriteContext & { id: number }): Promise<void>;
+    /**
+     * `ct destroy`'s delete. Optional and separate from the two above because `ct apply` NEVER
+     * deletes — a type can be fully applyable without one, and omitting it makes `ct destroy` say so
+     * rather than issue a REST DELETE the endpoint does not have.
+     */
+    remove?(ctx: { client: CtWriteClient; id: number }): Promise<void>;
+  };
   /** GET/PUT/PATCH/DELETE path for a single resource by id. */
   itemPath: (id: number) => string;
   /** Update verb: `group` is PATCH; every other type is PUT. */
@@ -109,6 +186,121 @@ export function fromInformation(resource: Record<string, unknown>, key: string):
   const information = (resource.information as Record<string, unknown> | undefined) ?? {};
   return information[key] ?? resource[key];
 }
+
+/**
+ * Bereich writes, through the legacy master-data endpoint (#108). Reads stay REST — including the
+ * read this create performs to learn the new id, because `saveMasterData` does not return one.
+ *
+ * Column mapping: the config and `ct get departments` speak the REST names (`name`, `shorty`,
+ * `sortKey`); the legacy table speaks `bezeichnung`, `kuerzel`, `sortkey`. Mapping here keeps that
+ * detail out of the config surface, and `masterDataColumns` validates the result against the
+ * instance's OWN column list, so a CT rename surfaces as a named error rather than a silent
+ * partial write.
+ */
+const DEPARTMENT_COLUMNS: Record<string, string> = {
+  name: "bezeichnung",
+  shorty: "kuerzel",
+  sortKey: "sortkey",
+};
+
+function departmentRow(body: Record<string, unknown>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  for (const [restName, column] of Object.entries(DEPARTMENT_COLUMNS)) {
+    if (body[restName] !== undefined) row[column] = body[restName];
+  }
+  return row;
+}
+
+/** Read the whole `/departments` collection — the only read path CT offers for Bereiche. */
+async function departmentRows(client: CtWriteClient): Promise<{ id: number; name?: string }[]> {
+  if (client.getAll) return (await client.getAll<{ id: number; name?: string }>("/departments")).data;
+  return (await client.get?.<{ id: number; name?: string }[]>("/departments")) ?? [];
+}
+
+/**
+ * `fetchOne` has no `/departments/{id}` to hit, so it filters the whole collection — and
+ * `fetchActual` runs it once per managed Bereich, concurrently. Share one read across that fan-out,
+ * the way the resolver caches identical catalog reads. Every write below drops the entry, so the
+ * cache can never outlive the state it describes.
+ */
+const departmentReads = new WeakMap<object, Promise<{ id: number; name?: string }[]>>();
+
+function cachedDepartmentRows(client: CtWriteClient): Promise<{ id: number; name?: string }[]> {
+  let p = departmentReads.get(client);
+  if (!p) {
+    p = departmentRows(client);
+    departmentReads.set(client, p);
+  }
+  return p;
+}
+
+/**
+ * Wrap a client's `ajax` once PER CLIENT. The wrapper is what `masterdata.ts` keys its ~3 MB
+ * registry cache on (a WeakMap on the object it is handed), so returning a fresh literal per call
+ * would miss that cache on every single write and re-fetch the whole payload each time.
+ */
+const ajaxWrappers = new WeakMap<object, Required<Pick<CtWriteClient, "ajax">>>();
+
+function requireAjax(client: CtWriteClient): Required<Pick<CtWriteClient, "ajax">> {
+  if (!client.ajax) {
+    throw new Error(
+      "Departments are written through ChurchTools' legacy master-data endpoint, which needs the " +
+        "full authenticated client (`ajax`). This client cannot reach it.",
+    );
+  }
+  let wrapper = ajaxWrappers.get(client);
+  if (!wrapper) {
+    wrapper = { ajax: client.ajax.bind(client) };
+    ajaxWrappers.set(client, wrapper);
+  }
+  return wrapper;
+}
+
+const departmentWriter: AdoptableResource["writer"] = {
+  async create({ client, body }): Promise<number> {
+    const { saveMasterData, DEPARTMENT_TABLE } = await import("../api/masterdata.js");
+    const name = body.name;
+    // `saveMasterData` answers {"status":"success","data":null} — no id — so the new row has to be
+    // identified by re-reading the REST catalog. Snapshot the ids BEFORE writing and diff after:
+    // matching on the name alone would be wrong the moment a Bereich of that name already exists
+    // (created by hand on the target host), because the create would still have succeeded and the
+    // post-write ambiguity error would leave an orphan row behind that every retry duplicates.
+    const before = await departmentRows(client);
+    const collision = before.filter((r) => r.name === name);
+    if (collision.length > 0) {
+      throw new Error(
+        `A Bereich named "${String(name)}" already exists in ChurchTools (#${collision.map((r) => r.id).join(", #")}). ` +
+          `Refusing to create a second one: the legacy master-data endpoint returns no id, so the new ` +
+          `row could not be told apart from the existing one. Adopt it instead (\`ct adopt department ` +
+          `${collision[0]!.id}\`) or rename one of the two.`,
+      );
+    }
+    const known = new Set(before.map((r) => r.id));
+    await saveMasterData(requireAjax(client), DEPARTMENT_TABLE, departmentRow(body));
+    departmentReads.delete(client);
+    const fresh = (await departmentRows(client)).filter((r) => !known.has(r.id));
+    if (fresh.length !== 1) {
+      throw new Error(
+        `Created the Bereich "${String(name)}", but ${fresh.length === 0 ? "no new row appeared in" : `${fresh.length} new rows appeared in`} ` +
+          `GET /departments — cannot record its id. Check ChurchTools for a stray Bereich before re-running.`,
+      );
+    }
+    return fresh[0]!.id;
+  },
+  async update({ client, body, id }): Promise<void> {
+    const { saveMasterData, DEPARTMENT_TABLE } = await import("../api/masterdata.js");
+    // A non-empty `id` makes the same call an UPDATE of that row (verified live, eqrm-dev 2026-08-14).
+    await saveMasterData(requireAjax(client), DEPARTMENT_TABLE, departmentRow(body), id);
+    departmentReads.delete(client);
+  },
+  async remove({ client, id }): Promise<void> {
+    const { deleteMasterData, DEPARTMENT_TABLE } = await import("../api/masterdata.js");
+    // `deleteMasterData` is a real verb, not a silently-ignored unknown one: a made-up `delMasterData`
+    // against the same endpoint answers "was not defined as Function!" (verified, eqrm-dev 2026-08-14).
+    await deleteMasterData(requireAjax(client), DEPARTMENT_TABLE, id);
+    departmentReads.delete(client);
+  },
+};
 
 export const RESOURCES: Record<string, AdoptableResource> = {
   campus: define({
@@ -243,6 +435,76 @@ export const RESOURCES: Record<string, AdoptableResource> = {
       securityLevelId: r.securityLevelId,
     }),
   }),
+  /**
+   * BEREICHE / DEPARTMENTS (#108) — `cdb_bereich`, the scope dimension of `churchdb:view alldata`
+   * ("Personen eines Bereiches sehen"). The one managed type whose READS are REST and whose WRITES
+   * are not.
+   *
+   * `GET /departments` is a normal catalog; no REST write verb exists for it (live-probed on eqrm
+   * prod CT 3.135.2 2026-08-13 and re-probed on eqrm-dev 2026-08-14 — no POST/PUT/DELETE, and no
+   * `/departments/{id}` path at all). The admin UI creates Bereiche through the legacy master-data
+   * endpoint, which is what {@link writer} drives. That asymmetry is the whole of #108: without it a
+   * Bereich-scoped grant only planned on hosts where somebody had already made the Bereich by hand,
+   * so a config could not stand up a fresh instance — the promotion model's core assumption.
+   *
+   * Managed columns are the three the instance's own registry reports as writable for `cdb_bereich`
+   * (`bezeichnung`, `kuerzel`, `sortkey`), surfaced under their REST names so config and `ct get
+   * departments` agree: `name`, `shorty`, `sortKey`. The writer maps them back.
+   */
+  department: define({
+    collectionPath: "/departments",
+    // Never used for writes — `writer` handles those — but the executor's update path still reads it
+    // for `assertNotPeople`, and `ct adopt department <id>` reads the row through `itemPath`.
+    updateMethod: "PUT",
+    // Tier 0: grants scope by Bereich, and permissions apply after every resource tier.
+    tier: 0,
+    destroyWarning:
+      "deleting a Bereich reaches every person assigned to it and every grant scoped to it " +
+      "(`churchdb:view alldata`). ChurchTools offers no REST delete for Bereiche at all — this goes " +
+      "through the legacy master-data endpoint. Verify it is unused first (`ct get departments`).",
+    deriveKey: (r) => slug(str(r, "name")),
+    managedFields: (r) => ({ name: r.name, shorty: r.shorty, sortKey: r.sortKey ?? 0 }),
+    // There is no `GET /departments/{id}` — filter the collection instead. Without this every plan
+    // after a create would read a 404 and propose creating the same Bereich again.
+    fetchOne: async (client, id) =>
+      ((await cachedDepartmentRows(client)) as Record<string, unknown>[]).find((r) => r.id === id) ?? null,
+    writer: departmentWriter,
+  }),
+  /**
+   * SECURITY LEVELS (#110) — `cc_securitylevel`, the scope dimension of `churchdb:+see persons` and
+   * the `securityLevelId` on every person field. The only CALLER-ASSIGNED-ID type here.
+   *
+   * Live-probed on eqrm-dev, CT 3.135.2, 2026-08-14 (create → rename → delete, instance restored):
+   *
+   *   POST   /securitylevels/{id}  body {name}                      → 200 {id, name, sortKey}; 409 if taken
+   *   PATCH  /securitylevels/{id}  body {name[, newid]} ?forcereorder → 200 {id, name}
+   *   DELETE /securitylevels/{id}                                    → 200
+   *
+   * Creating id 99 alongside 1–4 left 1–4 untouched and `sortkey` mirrored the id, so an insert does
+   * NOT implicitly renumber — reordering is opt-in through `newid` + `forcereorder`, which this tool
+   * deliberately does not drive (it would silently change what every numeric `scope: [1,2,3]` grant
+   * means instance-wide). `id` is therefore a MANAGED field: it is part of the declaration, it is sent
+   * at create, and a changed one is refused by the planner rather than PATCHed into a wrong shape.
+   *
+   * Managing `name` only (besides `id`) is safe here where it is not for person-status: PATCH is a
+   * partial update, not a full replace, so unmanaged siblings are left alone.
+   */
+  "security-level": define({
+    collectionPath: "/securitylevels",
+    // Caller-assigned: POST goes to the DECLARED id, not the collection. CT 409s if it is taken.
+    createPath: (body) => `/securitylevels/${String(body.id)}`,
+    callerAssignedId: true,
+    updateMethod: "PATCH",
+    // Tier 0: person statuses carry a `securityLevelId`, and grants scope by one, so levels must
+    // exist before anything that references them.
+    tier: 0,
+    destroyWarning:
+      "deleting a security level reaches every person field and grant scoped to it — the level id " +
+      "is referenced instance-wide (person-field `securityLevelId`, `cc_securitylevel` grant " +
+      "scopes). Verify it is unused first (`ct get security-levels`, `ct get data-fields`).",
+    deriveKey: (r) => slug(str(r, "name")),
+    managedFields: (r) => ({ id: r.id, name: r.name }),
+  }),
   "group-role": define({
     collectionPath: "/group/roles",
     updateMethod: "PUT",
@@ -279,6 +541,11 @@ export function resourceType(type: string): AdoptableResource {
  */
 export function knownFields(type: string): Set<string> {
   return new Set(Object.keys(resourceType(type).managedFields({})));
+}
+
+/** True when `type`'s id is chosen by the config rather than minted by CT (#110: security levels). */
+export function isCallerAssignedId(type: string): boolean {
+  return RESOURCES[type]?.callerAssignedId === true;
 }
 
 /** Camel-case a hyphenated type name: `group-type` → `groupType`. */

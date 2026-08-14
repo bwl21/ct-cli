@@ -4,7 +4,7 @@ import { CtApiError, type CtClient } from "../api/ctClient.js";
 import { resolveConfig } from "../config.js";
 import { prepareEnv } from "../env/context.js";
 import { loadState, saveState, type State } from "../state/state.js";
-import { RESOURCES } from "../resources/registry.js";
+import { RESOURCES, type CtWriteClient } from "../resources/registry.js";
 import { assertNotPeople } from "../engine/guard.js";
 import { orderKeys } from "../engine/graph.js";
 import { fetchActual } from "../engine/build.js";
@@ -234,13 +234,34 @@ export async function runDeleteLoop(ctx: DeleteLoopCtx): Promise<void> {
     const managed = state.resources[key]!;
     const spec = RESOURCES[managed.type];
     if (!spec) {
+      // Skipped, not destroyed: the resource is still in ChurchTools AND still in state, so exit
+      // non-zero like every other failure below — a `ct destroy` that reports success while its
+      // targets survive is the one outcome a caller must never see.
       error(`No write spec for type "${managed.type}" — skipping ${key}.`);
+      process.exitCode = 1;
       continue;
     }
     const path = spec.itemPath(managed.id);
     assertNotPeople(path);
     try {
-      await client.request("DELETE", path);
+      if (spec.writer) {
+        // A type whose writes are not REST (#108: Bereiche). Without a `remove` it has no delete path
+        // at all — say so instead of issuing a DELETE the endpoint does not implement, which would
+        // 404/405 and read as "already deleted".
+        if (!spec.writer.remove) {
+          error(
+            `${managed.type}.${key} (#${managed.id}) cannot be deleted by \`ct\` — ChurchTools exposes ` +
+              `no delete for this type. Remove it in the ChurchTools admin UI, then re-run to drop it ` +
+              `from state.`,
+          );
+          // Still in ChurchTools and still in state — a skip, not a success. Exit non-zero.
+          process.exitCode = 1;
+          continue;
+        }
+        await spec.writer.remove({ client: client as CtWriteClient, id: managed.id });
+      } else {
+        await client.request("DELETE", path);
+      }
     } catch (err) {
       if (err instanceof CtApiError && err.status === 404) {
         delete state.resources[key];

@@ -158,6 +158,73 @@ export class CtClient {
   }
 
   /**
+   * Call ChurchTools' LEGACY AJAX interface — `POST /index.php?q=<module>/ajax`, form-encoded,
+   * `{status, data}` envelope. Not REST, not in any OpenAPI spec (#111), and reached only where CT
+   * exposes no REST equivalent.
+   *
+   * Today that is the master-data registry (`churchdb/ajax`), which is the only write path for
+   * Bereiche (#108). The permission catalog reads the sibling `churchauth/ajax` through its own
+   * script rather than this method, because that runs outside an authenticated session.
+   *
+   * Reuses the session this client already holds: the login-token handshake set the cookie, and the
+   * legacy endpoint enforces the SAME `CSRF-Token` header as the REST writes (verified live — without
+   * it, `churchdb/ajax` answers 401 "CSRF-Token is invalid" rather than redirecting to a login page).
+   *
+   * Unlike REST, a failure here is a 200 with `{"status":"error"}`, so the status code alone proves
+   * nothing — the envelope is checked and a non-success is raised as a {@link CtApiError} carrying
+   * CT's own message. (An unknown `func` returns exactly that, which is how the delete verb was
+   * confirmed to exist rather than being silently ignored: `deleteMasterData` succeeded where a
+   * made-up `delMasterData` came back "was not defined as Function!".)
+   */
+  async ajax<T = unknown>(module: string, params: Record<string, string>): Promise<T> {
+    if (!this.cookie) {
+      throw new CtApiError("Not authenticated — run `ct auth login` first", 401, null);
+    }
+    if (!this.csrfToken) {
+      await this.refreshCsrfToken();
+    }
+    const url = `${this.config.host}/index.php?q=${module}/ajax`;
+    const label = `POST ${module}/ajax ${params.func ?? ""}`.trim();
+    // `redirect: "manual"` on purpose: an expired session makes this endpoint bounce through the
+    // login page, and following that lands on a redirect loop whose eventual error names neither
+    // the endpoint nor the real cause ("redirect count exceeded").
+    const res = await fetchWithRetry(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Cookie: this.cookie,
+          "CSRF-Token": this.csrfToken ?? "",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams(params).toString(),
+        redirect: "manual",
+      },
+      { isIdempotent: false },
+    );
+    this.captureCookie(res);
+    if (!res.ok) {
+      throw new CtApiError(`${label} failed`, res.status, await safeBody(res));
+    }
+    const text = await res.text();
+    let envelope: { status?: string; message?: string; data?: T };
+    try {
+      envelope = JSON.parse(text) as typeof envelope;
+    } catch {
+      throw new CtApiError(`${label} returned a non-JSON body`, res.status, text.slice(0, 500));
+    }
+    if (envelope.status !== "success") {
+      throw new CtApiError(
+        `${label} returned status "${envelope.status ?? "?"}"${envelope.message ? `: ${envelope.message}` : ""}`,
+        res.status,
+        envelope,
+      );
+    }
+    return envelope.data as T;
+  }
+
+  /**
    * Fetch every page of a ChurchTools list endpoint and concatenate them, so
    * callers see the whole collection instead of just CT's default first page
    * (#50). CT caps `limit` at a per-endpoint maximum below 500 on real

@@ -24,12 +24,12 @@ import { ALL_SCOPE_SENTINEL, SCOPE_REF_KIND } from "../permissions/scope.js";
 import { fromInformation } from "../resources/registry.js";
 import type { State } from "../state/state.js";
 
-/**
- * Scope dimensions whose numeric dataIds mean the same thing on EVERY ChurchTools instance, so a
- * numeric literal is portable and the grant is declarable without a logical reference form.
- * `cc_securitylevel` is the enumeration 1/2/3 — not a resource, but not host-specific either.
- */
-const NUMERIC_UNIVERSAL_SCOPE_FIELDS: ReadonlySet<string> = new Set(["cc_securitylevel"]);
+// `cc_securitylevel` used to be listed here as "numeric-universal" — a dimension whose ids mean the
+// same thing on every instance, so a numeric literal counted as declarable. #110 retired that idea:
+// security levels are admin-editable master-data rows with an auto-increment id, so the alignment held
+// by convention, not by construction. They now have a real reference form (`{ securityLevel: "…" }`,
+// resolved through `GET /securitylevels`), so `SCOPE_REF_KIND` covers them like any other dimension
+// and no universality exemption is needed.
 
 /** A live (group, role) permission domain — the granularity declarability is decided at. */
 export interface RoleInstance {
@@ -107,8 +107,8 @@ export interface CoverageInput {
  * A grant is declarable when its right is nameable AND its scope can be written portably:
  *  - unscoped rights always are;
  *  - the `-1` ALL sentinel always is (CT reads it back verbatim on every dimension);
- *  - a dimension with a logical reference form (#98: group, campus, group type, department) is;
- *  - a numeric-but-universal dimension (`cc_securitylevel`) is.
+ *  - a dimension with a logical reference form is (#98: group, campus, group type, department;
+ *    #110 added security levels).
  * Everything else — calendar categories, HTML templates, wiki categories, OAuth clients — names
  * module data this tool has no resource for, so it blocks the whole instance under the strict
  * ownership default. (With `preserveUnknown` (#102) those same instances become declarable while
@@ -130,7 +130,6 @@ export function declarability(rows: RawPermission[]): DeclarabilityVerdict {
     if (scopeField === null) continue;
     if (t.dataId.every((id) => id === ALL_SCOPE_SENTINEL)) continue;
     if (SCOPE_REF_KIND[scopeField] !== undefined) continue;
-    if (NUMERIC_UNIVERSAL_SCOPE_FIELDS.has(scopeField)) continue;
     blockedBy.add(scopeField);
   }
   return {

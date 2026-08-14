@@ -46,6 +46,14 @@ const RESOURCE_PATHS: Record<string, ResourceSpec> = {
   // (GET only; no write verb exists), so this is the way to discover the names a
   // `scope: [{ department: "…" }]` reference resolves against. Never adoptable.
   departments: { path: "/departments" },
+  // Security levels — the `cc_securitylevel` permission scope dimension (#110). Flat
+  // `[{id, name, sortKey}]`. This is how you discover the names a `scope: [{ securityLevel: "…" }]`
+  // reference resolves against, and how you check whether an instance's ids really are the usual
+  // 1..4 — they are editable master data, not a protocol constant.
+  "security-levels": { path: "/securitylevels" },
+  // Comment viewers — the `cdb_comment_viewer` permission scope dimension (#102). The names a
+  // `scope: [{ commentViewer: "…" }]` reference resolves against. NB `id: 0` ("Alle") is a real row.
+  "comment-viewers": { path: "/person/commentviewers" },
   // PERSON statuses — master data (the enumeration), never person records. The domain a `ct.status`
   // permission declaration hangs off, and an adoptable resource since #96.
   statuses: { path: "/statuses" },

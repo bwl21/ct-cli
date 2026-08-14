@@ -21,6 +21,8 @@
 export type RefKind =
   | "campus"
   | "department"
+  | "security-level"
+  | "comment-viewer"
   | "group-type"
   | "group-status"
   | "person-status"
@@ -44,10 +46,19 @@ export const GROUP_STATUS_NO_CATALOG =
   `group statuses have no REST catalog (GET /group/memberstatus is a different dimension: member ` +
   `statuses, string ids — verified 2026-07-10). Declare a numeric "groupStatusId" instead (e.g. "groupStatusId: 1").`;
 
-/** Simple key-addressed reference: campus / department / group type / group status / person status / role definition / group. */
+/** Simple key-addressed reference: campus / department / security level / group type / group status / person status / role definition / group. */
 export interface SimpleRef {
   __ctRef: true;
-  kind: "campus" | "department" | "group-type" | "group-status" | "person-status" | "role-def" | "group";
+  kind:
+    | "campus"
+    | "department"
+    | "security-level"
+    | "comment-viewer"
+    | "group-type"
+    | "group-status"
+    | "person-status"
+    | "role-def"
+    | "group";
   key: string;
 }
 
@@ -101,16 +112,67 @@ export const ref = {
   campus: (key: string): SimpleRef => ({ __ctRef: true, kind: "campus", key: requireKey("campus", key) }),
   /**
    * A Bereich/DEPARTMENT (`/departments`), the scope dimension of `cdb_bereich` rights such as
-   * `churchdb:view alldata` ("Personen eines Bereiches sehen") — #98. Unlike campuses and group
-   * types, departments are a READ-ONLY ref catalog: `GET /departments` exists but there is no POST /
-   * PUT / DELETE (live-probed against the instance OpenAPI spec, eqrm prod CT 3.135.2, 2026-08-13).
-   * So a department can be REFERENCED by name on any host, but never declared, adopted or created —
-   * an unresolvable name is a hard error, not a create.
+   * `churchdb:view alldata` ("Personen eines Bereiches sehen") — #98.
+   *
+   * Catalog-only FOR NOW: `ct` reads `GET /departments` and resolves a name against it, but declares
+   * and creates nothing, so an unresolvable name is a hard error rather than a create. That is a
+   * statement about what this tool drives today, NOT about ChurchTools: `/departments` has no REST
+   * write verb (live-probed against the instance OpenAPI spec, eqrm prod CT 3.135.2, 2026-08-13), but
+   * the admin UI does create Bereiche, through the legacy `POST /index.php?q=churchdb/ajax`
+   * `func=saveMasterData` interface that appears in no OpenAPI spec (captured 2026-08-13, #108/#109).
+   * Making departments declarable is tracked there.
    */
   department: (key: string): SimpleRef => ({
     __ctRef: true,
     kind: "department",
     key: requireKey("department", key),
+  }),
+  /**
+   * A SECURITY LEVEL (`/securitylevels`), the scope dimension of `cc_securitylevel` rights such as
+   * `churchdb:+see persons` — #110.
+   *
+   * Exists because "security-level ids are universal, so a numeric literal is portable" was an
+   * assumption, not a guarantee: `cc_securitylevel` is an admin-editable master-data table (`id`,
+   * `bezeichnung`, `sortkey`) with an auto-increment id — confirmed in the instance's own master-data
+   * registry, eqrm-dev CT 3.135.2, 2026-08-14 — so 1/2/3 line up across instances by convention, not
+   * by construction. Reordering is not even exotic: `PATCH /securitylevels/{id}` takes `newid` +
+   * `forcereorder`. Referencing a level by name makes a config say what it means on any host, and
+   * hard-error instead of silently granting the wrong level when the name is absent.
+   *
+   * Catalog-only TODAY, and unlike {@link ref.department} that is not forced by CT:
+   * `/securitylevels/{id}` exposes POST, PATCH and DELETE (live-probed 2026-08-14), so security
+   * levels could become a fully managed resource. They are not one yet because CREATE is
+   * `POST /securitylevels/{id}` — an id-bearing create path the registry's `collectionPath` contract
+   * does not model. Tracked on #110.
+   *
+   * Numeric scope entries stay fully supported (#49): the names are localised German strings with
+   * parentheses ("Stufe 3 (Hoch)" slugs to `stufe_3_hoch`), so a rename breaks a ref where a number
+   * would have survived. Pick per config which risk you would rather carry.
+   */
+  securityLevel: (key: string): SimpleRef => ({
+    __ctRef: true,
+    kind: "security-level",
+    key: requireKey("security-level", key),
+  }),
+  /**
+   * A COMMENT VIEWER (`/person/commentviewers`), the scope dimension of `cdb_comment_viewer` rights
+   * such as `churchdb:view comments` — #102.
+   *
+   * The dimension existed in the catalog all along but had no logical form, which is what made three
+   * role instances on `Bereich Pastoral Care` undeclarable: each was blocked by exactly ONE
+   * comment_viewer-scoped grant, so the whole role instance fell out of `ct coverage` as unmanageable.
+   * #109 assumed this would need the legacy master-data endpoint; it does not — `/person/commentviewers`
+   * is conventional REST (`[{id, name, sortKey}]`, plus POST/PUT/DELETE), live-probed on eqrm-dev
+   * CT 3.135.2, 2026-08-14.
+   *
+   * Catalog-only here, like {@link ref.securityLevel}: resolvable by name on any host, not declarable.
+   * Its REST surface would fit the resource registry unchanged, so promoting it later is a scope
+   * decision rather than a technical one.
+   */
+  commentViewer: (key: string): SimpleRef => ({
+    __ctRef: true,
+    kind: "comment-viewer",
+    key: requireKey("comment-viewer", key),
   }),
   groupType: (key: string): SimpleRef => ({
     __ctRef: true,
@@ -142,8 +204,13 @@ export const ref = {
   /**
    * A `group_role` permission domain, by its (group, role) pair (#25). The resolver maps it to the
    * numeric pairing domainId at plan time by matching the role name against the group's role list
-   * (see the ASSUMPTION block in src/resolve/resolver.ts — the exact source is unverified; the
-   * numeric `id:` escape hatch remains the fallback). The Ref itself is an inert sentinel until then.
+   * (see the VERIFIED LIVE block in src/resolve/resolver.ts; the numeric `id:` escape hatch remains
+   * the fallback). The Ref itself is an inert sentinel until then.
+   *
+   * When the GROUP is declared in the same config but does not exist on the target host yet, the
+   * domain resolves to a {@link PendingRef} and is completed during apply (#106) — after the group is
+   * created, from its own `/groups/{id}/roles`. That is what keeps one config plannable on a host
+   * where the group already exists AND on a fresh one where it does not.
    */
   groupRole: (group: string, role: string): GroupRoleRef => ({
     __ctRef: true,
@@ -251,16 +318,20 @@ export function collectRefs(value: unknown): Ref[] {
 /**
  * Collect the managed logical keys named by every {@link PendingRef} in a value. Pending markers
  * always point at a same-run declared resource, so these keys are exactly the apply-order
- * dependencies the referencing resource needs (group-role refs resolve to a concrete id at plan
- * time and never go pending).
+ * dependencies the referencing resource needs.
+ *
+ * The compound kinds contribute nothing here. `group-type-role` never goes pending at all. A
+ * `group-role` CAN (#106), but only in the permission-DOMAIN position — permissions are applied after
+ * every resource tier, so they need no per-resource ordering edge — and never inside a resource's
+ * field bag, which is the only thing this function walks.
  */
 export function collectPendingRefKeys(value: unknown): string[] {
   const out: string[] = [];
   const walk = (v: unknown): void => {
     if (isPendingRef(v)) {
       const r = v.__pendingRef;
-      // Compound refs (group-role, group-type-role) resolve to a concrete id at plan time and never go
-      // pending, so only the simple, single-`key` kinds contribute an apply-order dependency here.
+      // Only the simple, single-`key` kinds contribute an apply-order dependency here — see the note
+      // above for why the compound ones cannot reach this walk.
       if (r.kind !== "group-role" && r.kind !== "group-type-role") out.push(r.key);
       return;
     }

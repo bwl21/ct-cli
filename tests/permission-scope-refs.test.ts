@@ -175,11 +175,24 @@ describe("scope-dimension validation (#98)", () => {
       key: "p",
       domainType: "group_role",
       domainId: 1,
-      // churchdb:security level person scopes by cc_securitylevel — security levels are not resources.
+      // churchcal:view category scopes by cc_calcategory — a calendar dimension, outside this tool's
+      // mandate, so it has no ref kind and the numeric hatch is the only honest answer.
+      grants: [{ right: "churchcal:view category", scope: [ref.campus("koblenz")] }],
+    };
+    await expect(resolveScopeRefs([perm], resolverFor(emptyState(HOST)), emptyState(HOST))).rejects.toThrow(
+      /campus:koblenz.*cc_calcategory.*no logical reference form/s,
+    );
+  });
+
+  it("rejects a ref whose kind does not match the security-level dimension (#110)", async () => {
+    const perm: DesiredPermission = {
+      key: "p",
+      domainType: "group_role",
+      domainId: 1,
       grants: [{ right: "churchdb:security level person", scope: [ref.campus("koblenz")] }],
     };
     await expect(resolveScopeRefs([perm], resolverFor(emptyState(HOST)), emptyState(HOST))).rejects.toThrow(
-      /campus:koblenz.*cc_securitylevel.*no logical reference form/s,
+      /campus:koblenz.*"cc_securitylevel".*takes a security-level reference/s,
     );
   });
 
@@ -263,9 +276,11 @@ describe("scope-dimension validation (#98)", () => {
   });
 });
 
-describe("department scopes are a READ-ONLY ref catalog (cdb_bereich, #98)", () => {
+describe("department scopes are a read-but-not-managed ref catalog (cdb_bereich, #98)", () => {
   // `/departments` is GET-only — live-probed 2026-08-13 against the instance's own OpenAPI spec
-  // (eqrm prod, CT 3.135.2). So a department resolves by NAME on every host but is never declarable.
+  // (eqrm prod, CT 3.135.2) — and `ct` drives no other write path for it, so a department resolves by
+  // NAME on every host but is never declarable HERE. (ChurchTools itself can create one, through the
+  // legacy master-data endpoint the admin UI uses — #108/#109.)
   const departments = [
     { id: 7, name: "Equippers Koblenz" },
     { id: 1, name: "Equippers Rhein-Main" },
@@ -289,9 +304,11 @@ describe("department scopes are a READ-ONLY ref catalog (cdb_bereich, #98)", () 
     ]);
   });
 
-  it("hard-errors on an unknown department, and does NOT advise declaring it", async () => {
+  it("hard-errors on an unknown department, and NOW advises declaring it (#108)", async () => {
+    // Before #108 this said departments could not be declared or adopted. They can: `ct.department`
+    // creates one through the legacy master-data endpoint, so the generic advice is correct again.
     await expect(tuplesFor(perm("nope"), emptyState(HOST), [], client)).rejects.toThrow(
-      /no live department at \/departments matches key "nope".*read-only catalog.*cannot be declared or adopted/s,
+      /no managed resource and no live department at \/departments matches key "nope".*Declare\/adopt it/s,
     );
   });
 
@@ -314,6 +331,89 @@ describe("department scopes are a READ-ONLY ref catalog (cdb_bereich, #98)", () 
     expect(await tuplesFor(perm("equippers_koblenz"), state, [], client)).toEqual([
       { authId: 102, dataId: [7], type: "grant" },
     ]);
+  });
+});
+
+describe("security-level scopes resolve by name (cc_securitylevel, #110)", () => {
+  // "Security-level ids are universal, so a numeric literal is portable" was an assumption, not a
+  // guarantee: cc_securitylevel is admin-editable master data with an auto-increment id. These pin the
+  // ref form that says what it means on any host — while keeping the numeric hatch working.
+  const levels = [
+    { id: 1, name: "Stufe 1 (Niedrig)", sortKey: 1 },
+    { id: 2, name: "Stufe 2 (Mittel)", sortKey: 2 },
+    { id: 3, name: "Stufe 3 (Hoch)", sortKey: 3 },
+  ];
+  const client = {
+    get: vi.fn(async (path: string) => (path === "/securitylevels" ? levels : [])),
+  } as unknown as CtClient;
+
+  const perm = (scope: unknown[]): DesiredPermission => ({
+    key: "p",
+    domainType: "group_role",
+    domainId: 1,
+    grants: [{ right: "churchdb:security level person", scope: scope as never }],
+  });
+
+  it("resolves a level by its slugged name against the live catalog", async () => {
+    // No scopeKey: catalog-resolved ids are host-correct already and have no managed identity.
+    expect(await tuplesFor(perm([{ securityLevel: "stufe_3_hoch" }]), emptyState(HOST), [], client)).toEqual([
+      { authId: 125, dataId: [3], type: "grant" },
+    ]);
+  });
+
+  it("still accepts the numeric escape hatch, byte-identically (#49)", async () => {
+    expect(await tuplesFor(perm([1, 2, 3]), emptyState(HOST), [], client)).toEqual([
+      { authId: 125, dataId: [1], type: "grant" },
+      { authId: 125, dataId: [2], type: "grant" },
+      { authId: 125, dataId: [3], type: "grant" },
+    ]);
+  });
+
+  it("hard-errors on a level name this host does not have, instead of granting the wrong one", async () => {
+    await expect(
+      tuplesFor(perm([{ securityLevel: "stufe_9" }]), emptyState(HOST), [], client),
+    ).rejects.toThrow(/no live security-level at \/securitylevels matches key "stufe_9"/);
+  });
+});
+
+describe("comment-viewer scopes resolve by name (cdb_comment_viewer, #102)", () => {
+  // The dimension that made three Pastoral Care role instances undeclarable: each was blocked by
+  // exactly ONE comment_viewer-scoped grant. #109 assumed this needed the legacy master-data
+  // endpoint; `/person/commentviewers` is conventional REST, so it is just another catalog.
+  const viewers = [
+    { id: 0, name: "Alle", sortKey: 0 },
+    { id: 1, name: "Gemeindeleitung", sortKey: 1 },
+    { id: 2, name: "Admins", sortKey: 2 },
+  ];
+  const client = {
+    get: vi.fn(async (path: string) => (path === "/person/commentviewers" ? viewers : [])),
+  } as unknown as CtClient;
+
+  const perm = (scope: unknown[]): DesiredPermission => ({
+    key: "p",
+    domainType: "group_role",
+    domainId: 1,
+    grants: [{ right: "churchdb:view comments", scope: scope as never }],
+  });
+
+  it("resolves a viewer by name", async () => {
+    expect(
+      await tuplesFor(perm([{ commentViewer: "gemeindeleitung" }]), emptyState(HOST), [], client),
+    ).toEqual([{ authId: 113, dataId: [1], type: "grant" }]);
+  });
+
+  it("resolves the id-0 row — a falsy id must not read as 'not found'", async () => {
+    // "Alle" is id 0 on a real instance. Anything treating 0 as missing would silently drop the scope
+    // (or worse, fall through to a different row), so this is pinned deliberately.
+    expect(await tuplesFor(perm([{ commentViewer: "alle" }]), emptyState(HOST), [], client)).toEqual([
+      { authId: 113, dataId: [0], type: "grant" },
+    ]);
+  });
+
+  it("hard-errors on a viewer name this host does not have", async () => {
+    await expect(tuplesFor(perm([{ commentViewer: "nope" }]), emptyState(HOST), [], client)).rejects.toThrow(
+      /no live comment-viewer at \/person\/commentviewers matches key "nope"/,
+    );
   });
 });
 

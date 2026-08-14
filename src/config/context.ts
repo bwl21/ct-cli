@@ -19,7 +19,7 @@ import type { DesiredPermission, Grant, PreserveUnknown } from "../permissions/t
 import { KNOWN_SCOPE_FIELDS } from "../permissions/catalog.js";
 import { GROUP_STATUS_NO_CATALOG, isRef, ref, refKey, type Ref } from "../resolve/refs.js";
 import { normalizeScopeEntry } from "../permissions/scope.js";
-import { conventionalRulesetRef, knownFields } from "../resources/registry.js";
+import { conventionalRulesetRef, isCallerAssignedId, knownFields } from "../resources/registry.js";
 import { warn } from "../ui.js";
 // Re-exported so a config file can pull the query DSL from the same module as
 // `ConfigContext`: `import { q, churchQuery } from "../../src/config/context.js"`.
@@ -266,6 +266,39 @@ export interface ConfigContext {
    * Master data, not people — a status is the enumeration, never a person or a membership.
    */
   personStatus(input: ResourceInput): void;
+  /**
+   * A SECURITY LEVEL (`/securitylevels` — "Stufe 1 (Niedrig)" … ), #110. The **only** declaration
+   * whose `id` you choose yourself, and it is REQUIRED:
+   *
+   * ```ts
+   * ct.securityLevel({ key: "stufe_3_hoch", id: 3, name: "Stufe 3 (Hoch)" });
+   * ```
+   *
+   * ChurchTools creates a level with `POST /securitylevels/{id}` — the client picks the id and CT
+   * 409s if it is taken. That is deliberate on CT's side: the id IS the level (person fields carry a
+   * `securityLevelId`, grants scope by `cc_securitylevel`), so it has to be reproducible rather than
+   * whatever a fresh instance happens to auto-increment to. Declaring it is what makes a numeric
+   * `scope: [1, 2, 3]` genuinely portable for a config that owns its levels.
+   *
+   * Changing a declared `id` later is refused at plan time: that is a renumber, which rewrites what
+   * every existing grant on that dimension means. Master data, never people — but note the
+   * `destroyWarning`: a delete reaches every person field and grant referencing the level.
+   */
+  securityLevel(input: ResourceInput): void;
+  /**
+   * A BEREICH / department (`/departments`), #108 — the `cdb_bereich` scope dimension of
+   * `churchdb:view alldata` ("Personen eines Bereiches sehen").
+   *
+   * ```ts
+   * ct.department({ key: "equippers_koblenz", name: "Equippers Koblenz", shorty: "EQKO" });
+   * ```
+   *
+   * The one managed type ChurchTools has no REST write for: reads come from `GET /departments`,
+   * writes go through the legacy master-data endpoint the admin UI uses. Declaring Bereiche is what
+   * lets a config stand up a fresh host — before this, a Bereich-scoped grant only planned where
+   * someone had already created the Bereich by hand.
+   */
+  department(input: ResourceInput): void;
   /** Master-data group role (`/group/roles`). Named `roleDefinition` to avoid colliding
    *  with the `groupRole` permission function below. */
   roleDefinition(input: ResourceInput): void;
@@ -391,6 +424,20 @@ function toDesired(type: string, input: ResourceInput, location?: string): Desir
       `${type} "${key}": "${idField}" must be a number (the CT id), null to clear, or a logical ` +
         `reference${hint}.`,
     );
+  }
+  // A caller-assigned-id type (#110: security levels) is CREATED at its declared id — `createPath`
+  // interpolates `body.id` straight into the POST path. An omitted id would POST to a literal
+  // ".../undefined", and a string one ("3") would both post oddly and diff forever against CT's
+  // numeric actual. Neither is caught anywhere else: `id` is a plain managed field here, not one of
+  // the ID_FIELDS checked above. So require a real, non-negative integer at eval time.
+  if (isCallerAssignedId(type)) {
+    const declaredId = fields.id;
+    if (typeof declaredId !== "number" || !Number.isInteger(declaredId) || declaredId < 0) {
+      throw new Error(
+        `${type} "${key}": "id" is required and must be a non-negative integer — this resource is ` +
+          `created at the id you declare (got ${JSON.stringify(declaredId)}).`,
+      );
+    }
   }
   // Warn (never throw) on a declared field the registry does not manage for this type — e.g. a
   // seeded config using campus's vestigial `shortName` instead of the real `shorty` (#51). The
@@ -544,6 +591,8 @@ export function createContext(): {
     targetGroup: define("target-group"),
     relationshipType: define("relationship-type"),
     personStatus: define("person-status"),
+    securityLevel: define("security-level"),
+    department: define("department"),
     roleDefinition: define("group-role"),
     groupRole: definePermission("group_role"),
     groupTypeRole: definePermission("group_type_role"),

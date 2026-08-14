@@ -345,8 +345,10 @@ describe("emitAdoptedGrants", () => {
     ];
     const state = stateWithKids();
     const block = emitAdoptedGrants({ domainType: "group_type_role", domainId: 9, rows, state });
-    // the admin-authored member rights are emitted as ACTIVE grants, never NOTE comments
-    expect(block).not.toContain("NOTE:");
+    // the admin-authored member rights are emitted as ACTIVE grants, never as omitted WARNINGs. The
+    // security-level-scoped ones carry a portable-form NOTE (#110) — advice, not an omission — so the
+    // assertion is about what is DECLARED, which `parseEmittedGrants` below reads back in full.
+    expect(block).not.toContain("WARNING:");
     expect(block).toContain("churchdb:+add person");
     const grants = parseEmittedGrants(block);
 
@@ -432,20 +434,65 @@ describe("emitAdoptedGrants", () => {
 
   it("a catalog-only dimension gets ONE note — the portable form, not the 'not a group' line", () => {
     const rows: RawPermission[] = [
-      { authId: 102, dataId: 4, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cdb_bereich
+      // cdb_comment_viewer — a catalog ct reads but does not manage (#102). Bereiche used to be the
+      // example here; they became a managed resource in #108, so they now take the adopt-hint path.
+      { authId: 113, dataId: 4, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
     const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
 
-    expect(block).toContain('Portable form: { department: "<name>" }');
+    expect(block).toContain('Portable form: { commentViewer: "<name>" }');
     // The numeric-escape-hatch line is for dimensions with NO logical form; emitting it here too
     // would contradict the portable-form note directly above it.
     expect(block).not.toContain("not a group");
+    expect(block).toContain('{ right: "churchdb:view comments", scope: [4] }');
+  });
+
+  it("points an unmanaged Bereich scope at `ct adopt department` now that Bereiche are managed (#108)", () => {
+    const rows: RawPermission[] = [
+      { authId: 102, dataId: 4, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cdb_bereich
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
+    expect(block).toContain("ct adopt department 4");
     expect(block).toContain('{ right: "churchdb:view alldata", scope: [4] }');
+  });
+
+  it("points an UNMANAGED security-level scope at `ct adopt security-level` (#110)", () => {
+    // Security levels are a managed resource now, so the honest advice is the same as for any other
+    // managed dimension: adopt the level, then re-adopt the grants to get the portable ref form.
+    const rows: RawPermission[] = [
+      { authId: 125, dataId: 2, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cc_securitylevel
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
+    expect(block).toContain("ct adopt security-level 2");
+    expect(block).not.toContain("not a group");
+    expect(block).toContain('{ right: "churchdb:security level person", scope: [2] }');
+  });
+
+  it("emits a MANAGED security-level scope as the portable ref (#110)", () => {
+    const state: State = {
+      ...emptyState(),
+      resources: {
+        stufe_2_mittel: {
+          type: "security-level",
+          id: 2,
+          key: "stufe_2_mittel",
+          fields: { id: 2, name: "Stufe 2 (Mittel)" },
+          adoptedAt: "t",
+          updatedAt: "t",
+        },
+      },
+    };
+    const rows: RawPermission[] = [
+      { authId: 125, dataId: 2, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state });
+    expect(block).toContain('scope: [{ securityLevel: "stufe_2_mittel" }]');
   });
 
   it("a dimension with no logical form still gets the numeric-escape-hatch note", () => {
     const rows: RawPermission[] = [
-      { authId: 125, dataId: 2, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cc_securitylevel
+      // cc_calcategory — a calendar dimension, outside this tool's mandate, so no ref kind exists.
+      { authId: 403, dataId: 2, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
     const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
     expect(block).toContain("not a group");

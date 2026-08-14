@@ -9,7 +9,7 @@ import type { CtClient } from "../api/ctClient.js";
 import { CtApiError } from "../api/ctClient.js";
 import type { ManagedResource, State } from "../state/state.js";
 import type { DesiredResource, Plan } from "./types.js";
-import { RESOURCES } from "../resources/registry.js";
+import { RESOURCES, type CtWriteClient } from "../resources/registry.js";
 import { computePlan } from "./plan.js";
 import { foldSynthetic } from "./synthetic.js";
 import { Resolver } from "../resolve/resolver.js";
@@ -65,7 +65,14 @@ export async function fetchActual(
       return;
     }
     try {
-      const raw = await client.get<Record<string, unknown>>(spec.itemPath(managed.id));
+      // A type with no `GET {itemPath}` (#108: Bereiche have only the collection) reads through its
+      // own `fetchOne`, which returns null for "genuinely absent" — the same meaning a 404 carries
+      // below. Without this the default read 404s on every plan and the resource looks vanished, so
+      // apply proposes creating it again forever.
+      const raw = spec.fetchOne
+        ? await spec.fetchOne(client as CtWriteClient, managed.id)
+        : await client.get<Record<string, unknown>>(spec.itemPath(managed.id));
+      if (raw === null) return; // absent in CT — same handling as a 404
       actual.set(managed.key, spec.managedFields(raw));
     } catch (err) {
       if (err instanceof CtApiError && err.status === 404) {

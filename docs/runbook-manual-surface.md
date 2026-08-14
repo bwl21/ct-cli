@@ -5,24 +5,33 @@ apply "selective adoption" deliberately instead of guessing. If reproducing an
 instance from code means "rebuild the scaffold with `ct apply`, then do
 _these_ specific clicks by hand," this is the list of those clicks.
 
-Every item below falls into exactly one of three buckets:
+Every item below falls into exactly one of three buckets. Keeping them apart
+matters, because they say very different things and only one of them is about
+ChurchTools' capabilities at all (#111 — the three were routinely conflated,
+and "no REST endpoint" kept getting written down as "impossible"):
 
-- **API gap** — ChurchTools does not expose a write endpoint (or any
-  endpoint) for this. Nothing in `ct` can close this until CT ships one.
-- **Not yet implemented** — the ChurchTools API supports it, but `ct` doesn't
-  drive it yet. Tracked by an open issue; closing the issue removes the item
-  from this runbook.
-- **Out of tool scope** — deliberately, permanently unmanaged. Not a gap to
-  close; a boundary the tool is designed to respect.
+- **No write API `ct` can drive** — a _capability fact about the interfaces this
+  tool speaks_, dated and sourced. It says: neither the REST/OpenAPI surface nor
+  the legacy master-data registry offers a write path we can use today. It does
+  **not** say ChurchTools cannot do it — CT's admin UI writes plenty that no API
+  we audit exposes.
+- **Not yet implemented** — the API supports it, but `ct` doesn't drive it yet.
+  Tracked by an open issue; closing the issue removes the item from this runbook.
+- **Out of tool scope** — a _product decision_, not an API limit. Deliberately
+  unmanaged; not a gap to close, a boundary the tool is designed to respect.
 
-## API gap — CT does not expose a write endpoint
+Absolutes ("never", "permanently", "no API at all") belong only on items where
+**both** probes in [the re-audit procedure](#re-audit-procedure-for-new-ct-releases)
+were actually run and recorded, with dates — or on out-of-scope items, where the
+absolute is about our own intent rather than about CT.
 
-| Item                                           | What it is                                                                                                                                                                                                                                                                                                | Why manual                                                                                                                                                                                                                                           | Where in the CT admin UI                                                   | How to verify                                                                                                                                                                                                                                                                                                                                                |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Group member-statuses                          | The set of "member status" values a group can assign to its members (e.g. active/candidate) — NOT the same dimension as a group's own `groupStatusId`, which IS fully managed (`ct.group({ groupStatusId })`, [`docs/group-field-decisions.md`](group-field-decisions.md)); do not conflate the two (#67) | Only `GET /group/memberstatus` exists; no create/update/delete endpoint ([`docs/api-coverage.md`](api-coverage.md) #8)                                                                                                                               | Group settings → member status admin (org-wide master data, not per-group) | `ct get raw /group/memberstatus` (no dedicated `ct get member-statuses` subcommand yet — the generic `raw` path covers it) and diff by eye against the expected list below                                                                                                                                                                                   |
-| Meeting points (Treffpunkte)                   | A group's meeting-location master data                                                                                                                                                                                                                                                                    | No endpoint at all — zero matches for `treffpunkt`/`meetingpoint` anywhere in the OpenAPI spec ([`docs/api-coverage.md`](api-coverage.md) #11)                                                                                                       | Group admin → meeting point field on a group                               | No API verification possible; visually confirm in the UI. (Do not confuse with _meeting templates_ `/group/meetingtemplates` or _group meetings_ `/groups/{id}/meetings`, both full CRUD but different concepts — confirm with product if "meeting point" was meant to be one of those instead)                                                              |
-| Bereiche (departments) — creating/renaming one | The Bereich master data (`/departments`) — the `cdb_bereich` permission scope dimension                                                                                                                                                                                                                   | `GET /departments` exists but no write verb does — no `POST`/`PUT`/`DELETE`, and no `/departments/{id}` path at all (live-probed against the instance OpenAPI spec, eqrm prod CT 3.135.2, 2026-08-13; [`docs/api-coverage.md`](api-coverage.md) #14) | Master data admin → Bereiche                                               | `ct get departments` lists them. **Grants scoped to one ARE declarable** — `scope: [{ department: "<name-slug>" }]` resolves by name per host (#98) — so only CREATING or RENAMING a Bereich is manual. Renaming one in CT breaks every config reference to its old name, by design: the reference then hard-errors instead of silently regranting elsewhere |
-| Permission name↔authId catalog                 | The mapping from human-readable `module:right` names to the numeric `authId` the API actually writes                                                                                                                                                                                                      | Not exposed by the REST API at all; only servable via the legacy `POST /index.php?q=churchauth/ajax&func=getMasterData` call ([`src/permissions/README.md`](../src/permissions/README.md))                                                           | Permission editor (any role's right-picker enumerates the live set)        | Regeneration procedure below (**Permission catalog lifecycle**)                                                                                                                                                                                                                                                                                              |
+## No write API `ct` can drive
+
+| Item                           | What it is                                                                                                                                                                                                                                                                                                | Why manual                                                                                                                                                                                 | Where in the CT admin UI                                                   | How to verify                                                                                                                                                                                                                                                                                   |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Group member-statuses          | The set of "member status" values a group can assign to its members (e.g. active/candidate) — NOT the same dimension as a group's own `groupStatusId`, which IS fully managed (`ct.group({ groupStatusId })`, [`docs/group-field-decisions.md`](group-field-decisions.md)); do not conflate the two (#67) | Only `GET /group/memberstatus` exists; no create/update/delete endpoint ([`docs/api-coverage.md`](api-coverage.md) #8)                                                                     | Group settings → member status admin (org-wide master data, not per-group) | `ct get raw /group/memberstatus` (no dedicated `ct get member-statuses` subcommand yet — the generic `raw` path covers it) and diff by eye against the expected list below                                                                                                                      |
+| Meeting points (Treffpunkte)   | A group's meeting-location master data                                                                                                                                                                                                                                                                    | No endpoint at all — zero matches for `treffpunkt`/`meetingpoint` anywhere in the OpenAPI spec ([`docs/api-coverage.md`](api-coverage.md) #11)                                             | Group admin → meeting point field on a group                               | No API verification possible; visually confirm in the UI. (Do not confuse with _meeting templates_ `/group/meetingtemplates` or _group meetings_ `/groups/{id}/meetings`, both full CRUD but different concepts — confirm with product if "meeting point" was meant to be one of those instead) |
+| Permission name↔authId catalog | The mapping from human-readable `module:right` names to the numeric `authId` the API actually writes                                                                                                                                                                                                      | Not exposed by the REST API at all; only servable via the legacy `POST /index.php?q=churchauth/ajax&func=getMasterData` call ([`src/permissions/README.md`](../src/permissions/README.md)) | Permission editor (any role's right-picker enumerates the live set)        | Regeneration procedure below (**Permission catalog lifecycle**)                                                                                                                                                                                                                                 |
 
 **Expected values for a given instance:** left blank here deliberately — this
 runbook is generic (part of `ct-cli`, the tool repo). The per-instance
@@ -129,21 +138,49 @@ CT's OpenAPI spec (`GET $CT_HOST/system/runtime/swagger/openapi.json`, pulled
 by `npm run generate:client`) is **self-trimming**: `info.description` states
 it "will always show only those endpoints you can use with your ChurchTools
 installation." That means a version bump can silently add a write endpoint
-this runbook still lists as an API gap (most plausibly: a `group/memberstatus`
-write endpoint, or a meeting-point endpoint).
+this runbook still lists as unavailable.
 
-Until a scripted diff exists, re-audit manually after any CT upgrade:
+**The spec is not the whole surface.** This is the defect #111 was filed about:
+this procedure used to say "grep the OpenAPI spec", which can only ever discover
+REST endpoints — so it was structurally incapable of finding the legacy
+`POST /index.php?q=…/ajax` interface the admin UI writes a large amount of master
+data through, and yet it concluded "permanent" / "never" on that basis. Bereiche
+(#108), person statuses (#96) and security levels (#110) were all recorded as
+impossible on evidence that only ruled out REST. `ct` has depended on that same
+legacy surface the whole time — the permission catalog is generated from
+`POST /index.php?q=churchauth/ajax` `func=getMasterData`
+([`src/permissions/README.md`](../src/permissions/README.md)).
 
-1. Re-fetch the spec: `npm run generate:client` (writes
-   `src/api/schema.d.ts`) or fetch `openapi.json` directly and open it.
-2. For each item in the **API gap** table above, re-check whether its path
-   now has additional methods (grep the spec for `/group/memberstatus`,
-   `treffpunkt`/`meetingpoint`, etc.).
-3. If a write method appeared: promote the item — add it to
-   `src/resources/registry.ts` (or the relevant synthetic field), extend
-   the DSL, add tests, and delete its row from this runbook's API-gap table.
-4. Re-run `GET /info` to confirm the CT `version`/`build` this audit was
-   performed against, and note it in the commit that updates this file.
+So a "no write API" verdict now requires **both** probes, and the third where
+neither settles it:
+
+1. **REST probe.** Re-fetch the spec: `npm run generate:client` (writes
+   `src/api/schema.d.ts`) or fetch `openapi.json` directly. For each item in the
+   no-write-API table, re-check whether its path now has additional methods (grep
+   for `/group/memberstatus`, `treffpunkt`/`meetingpoint`, etc.).
+2. **Master-data registry probe.** `POST /index.php?q=churchdb/ajax` with body
+   `func=getMasterData` returns `data.masterDataTables`: every editable table with
+   its label, shortname, physical table name and a full `DESCRIBE`-style column
+   list. If the thing you are auditing has a table there (`cdb_bereich`,
+   `cdb_status`, `cc_securitylevel`, `cdb_comment_viewer`, …), it **is** writable —
+   `func=saveMasterData&table=<t>&id=&col0=…&value0=…` (empty `id` creates) — and
+   the item belongs under _Not yet implemented_, not here.
+3. **UI capture**, where neither probe settles it: perform the action in the CT
+   admin UI with devtools recording, and read what it actually posted. Save the
+   request line/body into the item's row.
+4. **Record the probe.** Note the date, the CT `version`/`build` from `GET /info`,
+   and _which_ probes were run, in the row and in the commit — the way the
+   permission-catalog note already does. A reader must be able to tell a verified
+   negative from an inherited assumption.
+5. If a write path appeared: promote the item — add it to
+   `src/resources/registry.ts` (or the relevant synthetic field), extend the DSL,
+   add tests, and move its row out of this table.
+
+**Wording rule.** Write what was probed, not what you assume. "No REST write
+endpoint (probed 2026-08-13, CT 3.135.2)" is a fact. "Cannot be created",
+"permanently", "not a resource at all" are claims that need step 2 (and usually
+step 3) behind them — and if the item is unmanaged because we _chose_ that, it
+belongs in **Out of tool scope**, phrased as a decision.
 
 This mirrors (and should eventually replace by scripting) the Phase 0 spike
 that produced `docs/api-coverage.md` — see that doc for the full method.
@@ -175,11 +212,14 @@ in where they'd otherwise be silently skipped:
    declaration, adopt them now with `ct adopt grants <domainType> <domainId>`
    (paste the emitted block into config) so they don't silently diverge from
    what `ct plan` believes is desired.
-7. **Field definitions & security levels** — read the current schema with
+7. **Field definitions** — read the current schema with
    `ct get person-masterdata` and `ct get data-fields` to confirm the expected
-   fields, field groups, and security levels exist; create/edit any missing
-   _definitions_ by hand in the master-data admin UI (no REST write endpoint —
-   see the field-definitions row above and [`docs/handbuch/field-definitions.md`](handbuch/field-definitions.md)).
+   fields and field groups exist; create/edit any missing _definitions_ by hand in
+   the master-data admin UI (no REST write endpoint — see the field-definitions row
+   above and [`docs/handbuch/field-definitions.md`](handbuch/field-definitions.md)).
+   **Security levels are no longer manual** (#110): declare them
+   (`ct.securityLevel({ key, id, name })`) and step 1's `ct apply` creates them at
+   the declared ids.
 8. **Anything from the "out of tool scope" table** — persons, memberships,
    per-record field values, calendars, services, resource booking, forms,
    check-in, wiki, finance, sync, module-level settings, i18n — configure per
@@ -199,4 +239,8 @@ in where they'd otherwise be silently skipped:
 - "Meeting point" (Treffpunkt) has no confirmed CT concept mapping — `docs/api-coverage.md`
   flags that it might actually mean _meeting templates_ or _group meetings_
   (both full CRUD, i.e. not actually manual at all). Confirm with product
-  before treating it as a permanent API gap.
+  before treating it as unavailable.
+- The two remaining rows in the no-write-API table (**group member-statuses**,
+  **meeting points**) carry a REST probe but **no master-data-registry probe**
+  yet — step 2 of the procedure above postdates them. Until someone runs it,
+  read them as "no REST write endpoint", not as "impossible".
