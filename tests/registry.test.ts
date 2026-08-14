@@ -142,7 +142,10 @@ describe("configSnippet — idiomatic multi-line output (#52 item A)", () => {
 describe("configSnippet round-trips through the config loader for every adoptable type", () => {
   it.each(Object.keys(RESOURCES))("%s", async (type) => {
     const key = `adopted_${type.replace(/-/g, "_")}`;
-    const snippet = configSnippet(type, key, { name: "Round Trip" });
+    // A caller-assigned-id type (#110: security levels) is created AT its declared id, so `id` is a
+    // managed field that `adopt` always emits and the config DSL requires. Mirror a real adopt.
+    const fields = RESOURCES[type]?.callerAssignedId ? { id: 3, name: "Round Trip" } : { name: "Round Trip" };
+    const snippet = configSnippet(type, key, fields);
     const dir = mkdtempSync(join(tmpdir(), "ct-adopt-"));
     writeFileSync(join(dir, "ct.config.ts"), `export default (ct) => { ct.${snippet} };`);
 

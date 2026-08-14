@@ -217,6 +217,30 @@ async function departmentRows(client: CtWriteClient): Promise<{ id: number; name
   return (await client.get?.<{ id: number; name?: string }[]>("/departments")) ?? [];
 }
 
+/**
+ * `fetchOne` has no `/departments/{id}` to hit, so it filters the whole collection — and
+ * `fetchActual` runs it once per managed Bereich, concurrently. Share one read across that fan-out,
+ * the way the resolver caches identical catalog reads. Every write below drops the entry, so the
+ * cache can never outlive the state it describes.
+ */
+const departmentReads = new WeakMap<object, Promise<{ id: number; name?: string }[]>>();
+
+function cachedDepartmentRows(client: CtWriteClient): Promise<{ id: number; name?: string }[]> {
+  let p = departmentReads.get(client);
+  if (!p) {
+    p = departmentRows(client);
+    departmentReads.set(client, p);
+  }
+  return p;
+}
+
+/**
+ * Wrap a client's `ajax` once PER CLIENT. The wrapper is what `masterdata.ts` keys its ~3 MB
+ * registry cache on (a WeakMap on the object it is handed), so returning a fresh literal per call
+ * would miss that cache on every single write and re-fetch the whole payload each time.
+ */
+const ajaxWrappers = new WeakMap<object, Required<Pick<CtWriteClient, "ajax">>>();
+
 function requireAjax(client: CtWriteClient): Required<Pick<CtWriteClient, "ajax">> {
   if (!client.ajax) {
     throw new Error(
@@ -224,38 +248,57 @@ function requireAjax(client: CtWriteClient): Required<Pick<CtWriteClient, "ajax"
         "full authenticated client (`ajax`). This client cannot reach it.",
     );
   }
-  return { ajax: client.ajax.bind(client) };
+  let wrapper = ajaxWrappers.get(client);
+  if (!wrapper) {
+    wrapper = { ajax: client.ajax.bind(client) };
+    ajaxWrappers.set(client, wrapper);
+  }
+  return wrapper;
 }
 
 const departmentWriter: AdoptableResource["writer"] = {
   async create({ client, body }): Promise<number> {
     const { saveMasterData, DEPARTMENT_TABLE } = await import("../api/masterdata.js");
-    await saveMasterData(requireAjax(client), DEPARTMENT_TABLE, departmentRow(body));
-    // `saveMasterData` answers {"status":"success","data":null} — no id. Re-read the REST catalog and
-    // match the name just written. A duplicate name would be ambiguous, so that is refused rather
-    // than guessed: picking either row would bind state to the wrong Bereich for good.
     const name = body.name;
-    const rows = await departmentRows(client);
-    const matches = rows.filter((r) => r.name === name);
-    if (matches.length !== 1) {
+    // `saveMasterData` answers {"status":"success","data":null} — no id — so the new row has to be
+    // identified by re-reading the REST catalog. Snapshot the ids BEFORE writing and diff after:
+    // matching on the name alone would be wrong the moment a Bereich of that name already exists
+    // (created by hand on the target host), because the create would still have succeeded and the
+    // post-write ambiguity error would leave an orphan row behind that every retry duplicates.
+    const before = await departmentRows(client);
+    const collision = before.filter((r) => r.name === name);
+    if (collision.length > 0) {
       throw new Error(
-        `Created the Bereich "${String(name)}", but ${matches.length === 0 ? "it did not appear in" : `${matches.length} rows match it in`} ` +
-          `GET /departments — cannot record its id. The legacy master-data endpoint returns no id, so ` +
-          `the new row is identified by name. Resolve the duplicate/absence in ChurchTools and re-run.`,
+        `A Bereich named "${String(name)}" already exists in ChurchTools (#${collision.map((r) => r.id).join(", #")}). ` +
+          `Refusing to create a second one: the legacy master-data endpoint returns no id, so the new ` +
+          `row could not be told apart from the existing one. Adopt it instead (\`ct adopt department ` +
+          `${collision[0]!.id}\`) or rename one of the two.`,
       );
     }
-    return matches[0]!.id;
+    const known = new Set(before.map((r) => r.id));
+    await saveMasterData(requireAjax(client), DEPARTMENT_TABLE, departmentRow(body));
+    departmentReads.delete(client);
+    const fresh = (await departmentRows(client)).filter((r) => !known.has(r.id));
+    if (fresh.length !== 1) {
+      throw new Error(
+        `Created the Bereich "${String(name)}", but ${fresh.length === 0 ? "no new row appeared in" : `${fresh.length} new rows appeared in`} ` +
+          `GET /departments — cannot record its id. Check ChurchTools for a stray Bereich before re-running.`,
+      );
+    }
+    return fresh[0]!.id;
   },
   async update({ client, body, id }): Promise<void> {
     const { saveMasterData, DEPARTMENT_TABLE } = await import("../api/masterdata.js");
     // A non-empty `id` makes the same call an UPDATE of that row (verified live, eqrm-dev 2026-08-14).
     await saveMasterData(requireAjax(client), DEPARTMENT_TABLE, departmentRow(body), id);
+    departmentReads.delete(client);
   },
   async remove({ client, id }): Promise<void> {
     const { deleteMasterData, DEPARTMENT_TABLE } = await import("../api/masterdata.js");
     // `deleteMasterData` is a real verb, not a silently-ignored unknown one: a made-up `delMasterData`
     // against the same endpoint answers "was not defined as Function!" (verified, eqrm-dev 2026-08-14).
     await deleteMasterData(requireAjax(client), DEPARTMENT_TABLE, id);
+    departmentReads.delete(client);
   },
 };
 
@@ -424,7 +467,7 @@ export const RESOURCES: Record<string, AdoptableResource> = {
     // There is no `GET /departments/{id}` — filter the collection instead. Without this every plan
     // after a create would read a 404 and propose creating the same Bereich again.
     fetchOne: async (client, id) =>
-      ((await departmentRows(client)) as Record<string, unknown>[]).find((r) => r.id === id) ?? null,
+      ((await cachedDepartmentRows(client)) as Record<string, unknown>[]).find((r) => r.id === id) ?? null,
     writer: departmentWriter,
   }),
   /**
@@ -498,6 +541,11 @@ export function resourceType(type: string): AdoptableResource {
  */
 export function knownFields(type: string): Set<string> {
   return new Set(Object.keys(resourceType(type).managedFields({})));
+}
+
+/** True when `type`'s id is chosen by the config rather than minted by CT (#110: security levels). */
+export function isCallerAssignedId(type: string): boolean {
+  return RESOURCES[type]?.callerAssignedId === true;
 }
 
 /** Camel-case a hyphenated type name: `group-type` → `groupType`. */

@@ -234,7 +234,11 @@ export async function runDeleteLoop(ctx: DeleteLoopCtx): Promise<void> {
     const managed = state.resources[key]!;
     const spec = RESOURCES[managed.type];
     if (!spec) {
+      // Skipped, not destroyed: the resource is still in ChurchTools AND still in state, so exit
+      // non-zero like every other failure below — a `ct destroy` that reports success while its
+      // targets survive is the one outcome a caller must never see.
       error(`No write spec for type "${managed.type}" — skipping ${key}.`);
+      process.exitCode = 1;
       continue;
     }
     const path = spec.itemPath(managed.id);
@@ -250,6 +254,8 @@ export async function runDeleteLoop(ctx: DeleteLoopCtx): Promise<void> {
               `no delete for this type. Remove it in the ChurchTools admin UI, then re-run to drop it ` +
               `from state.`,
           );
+          // Still in ChurchTools and still in state — a skip, not a success. Exit non-zero.
+          process.exitCode = 1;
           continue;
         }
         await spec.writer.remove({ client: client as CtWriteClient, id: managed.id });

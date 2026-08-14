@@ -90,6 +90,44 @@ describe("ct adopt", () => {
     await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  // Bereiche have NO `/departments/{id}` path (#108) — reading through the default item path 404s on
+  // every single invocation, so adopt has to go through the spec's own `fetchOne`.
+  it("reads a type with no item path through fetchOne, not through /<collection>/<id>", async () => {
+    const rows = [{ id: 7, name: "Equippers Koblenz", shorty: "EQKO", sortKey: 0 }];
+    const paths: string[] = [];
+    const original = getMock.getMockImplementation()!;
+    getMock.mockImplementation(async (path?: string) => {
+      paths.push(path!);
+      if (path === "/departments") return rows as unknown as Record<string, unknown>;
+      return original(path);
+    });
+    try {
+      await runAdopt(["department", "7", "--state", statePath]);
+    } finally {
+      getMock.mockImplementation(original);
+    }
+
+    const state = await loadState(statePath, HOST);
+    expect(state.resources.equippers_koblenz).toMatchObject({ type: "department", id: 7 });
+    expect(paths).toContain("/departments");
+    expect(paths.some((p) => p.startsWith("/departments/"))).toBe(false);
+  });
+
+  it("errors clearly when a fetchOne type has no row with that id", async () => {
+    const original = getMock.getMockImplementation()!;
+    getMock.mockImplementation(async (path?: string) => {
+      if (path === "/departments") return [] as unknown as Record<string, unknown>;
+      return original(path);
+    });
+    try {
+      await expect(runAdopt(["department", "99", "--state", statePath])).rejects.toThrow(
+        /No department with id 99 exists in ChurchTools/,
+      );
+    } finally {
+      getMock.mockImplementation(original);
+    }
+  });
+
   it("rejects an unknown resource type before any API call", async () => {
     await expect(runAdopt(["widget", "1", "--state", statePath])).rejects.toThrow(/Adoptable types/);
     expect(getMock).not.toHaveBeenCalled();

@@ -105,7 +105,14 @@ export async function applyPermissionPlan(
         domainId = await resolvePendingGroupRoleDomain(
           item.pendingDomain,
           state,
-          { get: client.get, getAll: client.getAll },
+          // BIND, don't copy: `CtClient`'s reads are prototype methods that call `this.request` /
+          // `this.requestEnvelope` internally, so handing on a bare `{ get: client.get }` detaches
+          // them and every pending group_role domain dies with "this.requestEnvelope is not a
+          // function" the moment it fetches the role list.
+          {
+            get: client.get.bind(client),
+            ...(client.getAll ? { getAll: client.getAll.bind(client) } : {}),
+          },
           site,
           roleLists,
         );

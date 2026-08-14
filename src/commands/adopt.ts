@@ -41,7 +41,14 @@ export function adoptCommand(): Command {
       const state = await loadState(statePath, config.host);
 
       const { client } = await authedSession();
-      const resource = await client.get<Record<string, unknown>>(spec.itemPath(id));
+      // A type whose reads have no item path (#108: Bereiche — CT offers `/departments` only) reads
+      // through the spec's own `fetchOne`. Going via `itemPath` would 404 on every invocation.
+      const resource = spec.fetchOne
+        ? await spec.fetchOne(client, id)
+        : await client.get<Record<string, unknown>>(spec.itemPath(id));
+      if (!resource) {
+        throw new Error(`No ${type} with id ${id} exists in ChurchTools.`);
+      }
 
       const key = opts.key?.trim() || spec.deriveKey(resource);
       if (!key) {

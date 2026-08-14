@@ -167,6 +167,35 @@ describe("adopt → config → plan round-trips to a no-op (#110)", () => {
   });
 });
 
+describe("a declared id is REQUIRED and must be a number (#110)", () => {
+  // The create POSTs to `/securitylevels/${body.id}`. An omitted id would interpolate the literal
+  // string "undefined" into the path, and a string "3" would diff forever against CT's numeric
+  // actual — neither is caught by ID_FIELDS (which covers campusId/groupTypeId/groupStatusId only),
+  // so eval time is the last place either can be stopped.
+  it("rejects a declaration with no id", async () => {
+    await expect(
+      evaluateConfig((ct) => {
+        ct.securityLevel({ key: "stufe_5", name: "Stufe 5" });
+      }),
+    ).rejects.toThrow(/"id" is required and must be a non-negative integer/);
+  });
+
+  it("rejects a STRING id rather than posting it and diffing against a number forever", async () => {
+    await expect(
+      evaluateConfig((ct) => {
+        ct.securityLevel({ key: "stufe_5", id: "5", name: "Stufe 5" });
+      }),
+    ).rejects.toThrow(/"id" is required and must be a non-negative integer/);
+  });
+
+  it("leaves every CT-minted-id type alone — a campus needs no declared id", async () => {
+    const { resources } = await evaluateConfig((ct) => {
+      ct.campus({ key: "mainz", name: "Mainz", shorty: "MZ" });
+    });
+    expect(resources[0]?.key).toBe("mainz");
+  });
+});
+
 describe("destroy carries the instance-wide warning (#110)", () => {
   it("names what a delete reaches, the way person-status does", () => {
     const warning = RESOURCES["security-level"]!.destroyWarning;

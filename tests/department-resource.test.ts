@@ -40,10 +40,22 @@ const BEREICH_TABLE = {
   },
 };
 
-/** A client exposing REST `request`/`getAll` plus the legacy `ajax` channel, recording both. */
-function recorder(departments: { id: number; name: string; shorty?: string; sortKey?: number }[] = []) {
+/**
+ * A client exposing REST `request`/`getAll` plus the legacy `ajax` channel, recording both.
+ *
+ * The catalog is LIVE, not a frozen list: a `saveMasterData` create appends a row the way CT does,
+ * so `GET /departments` afterwards differs from before. That asymmetry is the whole mechanism the
+ * writer relies on to learn the new id (the endpoint returns none), so a double that answered the
+ * same rows before and after would test nothing. `options.createdId` forces the id CT mints;
+ * `options.mintsNothing` makes the write a silent no-op (the "row never appeared" failure path).
+ */
+function recorder(
+  departments: { id: number; name: string; shorty?: string; sortKey?: number }[] = [],
+  options: { createdId?: number; mintsNothing?: boolean } = {},
+) {
   const ajaxCalls: { module: string; params: Record<string, string> }[] = [];
   const restCalls: { method: string; path: string; body?: unknown }[] = [];
+  const rows = [...departments];
   const client = {
     request: async <T>(method: string, path: string, body?: unknown): Promise<T> => {
       restCalls.push({ method, path, body });
@@ -51,11 +63,15 @@ function recorder(departments: { id: number; name: string; shorty?: string; sort
     },
     getAll: async <T>(path: string): Promise<{ data: T[] }> => {
       restCalls.push({ method: "GET", path });
-      return { data: departments as T[] };
+      return { data: [...rows] as T[] };
     },
     ajax: async <T>(module: string, params: Record<string, string>): Promise<T> => {
       ajaxCalls.push({ module, params });
       if (params.func === "getMasterData") return { masterDataTables: { "3": BEREICH_TABLE } } as T;
+      if (params.func === "saveMasterData" && params.id === "" && !options.mintsNothing) {
+        // `col0=bezeichnung&value0=<name>` — mirror CT and append the row under its REST name.
+        rows.push({ id: options.createdId ?? 7, name: params.value0! });
+      }
       return null as T;
     },
   };
@@ -65,8 +81,8 @@ function recorder(departments: { id: number; name: string; shorty?: string; sort
 describe("create goes through saveMasterData, then re-reads REST for the id (#108)", () => {
   it("posts the mapped columns with an EMPTY id, then records the id from GET /departments", async () => {
     const state = emptyState("h");
-    // The Bereich exists in the catalog by the time the create re-reads it.
-    const { client, ajaxCalls, restCalls } = recorder([{ id: 7, name: "Equippers Koblenz" }]);
+    // Empty instance; the write itself puts the Bereich in the catalog (see `recorder`).
+    const { client, ajaxCalls, restCalls } = recorder([], { createdId: 7 });
     const plan: Plan = {
       items: [
         {
@@ -87,9 +103,13 @@ describe("create goes through saveMasterData, then re-reads REST for the id (#10
     expect(res.failed).toBeUndefined();
     expect(res.created).toEqual(["equippers_koblenz"]);
 
-    // No REST write — that is the point. The only REST call is the id lookup afterwards.
+    // No REST write — that is the point. The only REST calls are the id lookups either side of it:
+    // the new row is identified by DIFFING the catalog, so both reads are load-bearing.
     expect(restCalls.filter((c) => c.method !== "GET")).toEqual([]);
-    expect(restCalls).toEqual([{ method: "GET", path: "/departments" }]);
+    expect(restCalls).toEqual([
+      { method: "GET", path: "/departments" },
+      { method: "GET", path: "/departments" },
+    ]);
 
     // The registry is read first (to validate columns), then the write.
     expect(ajaxCalls[0]).toEqual({ module: "churchdb", params: { func: "getMasterData" } });
@@ -110,14 +130,12 @@ describe("create goes through saveMasterData, then re-reads REST for the id (#10
     expect(state.resources.equippers_koblenz).toMatchObject({ type: "department", id: 7 });
   });
 
-  it("fails loudly when the created Bereich cannot be identified by name afterwards", async () => {
-    // saveMasterData returns no id, so the new row is found by name. Two rows sharing that name — or
-    // none — must stop the apply rather than bind state to a guessed id, which would be permanent.
+  it("refuses BEFORE writing when a Bereich of that name already exists", async () => {
+    // The ordinary collision: somebody made the Bereich by hand on the target host. Checking only
+    // AFTER the write would be worse than useless — the create would have succeeded, the ambiguity
+    // error would abort before state recorded anything, and every re-run would add another orphan.
     const state = emptyState("h");
-    const { client } = recorder([
-      { id: 7, name: "Doppelt" },
-      { id: 8, name: "Doppelt" },
-    ]);
+    const { client, ajaxCalls } = recorder([{ id: 7, name: "Doppelt" }]);
     const plan: Plan = {
       items: [
         {
@@ -131,8 +149,30 @@ describe("create goes through saveMasterData, then re-reads REST for the id (#10
     };
     const res = await executePlan(plan, { client, state, statePath: "unused", save: noSave, now: fixedNow });
     expect(res.failed?.key).toBe("doppelt");
-    expect(res.failed?.message).toMatch(/2 rows match it in GET \/departments/);
+    expect(res.failed?.message).toMatch(/already exists in ChurchTools \(#7\)/);
+    // Nothing was written: no saveMasterData reached the legacy endpoint at all.
+    expect(ajaxCalls.filter((c) => c.params.func === "saveMasterData")).toEqual([]);
     expect(state.resources.doppelt).toBeUndefined();
+  });
+
+  it("fails loudly when the write leaves no new row in the catalog", async () => {
+    const state = emptyState("h");
+    const { client } = recorder([{ id: 7, name: "Andere" }], { mintsNothing: true });
+    const plan: Plan = {
+      items: [
+        {
+          type: "department",
+          key: "neu",
+          id: null,
+          action: "create",
+          changes: [{ field: "name", from: undefined, to: "Neu" }],
+        },
+      ],
+    };
+    const res = await executePlan(plan, { client, state, statePath: "unused", save: noSave, now: fixedNow });
+    expect(res.failed?.key).toBe("neu");
+    expect(res.failed?.message).toMatch(/no new row appeared in GET \/departments/);
+    expect(state.resources.neu).toBeUndefined();
   });
 });
 
@@ -250,6 +290,58 @@ describe("reads go through fetchOne, because GET /departments/{id} does not exis
       shorty: "EQKO",
       sortKey: 0,
     });
+  });
+});
+
+describe("repeated reads and writes share their fetches", () => {
+  it("reads /departments ONCE across a whole fetchActual fan-out", async () => {
+    // `fetchActual` runs fetchOne per managed Bereich, concurrently — without sharing, a config with
+    // N departments issues N full collection GETs on every plan AND every apply.
+    const { client, restCalls } = recorder([
+      { id: 7, name: "A" },
+      { id: 8, name: "B" },
+      { id: 9, name: "C" },
+    ]);
+    const spec = RESOURCES.department!;
+    const ids = [7, 8, 9];
+    const rows = await Promise.all(ids.map((id) => spec.fetchOne!(client, id)));
+    expect(rows.map((r) => r?.id)).toEqual(ids);
+    expect(restCalls).toEqual([{ method: "GET", path: "/departments" }]);
+  });
+
+  it("re-reads /departments after a write, so the shared read can never go stale", async () => {
+    const { client, restCalls } = recorder([{ id: 7, name: "A" }]);
+    const spec = RESOURCES.department!;
+    await spec.fetchOne!(client, 7);
+    await spec.writer!.update!({ client, body: { name: "A2" }, id: 7 });
+    await spec.fetchOne!(client, 7);
+    expect(restCalls.filter((c) => c.path === "/departments")).toHaveLength(2);
+  });
+
+  it("fetches the ~3 MB master-data registry ONCE across several writes", async () => {
+    // The registry is cached per client inside masterdata.ts. The writer must therefore hand on a
+    // STABLE wrapper object — a fresh literal per call misses that cache and refetches every time.
+    const { client, ajaxCalls } = recorder([{ id: 7, name: "A" }]);
+    const spec = RESOURCES.department!;
+    await spec.writer!.update!({ client, body: { name: "A2" }, id: 7 });
+    await spec.writer!.update!({ client, body: { name: "A3" }, id: 7 });
+    await spec.writer!.remove!({ client, id: 7 });
+    expect(ajaxCalls.filter((c) => c.params.func === "getMasterData")).toHaveLength(1);
+  });
+});
+
+describe("the legacy write channel is allowlisted to one table", () => {
+  // `assertNotPeople` guards REST PATHS and cannot see this channel at all, while the registry the
+  // instance reports includes person master data. Enforce the one-table scope in code, not prose.
+  it("refuses to save or delete any table other than cdb_bereich", async () => {
+    const { client } = recorder();
+    const { saveMasterData, deleteMasterData } = await import("../src/api/masterdata.js");
+    await expect(saveMasterData(client, "cdb_familienstand", { bezeichnung: "X" })).rejects.toThrow(
+      /Refusing to write master-data table "cdb_familienstand"/,
+    );
+    await expect(deleteMasterData(client, "cdb_familienstand", 1)).rejects.toThrow(
+      /Refusing to write master-data table "cdb_familienstand"/,
+    );
   });
 });
 

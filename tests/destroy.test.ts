@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { parseTargets, orderDestroy, runDeleteLoop, destroyWarnings } from "../src/commands/destroy.js";
 import { emptyState, type State } from "../src/state/state.js";
 import { CtApiError, type CtClient } from "../src/api/ctClient.js";
+import { RESOURCES } from "../src/resources/registry.js";
 
 function stateWith(...entries: Array<{ key: string; type: string; id: number }>): State {
   const state = emptyState("h");
@@ -115,6 +116,38 @@ describe("runDeleteLoop", () => {
     expect(save).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
     process.exitCode = prevExit;
+  });
+
+  it("exits NON-ZERO when a type has no delete path — the target survives, so it is not a success", async () => {
+    // A writer without `remove` (#108's branch for a type ChurchTools exposes no delete for) leaves
+    // the resource in CT *and* in state. Reporting exit 0 there would tell a script the destroy
+    // succeeded while nothing was destroyed.
+    const spec = RESOURCES.department!;
+    const originalRemove = spec.writer!.remove;
+    delete spec.writer!.remove;
+    const state = stateWith({ key: "bereich", type: "department", id: 7 });
+    const request = vi.fn(async () => ({}));
+    const save = vi.fn(async () => {});
+    const prevExit = process.exitCode;
+    const errSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    try {
+      await runDeleteLoop({
+        client: asClient(request),
+        state,
+        statePath: "s.json",
+        ordered: ["bereich"],
+        save,
+      });
+      expect(process.exitCode).toBe(1);
+      expect(state.resources.bereich).toBeDefined(); // still managed — nothing was deleted
+      expect(request).not.toHaveBeenCalled(); // and no DELETE was issued against a path CT lacks
+      expect(errSpy.mock.calls.map((c) => String(c[0])).join("\n")).toContain("cannot be deleted");
+    } finally {
+      spec.writer!.remove = originalRemove;
+      errSpy.mockRestore();
+      process.exitCode = prevExit;
+    }
   });
 
   it("renders a CtApiError's HTTP status + body in the stop message, via the shared formatter (#71)", async () => {

@@ -61,6 +61,24 @@ export const DEPARTMENT_TABLE = "cdb_bereich";
 /** The module whose legacy AJAX endpoint serves the master-data registry. */
 const MASTER_DATA_MODULE = "churchdb";
 
+/**
+ * The ONLY tables this layer may write. `assertNotPeople` guards REST *paths* and cannot see the
+ * legacy channel at all, and the registry that `getMasterData` reports includes person master data
+ * (marital status, nationality, …) — so the "we only ever pass cdb_bereich" of the SCOPE note above
+ * is enforced here rather than merely documented. Widening this list is a deliberate act.
+ */
+const WRITABLE_TABLES: ReadonlySet<string> = new Set(["cdb_bereich"]);
+
+function assertWritableTable(tablename: string): void {
+  if (!WRITABLE_TABLES.has(tablename)) {
+    throw new Error(
+      `Refusing to write master-data table "${tablename}" through the legacy endpoint. \`ct\` drives ` +
+        `exactly one table here: ${[...WRITABLE_TABLES].join(", ")}. Everything else is either REST-managed ` +
+        `or outside this tool's structural mandate (person master data).`,
+    );
+  }
+}
+
 interface RawMasterData {
   masterDataTables?: Record<string, MasterDataTable>;
 }
@@ -159,6 +177,7 @@ export async function saveMasterData(
   fields: Record<string, unknown>,
   id?: number,
 ): Promise<void> {
+  assertWritableTable(tablename);
   const table = await masterDataTable(client, tablename);
   await client.ajax(MASTER_DATA_MODULE, {
     func: "saveMasterData",
@@ -177,6 +196,7 @@ export async function deleteMasterData(
   tablename: string,
   id: number,
 ): Promise<void> {
+  assertWritableTable(tablename);
   await masterDataTable(client, tablename); // validate the table exists before asking CT to drop a row
   await client.ajax(MASTER_DATA_MODULE, { func: "deleteMasterData", table: tablename, id: String(id) });
 }

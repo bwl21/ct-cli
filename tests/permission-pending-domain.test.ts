@@ -261,6 +261,41 @@ describe("group_role symmetry: a same-run group DOES go pending and completes in
     );
   });
 
+  it("survives a client whose reads are PROTOTYPE methods using `this` (the real CtClient shape)", async () => {
+    // Regression guard. `applyPermissionPlan` hands the role-list fetcher a narrowed reading client;
+    // building that as `{ get: client.get }` DETACHES the method from its instance, so the real
+    // CtClient — whose `get` calls `this.requestEnvelope` internally — dies with "this.… is not a
+    // function" on every pending group_role domain. The plain-object doubles above cannot catch it
+    // (they close over nothing), so this double mimics the class: state on `this`, method on the
+    // prototype.
+    class ProtoClient {
+      readonly seen: string[] = [];
+      async request(method: string, path: string, body?: unknown): Promise<unknown> {
+        this.seen.push(`${method} ${path}`);
+        void body;
+        return method === "POST" && path === "/groups" ? { id: GROUP_ID } : {};
+      }
+      async get(path: string): Promise<unknown> {
+        // The load-bearing part: reaching a sibling through `this`, exactly as CtClient.get does.
+        this.seen.push(`GET ${path}`);
+        return path === `/groups/${GROUP_ID}/roles`
+          ? [{ id: PAIRING_ID, name: "Leiter", groupTypeRoleId: 12 }]
+          : [];
+      }
+    }
+    const proto = new ProtoClient();
+    const client = proto as unknown as CtClient;
+    const state = emptyState(HOST);
+    const { items } = await buildPermissionPlan(client, state, [grPerm], declaredGroup);
+    await executePlan(createGroupPlan, { client, state, statePath: "unused", save: async () => {} });
+
+    const res = await applyPermissionPlan(items, client, state);
+    expect(res.failed).toEqual([]);
+    expect(res.granted).toBe(1);
+    expect(proto.seen).toContain(`GET /groups/${GROUP_ID}/roles`);
+    expect(proto.seen).toContain(`PUT /permissions/group_role/${PAIRING_ID}`);
+  });
+
   it("is unchanged on a host where the group already exists — concrete domain, no pending path", async () => {
     const { client, get } = groupClient();
     const state: State = {

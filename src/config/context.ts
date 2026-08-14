@@ -19,7 +19,7 @@ import type { DesiredPermission, Grant, PreserveUnknown } from "../permissions/t
 import { KNOWN_SCOPE_FIELDS } from "../permissions/catalog.js";
 import { GROUP_STATUS_NO_CATALOG, isRef, ref, refKey, type Ref } from "../resolve/refs.js";
 import { normalizeScopeEntry } from "../permissions/scope.js";
-import { conventionalRulesetRef, knownFields } from "../resources/registry.js";
+import { conventionalRulesetRef, isCallerAssignedId, knownFields } from "../resources/registry.js";
 import { warn } from "../ui.js";
 // Re-exported so a config file can pull the query DSL from the same module as
 // `ConfigContext`: `import { q, churchQuery } from "../../src/config/context.js"`.
@@ -424,6 +424,20 @@ function toDesired(type: string, input: ResourceInput, location?: string): Desir
       `${type} "${key}": "${idField}" must be a number (the CT id), null to clear, or a logical ` +
         `reference${hint}.`,
     );
+  }
+  // A caller-assigned-id type (#110: security levels) is CREATED at its declared id — `createPath`
+  // interpolates `body.id` straight into the POST path. An omitted id would POST to a literal
+  // ".../undefined", and a string one ("3") would both post oddly and diff forever against CT's
+  // numeric actual. Neither is caught anywhere else: `id` is a plain managed field here, not one of
+  // the ID_FIELDS checked above. So require a real, non-negative integer at eval time.
+  if (isCallerAssignedId(type)) {
+    const declaredId = fields.id;
+    if (typeof declaredId !== "number" || !Number.isInteger(declaredId) || declaredId < 0) {
+      throw new Error(
+        `${type} "${key}": "id" is required and must be a non-negative integer — this resource is ` +
+          `created at the id you declare (got ${JSON.stringify(declaredId)}).`,
+      );
+    }
   }
   // Warn (never throw) on a declared field the registry does not manage for this type — e.g. a
   // seeded config using campus's vestigial `shortName` instead of the real `shorty` (#51). The
