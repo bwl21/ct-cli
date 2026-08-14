@@ -83,9 +83,12 @@ const CATALOG_PATH: Partial<Record<RefKind, string>> = {
   department: "/departments",
   // Security levels — the `cc_securitylevel` scope dimension (#110). `GET /securitylevels` returns a
   // flat `[{id, name, sortKey}]` array ("Stufe 1 (Niedrig)" … "Stufe 4 (Sehr hoch)"), live-verified on
-  // eqrm prod, CT 3.135.2, 2026-08-13. Catalog-only, like departments: `ct` resolves a level by name
-  // but never creates one. It exists because the ids are NOT a protocol constant — `cc_securitylevel`
-  // is an editable master-data table, so a hard-coded `scope: [1, 2, 3]` is portable only by convention.
+  // eqrm prod (CT 3.135.2, 2026-08-13) and eqrm-dev (2026-08-14). Read here because the ids are NOT a
+  // protocol constant — `cc_securitylevel` is an editable master-data table with an auto-increment id
+  // and a supported reorder (`PATCH …/{id}` with `newid`), so a hard-coded `scope: [1, 2, 3]` is
+  // portable only by convention. Unlike `department`, catalog-only is OUR limit, not CT's:
+  // `/securitylevels/{id}` has POST/PATCH/DELETE, but its create is id-bearing and does not fit the
+  // registry's `collectionPath` contract, so promotion to a managed resource is a separate call (#110).
   "security-level": "/securitylevels",
   "group-type": "/group/grouptypes",
   // PERSON statuses — the domain of a `status` permission declaration (#90). Unlike GROUP statuses

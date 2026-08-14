@@ -5,7 +5,7 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: e3b937247ebebc2a
+sources_hash: 0775204b798e0aae
 reviewed: 2026-08-13
 ---
 
@@ -373,17 +373,23 @@ Three things are hard errors at **plan** time, never a guessed `dataId`:
 ### Departments and security levels: referenceable, not declarable
 
 `cdb_bereich` (Bereiche) and `cc_securitylevel` (Sicherheitslevel) are the two
-dimensions `ct` **reads but does not manage**. Neither has a REST write verb —
-live-probed against the instance's own OpenAPI spec (eqrm prod, CT 3.135.2,
-2026-08-13): `GET /departments` and `GET /securitylevels` exist; no
-`POST`/`PUT`/`DELETE` on either does.
+dimensions `ct` **reads but does not manage**. They are unmanaged for two
+different reasons, and neither reason is "ChurchTools cannot do it":
 
-That is a fact about the REST API and about what this tool drives — **not** a
-claim that ChurchTools cannot create them. Both are rows in CT's editable
-master-data registry, which the admin UI writes through a legacy endpoint that
-appears in no OpenAPI spec. Making them declarable is tracked in
-[#108](https://github.com/eqrm/ct-cli/issues/108) /
-[#109](https://github.com/eqrm/ct-cli/issues/109).
+- **Bereiche** genuinely have no REST write path — live-probed against the
+  instance's own OpenAPI spec (eqrm prod CT 3.135.2, 2026-08-13; re-probed on
+  eqrm-dev 2026-08-14): `GET /departments` exists, nothing else on that path
+  does. The admin UI creates them through the legacy master-data endpoint, which
+  appears in no OpenAPI spec and which `ct` does not drive
+  ([#108](https://github.com/eqrm/ct-cli/issues/108) /
+  [#109](https://github.com/eqrm/ct-cli/issues/109)).
+- **Security levels do have REST writes.** `/securitylevels/{id}` exposes
+  `POST` (create), `PATCH` (update, including reorder via `newid` +
+  `forcereorder`) and `DELETE` — live-probed 2026-08-14, CT 3.135.2. They are
+  unmanaged here only because that create path carries an id, which the resource
+  registry's "POST to the collection path" contract does not model. Promotion is
+  a deliberate open question on
+  [#110](https://github.com/eqrm/ct-cli/issues/110), not an API limit.
 
 So a reference of either kind resolves by name on every host — which is what
 makes `churchdb:view alldata` ("Personen eines Bereiches sehen") and
@@ -410,7 +416,9 @@ as _numeric-universal_: `scope: [1, 2, 3]` was considered portable because the i
 "mean the same thing on every instance". They do — by convention. `cc_securitylevel`
 is an admin-editable master-data table with an auto-increment id and a `sortkey`,
 so someone adding or reordering a level on one host silently changes what a
-hard-coded `[1, 2, 3]` grants there, with a green plan. Numerics still work
+hard-coded `[1, 2, 3]` grants there, with a green plan. Reordering is not even an
+edge case: `PATCH /securitylevels/{id}` takes a `newid` and a `forcereorder` flag,
+i.e. CT ships it as a supported operation. Numerics still work
 everywhere; the trade-off is that level names are localised German strings
 (`"Stufe 3 (Hoch)"` → `stufe_3_hoch`), so a **rename** breaks a reference where a
 number would have survived. Pick per config which risk you would rather carry.

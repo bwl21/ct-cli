@@ -63,8 +63,12 @@ export const GROUP_SCOPE_FIELD = "cdb_gruppe";
  * re-resolved at apply time) and a state-backed id is worth re-resolving. Departments and security
  * levels are catalogs `ct` READS but does not manage, so a reference always resolves by NAME against
  * the live catalog and hard-errors when the name is absent — strictly better than a silent numeric
- * misgrant, but never a create. (Neither has a REST write verb; both ARE writable through the legacy
- * master-data endpoint the admin UI uses, which `ct` does not drive yet — #108/#109.)
+ * misgrant, but never a create. They are unmanaged for DIFFERENT reasons, and neither is "CT cannot":
+ *  - `cdb_bereich` has no REST write at all; the admin UI writes it through the legacy master-data
+ *    endpoint `ct` does not drive (#108/#109).
+ *  - `cc_securitylevel` DOES have REST writes (`/securitylevels/{id}`: POST/PATCH/DELETE, probed
+ *    2026-08-14) — it is unmanaged only because its id-bearing create does not fit the resource
+ *    registry's `collectionPath` contract (#110).
  *
  * The remaining scoped dimensions (`ccm_data_category`, `cdb_comment_viewer`, `oauth_client`, …) stay
  * numeric-only because this tool has no way to address their values by a host-independent name today —

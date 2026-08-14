@@ -131,10 +131,17 @@ export const ref = {
    *
    * Exists because "security-level ids are universal, so a numeric literal is portable" was an
    * assumption, not a guarantee: `cc_securitylevel` is an admin-editable master-data table (`id`,
-   * `bezeichnung`, `sortkey`) with an auto-increment id, so 1/2/3 line up across instances by
-   * convention — because nobody has added or reordered a level — not by construction. Referencing a
-   * level by name makes a config say what it means on any host, and hard-error instead of silently
-   * granting the wrong level when the name is absent.
+   * `bezeichnung`, `sortkey`) with an auto-increment id — confirmed in the instance's own master-data
+   * registry, eqrm-dev CT 3.135.2, 2026-08-14 — so 1/2/3 line up across instances by convention, not
+   * by construction. Reordering is not even exotic: `PATCH /securitylevels/{id}` takes `newid` +
+   * `forcereorder`. Referencing a level by name makes a config say what it means on any host, and
+   * hard-error instead of silently granting the wrong level when the name is absent.
+   *
+   * Catalog-only TODAY, and unlike {@link ref.department} that is not forced by CT:
+   * `/securitylevels/{id}` exposes POST, PATCH and DELETE (live-probed 2026-08-14), so security
+   * levels could become a fully managed resource. They are not one yet because CREATE is
+   * `POST /securitylevels/{id}` — an id-bearing create path the registry's `collectionPath` contract
+   * does not model. Tracked on #110.
    *
    * Numeric scope entries stay fully supported (#49): the names are localised German strings with
    * parentheses ("Stufe 3 (Hoch)" slugs to `stufe_3_hoch`), so a rename breaks a ref where a number
