@@ -90,6 +90,10 @@ const CATALOG_PATH: Partial<Record<RefKind, string>> = {
   // `/securitylevels/{id}` has POST/PATCH/DELETE, but its create is id-bearing and does not fit the
   // registry's `collectionPath` contract, so promotion to a managed resource is a separate call (#110).
   "security-level": "/securitylevels",
+  // Comment viewers — the `cdb_comment_viewer` scope dimension (#102). `[{id, name, sortKey}]`,
+  // live-verified on eqrm-dev CT 3.135.2, 2026-08-14. NB `id: 0` is a real row here ("Alle"), which
+  // is why nothing in the resolve path may treat a falsy id as "missing".
+  "comment-viewer": "/person/commentviewers",
   "group-type": "/group/grouptypes",
   // PERSON statuses — the domain of a `status` permission declaration (#90). Unlike GROUP statuses
   // (see the note above), these DO have a flat REST catalog: `GET /statuses` returns

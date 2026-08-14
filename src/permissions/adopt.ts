@@ -33,6 +33,7 @@ const SCOPE_SUGAR_FIELD: Readonly<Record<string, string>> = {
   "group-type": "groupType",
   department: "department",
   "security-level": "securityLevel",
+  "comment-viewer": "commentViewer",
 };
 
 interface ReverseEntry {

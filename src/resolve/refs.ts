@@ -22,6 +22,7 @@ export type RefKind =
   | "campus"
   | "department"
   | "security-level"
+  | "comment-viewer"
   | "group-type"
   | "group-status"
   | "person-status"
@@ -52,6 +53,7 @@ export interface SimpleRef {
     | "campus"
     | "department"
     | "security-level"
+    | "comment-viewer"
     | "group-type"
     | "group-status"
     | "person-status"
@@ -151,6 +153,26 @@ export const ref = {
     __ctRef: true,
     kind: "security-level",
     key: requireKey("security-level", key),
+  }),
+  /**
+   * A COMMENT VIEWER (`/person/commentviewers`), the scope dimension of `cdb_comment_viewer` rights
+   * such as `churchdb:view comments` — #102.
+   *
+   * The dimension existed in the catalog all along but had no logical form, which is what made three
+   * role instances on `Bereich Pastoral Care` undeclarable: each was blocked by exactly ONE
+   * comment_viewer-scoped grant, so the whole role instance fell out of `ct coverage` as unmanageable.
+   * #109 assumed this would need the legacy master-data endpoint; it does not — `/person/commentviewers`
+   * is conventional REST (`[{id, name, sortKey}]`, plus POST/PUT/DELETE), live-probed on eqrm-dev
+   * CT 3.135.2, 2026-08-14.
+   *
+   * Catalog-only here, like {@link ref.securityLevel}: resolvable by name on any host, not declarable.
+   * Its REST surface would fit the resource registry unchanged, so promoting it later is a scope
+   * decision rather than a technical one.
+   */
+  commentViewer: (key: string): SimpleRef => ({
+    __ctRef: true,
+    kind: "comment-viewer",
+    key: requireKey("comment-viewer", key),
   }),
   groupType: (key: string): SimpleRef => ({
     __ctRef: true,

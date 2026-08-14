@@ -175,11 +175,12 @@ describe("scope-dimension validation (#98)", () => {
       key: "p",
       domainType: "group_role",
       domainId: 1,
-      // churchdb:view comments scopes by cdb_comment_viewer, which has no ref kind here yet (#109).
-      grants: [{ right: "churchdb:view comments", scope: [ref.campus("koblenz")] }],
+      // churchcal:view category scopes by cc_calcategory — a calendar dimension, outside this tool's
+      // mandate, so it has no ref kind and the numeric hatch is the only honest answer.
+      grants: [{ right: "churchcal:view category", scope: [ref.campus("koblenz")] }],
     };
     await expect(resolveScopeRefs([perm], resolverFor(emptyState(HOST)), emptyState(HOST))).rejects.toThrow(
-      /campus:koblenz.*cdb_comment_viewer.*no logical reference form/s,
+      /campus:koblenz.*cc_calcategory.*no logical reference form/s,
     );
   });
 
@@ -370,6 +371,47 @@ describe("security-level scopes resolve by name (cc_securitylevel, #110)", () =>
     await expect(
       tuplesFor(perm([{ securityLevel: "stufe_9" }]), emptyState(HOST), [], client),
     ).rejects.toThrow(/no live security-level at \/securitylevels matches key "stufe_9"/);
+  });
+});
+
+describe("comment-viewer scopes resolve by name (cdb_comment_viewer, #102)", () => {
+  // The dimension that made three Pastoral Care role instances undeclarable: each was blocked by
+  // exactly ONE comment_viewer-scoped grant. #109 assumed this needed the legacy master-data
+  // endpoint; `/person/commentviewers` is conventional REST, so it is just another catalog.
+  const viewers = [
+    { id: 0, name: "Alle", sortKey: 0 },
+    { id: 1, name: "Gemeindeleitung", sortKey: 1 },
+    { id: 2, name: "Admins", sortKey: 2 },
+  ];
+  const client = {
+    get: vi.fn(async (path: string) => (path === "/person/commentviewers" ? viewers : [])),
+  } as unknown as CtClient;
+
+  const perm = (scope: unknown[]): DesiredPermission => ({
+    key: "p",
+    domainType: "group_role",
+    domainId: 1,
+    grants: [{ right: "churchdb:view comments", scope: scope as never }],
+  });
+
+  it("resolves a viewer by name", async () => {
+    expect(
+      await tuplesFor(perm([{ commentViewer: "gemeindeleitung" }]), emptyState(HOST), [], client),
+    ).toEqual([{ authId: 113, dataId: [1], type: "grant" }]);
+  });
+
+  it("resolves the id-0 row — a falsy id must not read as 'not found'", async () => {
+    // "Alle" is id 0 on a real instance. Anything treating 0 as missing would silently drop the scope
+    // (or worse, fall through to a different row), so this is pinned deliberately.
+    expect(await tuplesFor(perm([{ commentViewer: "alle" }]), emptyState(HOST), [], client)).toEqual([
+      { authId: 113, dataId: [0], type: "grant" },
+    ]);
+  });
+
+  it("hard-errors on a viewer name this host does not have", async () => {
+    await expect(tuplesFor(perm([{ commentViewer: "nope" }]), emptyState(HOST), [], client)).rejects.toThrow(
+      /no live comment-viewer at \/person\/commentviewers matches key "nope"/,
+    );
   });
 });
 

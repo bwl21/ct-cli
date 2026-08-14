@@ -5,7 +5,7 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: 0775204b798e0aae
+sources_hash: 6b8acc0778bf1fd5
 reviewed: 2026-08-13
 ---
 
@@ -335,13 +335,14 @@ ct.groupRole({
 `{ campus: "koblenz" }` is sugar for `ref.campus("koblenz")` — the same `Ref`
 the rest of the DSL uses — so both spellings are interchangeable.
 
-| `scopeField`       | Reference form                            | Resolved against                                  |
-| ------------------ | ----------------------------------------- | ------------------------------------------------- |
-| `cdb_gruppe`       | `{ group: "<key>" }` (or the bare string) | managed groups                                    |
-| `cdb_station`      | `{ campus: "<key>" }`                     | managed campuses, then `GET /campuses`            |
-| `cdb_gruppentyp`   | `{ groupType: "<key>" }`                  | managed group types, then `GET /group/grouptypes` |
-| `cdb_bereich`      | `{ department: "<name-slug>" }`           | `GET /departments` **only** — see below           |
-| `cc_securitylevel` | `{ securityLevel: "<name-slug>" }`        | `GET /securitylevels` **only** — see below (#110) |
+| `scopeField`         | Reference form                            | Resolved against                                  |
+| -------------------- | ----------------------------------------- | ------------------------------------------------- |
+| `cdb_gruppe`         | `{ group: "<key>" }` (or the bare string) | managed groups                                    |
+| `cdb_station`        | `{ campus: "<key>" }`                     | managed campuses, then `GET /campuses`            |
+| `cdb_gruppentyp`     | `{ groupType: "<key>" }`                  | managed group types, then `GET /group/grouptypes` |
+| `cdb_bereich`        | `{ department: "<name-slug>" }`           | `GET /departments` **only** — see below           |
+| `cc_securitylevel`   | `{ securityLevel: "<name-slug>" }`        | `GET /securitylevels` **only** — see below (#110) |
+| `cdb_comment_viewer` | `{ commentViewer: "<name-slug>" }`        | `GET /person/commentviewers` **only** (#102)      |
 
 **Why this matters:** campus ids are host-specific — Mainz is `0` on eqrm prod
 and `6` on eqrm dev. A campus-scoped grant written as a numeric literal is
@@ -363,18 +364,19 @@ Three things are hard errors at **plan** time, never a guessed `dataId`:
 - a reference whose dimension does not match the right's `scopeField` —
   e.g. `{ groupType: … }` on `churchdb:view station` (a `cdb_station` right);
 - a reference on a dimension that has **no** logical form yet
-  (`cdb_comment_viewer`, `ccm_data_category`, `oauth_client`, … — values `ct`
-  has no host-independent way to name today) — the message points at the numeric
+  (`ccm_data_category`, `oauth_client`, `cc_calcategory`, … — mostly dimensions
+  of modules outside this tool's mandate) — the message points at the numeric
   escape hatch;
 - a **bare string** on a non-group dimension. A string always means "managed
   group", so on e.g. a `cdb_station` right it would either fail confusingly or —
   worse — match an unrelated group that happens to carry that key.
 
-### Departments and security levels: referenceable, not declarable
+### Catalog dimensions: referenceable, not declarable
 
-`cdb_bereich` (Bereiche) and `cc_securitylevel` (Sicherheitslevel) are the two
-dimensions `ct` **reads but does not manage**. They are unmanaged for two
-different reasons, and neither reason is "ChurchTools cannot do it":
+`cdb_bereich` (Bereiche), `cc_securitylevel` (Sicherheitslevel) and
+`cdb_comment_viewer` (Kommentare-Viewer) are the dimensions `ct` **reads but does
+not manage**. Each is unmanaged for a different reason, and none of the reasons
+is "ChurchTools cannot do it":
 
 - **Bereiche** genuinely have no REST write path — live-probed against the
   instance's own OpenAPI spec (eqrm prod CT 3.135.2, 2026-08-13; re-probed on
@@ -390,12 +392,17 @@ different reasons, and neither reason is "ChurchTools cannot do it":
   registry's "POST to the collection path" contract does not model. Promotion is
   a deliberate open question on
   [#110](https://github.com/eqrm/ct-cli/issues/110), not an API limit.
+- **Comment viewers have plain REST CRUD** — `/person/commentviewers` plus
+  `POST`/`PUT`/`DELETE` on the item path, which would fit the resource registry
+  unchanged. They are catalog-only purely because nothing has needed to declare
+  one yet ([#102](https://github.com/eqrm/ct-cli/issues/102)).
 
-So a reference of either kind resolves by name on every host — which is what
-makes `churchdb:view alldata` ("Personen eines Bereiches sehen") and
-`churchdb:+see persons` declarable at all — but there is no `ct.department` /
-`ct.securityLevel` resource, no `ct adopt` for them, and a name that matches
-nothing is a **hard error** rather than a create:
+So a reference of any of these kinds resolves by name on every host — which is
+what makes `churchdb:view alldata` ("Personen eines Bereiches sehen"),
+`churchdb:+see persons` and `churchdb:view comments` declarable at all — but
+there is no `ct.department` / `ct.securityLevel` / `ct.commentViewer` resource,
+no `ct adopt` for them, and a name that matches nothing is a **hard error**
+rather than a create:
 
 ```
 Cannot resolve department:nope referenced at … : no live department at
@@ -405,7 +412,8 @@ them, so it cannot create this one — fix the key/name (list them with
 numeric id.
 ```
 
-Discover the names with `ct get departments` / `ct get security-levels`. Because
+Discover the names with `ct get departments`, `ct get security-levels` or
+`ct get comment-viewers`. Because
 the id always comes from the live catalog, such a scope is never "pending" and is
 never re-resolved at apply time — it is host-correct the moment it resolves. A
 managed resource that happens to share the key does **not** shadow it (that would
@@ -440,9 +448,10 @@ comment-viewer bucket — **not** a group — so `GET /groups/{1,2,3}` 404s. A
 `scope` array entry may therefore be a plain number instead of a string:
 
 (Security levels gained a name-based form in #110 — see
-[Departments and security levels](#departments-and-security-levels-referenceable-not-declarable).
-Numerics keep working there; `cdb_comment_viewer` and friends still have nothing
-but numerics.)
+[Catalog dimensions](#catalog-dimensions-referenceable-not-declarable).
+Comment viewers gained one too, in #102. Numerics keep working for both;
+calendar categories, OAuth clients and the other module dimensions still have
+nothing but numerics.)
 
 ```ts
 { right: "churchdb:security level view own data", scope: [1, 2, 3, 5] },
@@ -540,7 +549,7 @@ to be accepted by `ct plan` (the round trip is locked by tests):
     turn the id into a name. It emits the number plus a `NOTE` giving the portable
     form (`{ department: "<name>" }` / `{ securityLevel: "<name>" }`) to write by
     hand.
-  - **Any other scope dimension** (`cdb_comment_viewer`, `oauth_client`,
+  - **Any other scope dimension** (`cc_calcategory`, `oauth_client`,
     …): there is no group to adopt, so the `dataId`(s) are emitted directly
     as a numeric `scope: [1, 2, 3]` — always an active line, with a comment
     naming the right's actual scope dimension. `ct adopt group <id>` is never
@@ -696,8 +705,9 @@ routinely has two declarable roles and one blocked one, and group granularity
 would hide exactly that. A role instance is declarable when every authored grant
 is either unscoped, uses the `-1` ALL sentinel, scopes by a dimension with a
 [logical reference form](#scope-resolution) (`cdb_gruppe`, `cdb_station`,
-`cdb_gruppentyp`, `cdb_bereich`, `cc_securitylevel`). Anything else scopes by a
-dimension `ct` cannot yet name portably, and is named as the blocker.
+`cdb_gruppentyp`, `cdb_bereich`, `cc_securitylevel`, `cdb_comment_viewer`).
+Anything else scopes by a dimension `ct` cannot yet name portably — in practice
+the modules outside its mandate — and is named as the blocker.
 
 ## Example
 

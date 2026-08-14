@@ -457,8 +457,8 @@ describe("emitAdoptedGrants", () => {
 
   it("a dimension with no logical form still gets the numeric-escape-hatch note", () => {
     const rows: RawPermission[] = [
-      // cdb_comment_viewer — master data with names, but no ref kind here yet (#109 tracks it).
-      { authId: 113, dataId: 2, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+      // cc_calcategory — a calendar dimension, outside this tool's mandate, so no ref kind exists.
+      { authId: 403, dataId: 2, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
     ];
     const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
     expect(block).toContain("not a group");

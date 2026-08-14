@@ -57,22 +57,28 @@ export const GROUP_SCOPE_FIELD = "cdb_gruppe";
  *  - `cdb_bereich`     → departments (`/departments`) — Bereiche, e.g. `churchdb:view alldata`
  *                        ("Personen eines Bereiches sehen")
  *  - `cc_securitylevel` → security levels (`/securitylevels`, #110) — e.g. `churchdb:+see persons`
+ *  - `cdb_comment_viewer` → comment viewers (`/person/commentviewers`, #102) — `churchdb:view comments`
  *
- * `managed` is what separates the last two from the rest. Groups, campuses and group types are
+ * `managed` is what separates the last three from the rest. Groups, campuses and group types are
  * MANAGED resource kinds: a scope target can be declared in the same config (resolving pending, then
- * re-resolved at apply time) and a state-backed id is worth re-resolving. Departments and security
- * levels are catalogs `ct` READS but does not manage, so a reference always resolves by NAME against
- * the live catalog and hard-errors when the name is absent — strictly better than a silent numeric
- * misgrant, but never a create. They are unmanaged for DIFFERENT reasons, and neither is "CT cannot":
+ * re-resolved at apply time) and a state-backed id is worth re-resolving. Departments, security levels
+ * and comment viewers are catalogs `ct` READS but does not manage, so a reference always resolves by
+ * NAME against the live catalog and hard-errors when the name is absent — strictly better than a
+ * silent numeric misgrant, but never a create. Each is unmanaged for a DIFFERENT reason, and none of
+ * them is "ChurchTools cannot":
  *  - `cdb_bereich` has no REST write at all; the admin UI writes it through the legacy master-data
  *    endpoint `ct` does not drive (#108/#109).
  *  - `cc_securitylevel` DOES have REST writes (`/securitylevels/{id}`: POST/PATCH/DELETE, probed
  *    2026-08-14) — it is unmanaged only because its id-bearing create does not fit the resource
  *    registry's `collectionPath` contract (#110).
+ *  - `cdb_comment_viewer` has conventional REST CRUD that WOULD fit the registry unchanged (#102) —
+ *    it is catalog-only here purely because nothing has needed to declare one yet.
  *
- * The remaining scoped dimensions (`ccm_data_category`, `cdb_comment_viewer`, `oauth_client`, …) stay
+ * The remaining scoped dimensions (`ccm_data_category`, `oauth_client`, `cc_calcategory`, …) stay
  * numeric-only because this tool has no way to address their values by a host-independent name today —
- * an omission to revisit (#109), not a proof that they are "not resources".
+ * an omission to revisit, not a proof that they are "not resources". Most of them belong to modules
+ * outside this tool's mandate (calendars, resources, services, wiki, finance), which is the real
+ * reason none has a ref kind, and a better thing to say than that they are "not resources at all".
  */
 export const SCOPE_REF_KIND: Readonly<Record<string, { kind: RefKind; type: string; managed: boolean }>> = {
   [GROUP_SCOPE_FIELD]: { kind: "group", type: "group", managed: true },
@@ -80,6 +86,7 @@ export const SCOPE_REF_KIND: Readonly<Record<string, { kind: RefKind; type: stri
   cdb_gruppentyp: { kind: "group-type", type: "group-type", managed: true },
   cdb_bereich: { kind: "department", type: "department", managed: false },
   cc_securitylevel: { kind: "security-level", type: "security-level", managed: false },
+  cdb_comment_viewer: { kind: "comment-viewer", type: "comment-viewer", managed: false },
 };
 
 /** The DSL's object sugar for a typed scope ref: exactly one dimension field, e.g. `{ campus: "koblenz" }`. */
@@ -89,6 +96,7 @@ const SCOPE_SUGAR: Readonly<Record<string, (key: string) => Ref>> = {
   groupType: ref.groupType,
   department: ref.department,
   securityLevel: ref.securityLevel,
+  commentViewer: ref.commentViewer,
 };
 
 /**

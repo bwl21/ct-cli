@@ -18,7 +18,8 @@ export type ScopeSugar =
   | { campus: string }
   | { groupType: string }
   | { department: string }
-  | { securityLevel: string };
+  | { securityLevel: string }
+  | { commentViewer: string };
 
 /**
  * One entry of a scoped grant's `scope`:

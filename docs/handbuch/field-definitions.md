@@ -3,7 +3,7 @@ title: Field definitions & security levels
 sources:
   - src/commands/get.ts
   - src/api/ctClient.ts
-sources_hash: 93ba678d9f747e3c
+sources_hash: 4ee434f900165c79
 reviewed: 2026-08-13
 ---
 
