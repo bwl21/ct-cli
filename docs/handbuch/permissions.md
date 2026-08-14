@@ -5,7 +5,7 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: 6b8acc0778bf1fd5
+sources_hash: afcc2dc8de2d4ee1
 reviewed: 2026-08-13
 ---
 
@@ -335,14 +335,14 @@ ct.groupRole({
 `{ campus: "koblenz" }` is sugar for `ref.campus("koblenz")` — the same `Ref`
 the rest of the DSL uses — so both spellings are interchangeable.
 
-| `scopeField`         | Reference form                            | Resolved against                                  |
-| -------------------- | ----------------------------------------- | ------------------------------------------------- |
-| `cdb_gruppe`         | `{ group: "<key>" }` (or the bare string) | managed groups                                    |
-| `cdb_station`        | `{ campus: "<key>" }`                     | managed campuses, then `GET /campuses`            |
-| `cdb_gruppentyp`     | `{ groupType: "<key>" }`                  | managed group types, then `GET /group/grouptypes` |
-| `cdb_bereich`        | `{ department: "<name-slug>" }`           | `GET /departments` **only** — see below           |
-| `cc_securitylevel`   | `{ securityLevel: "<name-slug>" }`        | `GET /securitylevels` **only** — see below (#110) |
-| `cdb_comment_viewer` | `{ commentViewer: "<name-slug>" }`        | `GET /person/commentviewers` **only** (#102)      |
+| `scopeField`         | Reference form                            | Resolved against                                           |
+| -------------------- | ----------------------------------------- | ---------------------------------------------------------- |
+| `cdb_gruppe`         | `{ group: "<key>" }` (or the bare string) | managed groups                                             |
+| `cdb_station`        | `{ campus: "<key>" }`                     | managed campuses, then `GET /campuses`                     |
+| `cdb_gruppentyp`     | `{ groupType: "<key>" }`                  | managed group types, then `GET /group/grouptypes`          |
+| `cdb_bereich`        | `{ department: "<name-slug>" }`           | `GET /departments` **only** — see below                    |
+| `cc_securitylevel`   | `{ securityLevel: "<name-slug>" }`        | managed security levels, then `GET /securitylevels` (#110) |
+| `cdb_comment_viewer` | `{ commentViewer: "<name-slug>" }`        | `GET /person/commentviewers` **only** (#102)               |
 
 **Why this matters:** campus ids are host-specific — Mainz is `0` on eqrm prod
 and `6` on eqrm dev. A campus-scoped grant written as a numeric literal is
@@ -373,10 +373,9 @@ Three things are hard errors at **plan** time, never a guessed `dataId`:
 
 ### Catalog dimensions: referenceable, not declarable
 
-`cdb_bereich` (Bereiche), `cc_securitylevel` (Sicherheitslevel) and
-`cdb_comment_viewer` (Kommentare-Viewer) are the dimensions `ct` **reads but does
-not manage**. Each is unmanaged for a different reason, and none of the reasons
-is "ChurchTools cannot do it":
+`cdb_bereich` (Bereiche) and `cdb_comment_viewer` (Kommentare-Viewer) are the
+dimensions `ct` **reads but does not manage**. Neither is unmanaged because
+"ChurchTools cannot do it":
 
 - **Bereiche** genuinely have no REST write path — live-probed against the
   instance's own OpenAPI spec (eqrm prod CT 3.135.2, 2026-08-13; re-probed on
@@ -385,24 +384,19 @@ is "ChurchTools cannot do it":
   appears in no OpenAPI spec and which `ct` does not drive
   ([#108](https://github.com/eqrm/ct-cli/issues/108) /
   [#109](https://github.com/eqrm/ct-cli/issues/109)).
-- **Security levels do have REST writes.** `/securitylevels/{id}` exposes
-  `POST` (create), `PATCH` (update, including reorder via `newid` +
-  `forcereorder`) and `DELETE` — live-probed 2026-08-14, CT 3.135.2. They are
-  unmanaged here only because that create path carries an id, which the resource
-  registry's "POST to the collection path" contract does not model. Promotion is
-  a deliberate open question on
-  [#110](https://github.com/eqrm/ct-cli/issues/110), not an API limit.
 - **Comment viewers have plain REST CRUD** — `/person/commentviewers` plus
   `POST`/`PUT`/`DELETE` on the item path, which would fit the resource registry
   unchanged. They are catalog-only purely because nothing has needed to declare
   one yet ([#102](https://github.com/eqrm/ct-cli/issues/102)).
 
-So a reference of any of these kinds resolves by name on every host — which is
-what makes `churchdb:view alldata` ("Personen eines Bereiches sehen"),
-`churchdb:+see persons` and `churchdb:view comments` declarable at all — but
-there is no `ct.department` / `ct.securityLevel` / `ct.commentViewer` resource,
-no `ct adopt` for them, and a name that matches nothing is a **hard error**
-rather than a create:
+So a reference of either kind resolves by name on every host — which is what
+makes `churchdb:view alldata` ("Personen eines Bereiches sehen") and
+`churchdb:view comments` declarable at all — but there is no `ct.department` /
+`ct.commentViewer` resource, no `ct adopt` for them, and a name that matches
+nothing is a **hard error** rather than a create:
+
+(Security levels were in this list until #110. They are a managed resource now —
+see the next section.)
 
 ```
 Cannot resolve department:nope referenced at … : no live department at
@@ -412,24 +406,53 @@ them, so it cannot create this one — fix the key/name (list them with
 numeric id.
 ```
 
-Discover the names with `ct get departments`, `ct get security-levels` or
-`ct get comment-viewers`. Because
+Discover the names with `ct get departments` or `ct get comment-viewers`. Because
 the id always comes from the live catalog, such a scope is never "pending" and is
 never re-resolved at apply time — it is host-correct the moment it resolves. A
 managed resource that happens to share the key does **not** shadow it (that would
 be exactly the misgrant this feature exists to prevent).
 
-**Why security levels got a reference form (#110).** They were previously treated
-as _numeric-universal_: `scope: [1, 2, 3]` was considered portable because the ids
-"mean the same thing on every instance". They do — by convention. `cc_securitylevel`
-is an admin-editable master-data table with an auto-increment id and a `sortkey`,
-so someone adding or reordering a level on one host silently changes what a
-hard-coded `[1, 2, 3]` grants there, with a green plan. Reordering is not even an
-edge case: `PATCH /securitylevels/{id}` takes a `newid` and a `forcereorder` flag,
-i.e. CT ships it as a supported operation. Numerics still work
-everywhere; the trade-off is that level names are localised German strings
-(`"Stufe 3 (Hoch)"` → `stufe_3_hoch`), so a **rename** breaks a reference where a
-number would have survived. Pick per config which risk you would rather carry.
+### Security levels: a managed resource with a declared id (#110)
+
+Security levels were treated as _numeric-universal_ for a long time:
+`scope: [1, 2, 3]` was considered portable because the ids "mean the same thing
+on every instance". They do — **by convention**. `cc_securitylevel` is an
+admin-editable table with an auto-increment id and a `sortkey`, and reordering is
+not even an edge case: `PATCH /securitylevels/{id}` takes `newid` +
+`forcereorder`, i.e. CT ships renumbering as a supported operation. So someone
+adding or reordering a level on one host silently changes what a hard-coded
+`[1, 2, 3]` grants there, with a green plan.
+
+Two things address that, and you can use either:
+
+**1. Reference a level by name.** `{ securityLevel: "stufe_3_hoch" }` resolves
+against managed levels first, then `GET /securitylevels`. The trade-off: names
+are localised German strings (`"Stufe 3 (Hoch)"` → `stufe_3_hoch`), so a
+**rename** breaks a reference where a number would have survived.
+
+**2. Declare the levels themselves**, which makes the numeric form portable too,
+because the config now owns the ids:
+
+```ts
+ct.securityLevel({ key: "stufe_3_hoch", id: 3, name: "Stufe 3 (Hoch)" });
+```
+
+`id` is **required** here and it is the only declaration where you choose the id.
+ChurchTools creates a level with `POST /securitylevels/{id}` — the client picks
+the id, CT 409s if it is taken — precisely so a level is reproducible rather than
+whatever a fresh instance auto-increments to. Live-probed on eqrm-dev 2026-08-14:
+creating id 99 next to levels 1–4 left 1–4 untouched and set `sortkey` to the id,
+so an insert does **not** implicitly renumber.
+
+Two guard rails:
+
+- **Changing a declared `id` is refused at plan time.** That is a renumber, not a
+  field update, and it rewrites what every numeric `cc_securitylevel` scope on the
+  instance grants. `ct` does not drive `newid`/`forcereorder`; do it in the admin
+  UI deliberately and update the config to match.
+- **`ct destroy` warns.** Deleting a level reaches every person field
+  (`securityLevelId`) and every grant scoped to it. Same treatment as person
+  statuses.
 
 ### Numeric scope escape hatch (#49)
 

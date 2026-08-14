@@ -8,8 +8,30 @@
  */
 
 export interface AdoptableResource {
-  /** Collection path: `POST` here creates. */
+  /** Collection path: `POST` here creates, unless {@link createPath} overrides the target. */
   collectionPath: string;
+  /**
+   * POST target for a CREATE, when it is not {@link collectionPath} (#110).
+   *
+   * Exists for ChurchTools' one CALLER-ASSIGNED-ID resource: a security level is created with
+   * `POST /securitylevels/{id}` — the client picks the id, and CT 409s if it is taken. That is the
+   * opposite of every other type here, where CT mints the id and the tool records the mapping. The
+   * hook receives the create body (which for such a type carries the declared `id`) and returns the
+   * path to POST to. Types whose create is a plain collection POST omit it.
+   */
+  createPath?: (body: Record<string, unknown>) => string;
+  /**
+   * True when the resource's id is chosen by the CONFIG, not minted by ChurchTools (#110).
+   *
+   * For these, the id is not an opaque handle but part of the resource's meaning — security level 3
+   * IS "Stufe 3", referenced by `securityLevelId` on person fields and by `cc_securitylevel` grant
+   * scopes across the whole instance. Two consequences the engine has to respect:
+   *  - CREATE must send the declared id (see {@link createPath}), and
+   *  - CHANGING it is a RENUMBER, not a field update. CT models that as `PATCH` with `newid` +
+   *    `forcereorder`, which rewrites what every existing numeric grant on that dimension means.
+   *    The planner refuses it rather than emitting a wrong-shaped PATCH (see `computePlan`).
+   */
+  callerAssignedId?: boolean;
   /** GET/PUT/PATCH/DELETE path for a single resource by id. */
   itemPath: (id: number) => string;
   /** Update verb: `group` is PATCH; every other type is PUT. */
@@ -242,6 +264,41 @@ export const RESOURCES: Record<string, AdoptableResource> = {
       sortKey: r.sortKey,
       securityLevelId: r.securityLevelId,
     }),
+  }),
+  /**
+   * SECURITY LEVELS (#110) — `cc_securitylevel`, the scope dimension of `churchdb:+see persons` and
+   * the `securityLevelId` on every person field. The only CALLER-ASSIGNED-ID type here.
+   *
+   * Live-probed on eqrm-dev, CT 3.135.2, 2026-08-14 (create → rename → delete, instance restored):
+   *
+   *   POST   /securitylevels/{id}  body {name}                      → 200 {id, name, sortKey}; 409 if taken
+   *   PATCH  /securitylevels/{id}  body {name[, newid]} ?forcereorder → 200 {id, name}
+   *   DELETE /securitylevels/{id}                                    → 200
+   *
+   * Creating id 99 alongside 1–4 left 1–4 untouched and `sortkey` mirrored the id, so an insert does
+   * NOT implicitly renumber — reordering is opt-in through `newid` + `forcereorder`, which this tool
+   * deliberately does not drive (it would silently change what every numeric `scope: [1,2,3]` grant
+   * means instance-wide). `id` is therefore a MANAGED field: it is part of the declaration, it is sent
+   * at create, and a changed one is refused by the planner rather than PATCHed into a wrong shape.
+   *
+   * Managing `name` only (besides `id`) is safe here where it is not for person-status: PATCH is a
+   * partial update, not a full replace, so unmanaged siblings are left alone.
+   */
+  "security-level": define({
+    collectionPath: "/securitylevels",
+    // Caller-assigned: POST goes to the DECLARED id, not the collection. CT 409s if it is taken.
+    createPath: (body) => `/securitylevels/${String(body.id)}`,
+    callerAssignedId: true,
+    updateMethod: "PATCH",
+    // Tier 0: person statuses carry a `securityLevelId`, and grants scope by one, so levels must
+    // exist before anything that references them.
+    tier: 0,
+    destroyWarning:
+      "deleting a security level reaches every person field and grant scoped to it — the level id " +
+      "is referenced instance-wide (person-field `securityLevelId`, `cc_securitylevel` grant " +
+      "scopes). Verify it is unused first (`ct get security-levels`, `ct get data-fields`).",
+    deriveKey: (r) => slug(str(r, "name")),
+    managedFields: (r) => ({ id: r.id, name: r.name }),
   }),
   "group-role": define({
     collectionPath: "/group/roles",

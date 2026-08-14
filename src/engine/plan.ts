@@ -13,6 +13,34 @@
 import type { State } from "../state/state.js";
 import type { DesiredResource, FieldChange, Plan, PlanItem } from "./types.js";
 import { orderKeys, isKnownType } from "./graph.js";
+import { RESOURCES } from "../resources/registry.js";
+
+/**
+ * Refuse to plan a changed `id` on a CALLER-ASSIGNED-ID type (#110).
+ *
+ * For those types the id is not an opaque handle the tool owns — it is the resource's meaning, and
+ * it is referenced from all over the instance (a security level id appears on person fields and in
+ * every `cc_securitylevel` grant scope). ChurchTools models changing one as a RENUMBER — `PATCH`
+ * with `newid` + `forcereorder` — not as a field update, and doing it silently rewrites what every
+ * numeric grant on that dimension grants.
+ *
+ * The executor would otherwise emit a plain `PATCH {id: <new>}`, which is the wrong shape: CT would
+ * either ignore it (a plan that never converges) or 409. So this is a hard error naming the real
+ * operation, and the author performs it deliberately in ChurchTools.
+ */
+function assertNoRenumber(type: string, key: string, changes: FieldChange[], currentId: number): void {
+  if (!RESOURCES[type]?.callerAssignedId) return;
+  const idChange = changes.find((c) => c.field === "id");
+  if (!idChange) return;
+  throw new Error(
+    `${type} "${key}": cannot change id ${currentId} → ${JSON.stringify(idChange.to)}. For ${type}s ` +
+      `the id is chosen by the config and referenced across the instance, so changing it is a ` +
+      `RENUMBER (ChurchTools: PATCH with "newid" + "forcereorder"), not a field update — and it ` +
+      `silently changes what every numeric scope naming the old id grants. \`ct\` does not drive ` +
+      `that. Renumber in the ChurchTools admin UI and update the config to match, or declare a ` +
+      `separate ${type} under a new key.`,
+  );
+}
 
 /**
  * Structural deep-equal. Order-independent for objects, so a mere key-order
@@ -205,6 +233,7 @@ export function computePlan(
       continue;
     }
     const changes = diffFields(d.fields, a);
+    assertNoRenumber(d.type, d.key, changes, managed.id);
     const drift = driftFields(managed.fields, a);
     const driftedFields = new Set(drift.map((c) => c.field));
     updates.push({

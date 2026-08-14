@@ -445,14 +445,37 @@ describe("emitAdoptedGrants", () => {
     expect(block).toContain('{ right: "churchdb:view alldata", scope: [4] }');
   });
 
-  it("a security-level scope gets the portable-form note, not the numeric-escape-hatch one (#110)", () => {
+  it("points an UNMANAGED security-level scope at `ct adopt security-level` (#110)", () => {
+    // Security levels are a managed resource now, so the honest advice is the same as for any other
+    // managed dimension: adopt the level, then re-adopt the grants to get the portable ref form.
     const rows: RawPermission[] = [
       { authId: 125, dataId: 2, type: "grant", domainId: 42, meta: { modifiedPid: 5 } }, // cc_securitylevel
     ];
     const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
-    expect(block).toContain('Portable form: { securityLevel: "<name>" }');
+    expect(block).toContain("ct adopt security-level 2");
     expect(block).not.toContain("not a group");
     expect(block).toContain('{ right: "churchdb:security level person", scope: [2] }');
+  });
+
+  it("emits a MANAGED security-level scope as the portable ref (#110)", () => {
+    const state: State = {
+      ...emptyState(),
+      resources: {
+        stufe_2_mittel: {
+          type: "security-level",
+          id: 2,
+          key: "stufe_2_mittel",
+          fields: { id: 2, name: "Stufe 2 (Mittel)" },
+          adoptedAt: "t",
+          updatedAt: "t",
+        },
+      },
+    };
+    const rows: RawPermission[] = [
+      { authId: 125, dataId: 2, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+    ];
+    const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state });
+    expect(block).toContain('scope: [{ securityLevel: "stufe_2_mittel" }]');
   });
 
   it("a dimension with no logical form still gets the numeric-escape-hatch note", () => {

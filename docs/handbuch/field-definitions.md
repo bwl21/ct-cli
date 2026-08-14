@@ -56,8 +56,9 @@ ct get data-fields         # all data-field definitions (person + group), one ro
   is also how you check whether the usual ids `1..4` really hold there — they are
   editable master-data rows, not protocol constants. **Security levels are the
   one item on this page that is _not_ read-only in ChurchTools:**
-  `/securitylevels/{id}` takes `POST`/`PATCH`/`DELETE` (probed 2026-08-14).
-  `ct` only reads them today — see #110.
+  `/securitylevels/{id}` takes `POST`/`PATCH`/`DELETE` (probed 2026-08-14), and
+  since #110 they are a **managed resource** — `ct.securityLevel({ key, id, name })`,
+  `ct adopt security-level <id>`. See [`permissions.md`](permissions.md).
 - `ct get data-fields` → `GET /dbfields` (auto-paginated). The **unified**
   data-field definition catalog. Person master-data fields **and** group custom
   fields live in the same list, discriminated per-row by `fieldCategory`
@@ -116,12 +117,12 @@ re-deciding rather than merely re-reading.
 
 ## Endpoint reference
 
-| Purpose                                    | Path                                                                           | Methods (this CT)                              | `ct` surface                                 |
-| ------------------------------------------ | ------------------------------------------------------------------------------ | ---------------------------------------------- | -------------------------------------------- |
-| Person master-data model + security levels | `/person/masterdata`                                                           | GET (read-only)                                | `ct get person-masterdata`                   |
-| Security levels, standalone                | `/securitylevels`, `/securitylevels/{id}`                                      | GET; POST/PATCH/DELETE on the item path (#110) | `ct get security-levels` (read only for now) |
-| Data-field definitions (person + group)    | `/dbfields`, `/dbfields/{id}`                                                  | GET (read-only)                                | `ct get data-fields`                         |
-| Field-definition **mutation**              | legacy `churchdb` AJAX (`db_insertfields`/`db_updatefields`/`db_deletefields`) | non-REST                                       | **not managed — manual**                     |
+| Purpose                                    | Path                                                                           | Methods (this CT)                       | `ct` surface                                        |
+| ------------------------------------------ | ------------------------------------------------------------------------------ | --------------------------------------- | --------------------------------------------------- |
+| Person master-data model + security levels | `/person/masterdata`                                                           | GET (read-only)                         | `ct get person-masterdata`                          |
+| Security levels, standalone                | `/securitylevels`, `/securitylevels/{id}`                                      | GET; POST/PATCH/DELETE on the item path | `ct get security-levels`, `ct.securityLevel` (#110) |
+| Data-field definitions (person + group)    | `/dbfields`, `/dbfields/{id}`                                                  | GET (read-only)                         | `ct get data-fields`                                |
+| Field-definition **mutation**              | legacy `churchdb` AJAX (`db_insertfields`/`db_updatefields`/`db_deletefields`) | non-REST                                | **not managed — manual**                            |
 
 All paths verified against public CT client libraries + CT Academy docs, **not**
 against this repo's (git-ignored, ungenerated) `src/api/schema.d.ts`.

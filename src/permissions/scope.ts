@@ -59,20 +59,16 @@ export const GROUP_SCOPE_FIELD = "cdb_gruppe";
  *  - `cc_securitylevel` → security levels (`/securitylevels`, #110) — e.g. `churchdb:+see persons`
  *  - `cdb_comment_viewer` → comment viewers (`/person/commentviewers`, #102) — `churchdb:view comments`
  *
- * `managed` is what separates the last three from the rest. Groups, campuses and group types are
- * MANAGED resource kinds: a scope target can be declared in the same config (resolving pending, then
- * re-resolved at apply time) and a state-backed id is worth re-resolving. Departments, security levels
- * and comment viewers are catalogs `ct` READS but does not manage, so a reference always resolves by
- * NAME against the live catalog and hard-errors when the name is absent — strictly better than a
- * silent numeric misgrant, but never a create. Each is unmanaged for a DIFFERENT reason, and none of
- * them is "ChurchTools cannot":
+ * `managed` separates the MANAGED resource kinds — groups, campuses, group types and (since #110)
+ * security levels — from the read-only catalogs. For a managed kind a scope target can be declared in
+ * the same config (resolving pending, then re-resolved at apply time) and a state-backed id is worth
+ * re-resolving. For a catalog kind the reference always resolves by NAME against the live catalog and
+ * hard-errors when the name is absent — strictly better than a silent numeric misgrant, but never a
+ * create. Neither remaining catalog kind is unmanaged because "ChurchTools cannot":
  *  - `cdb_bereich` has no REST write at all; the admin UI writes it through the legacy master-data
- *    endpoint `ct` does not drive (#108/#109).
- *  - `cc_securitylevel` DOES have REST writes (`/securitylevels/{id}`: POST/PATCH/DELETE, probed
- *    2026-08-14) — it is unmanaged only because its id-bearing create does not fit the resource
- *    registry's `collectionPath` contract (#110).
+ *    endpoint (#108/#109).
  *  - `cdb_comment_viewer` has conventional REST CRUD that WOULD fit the registry unchanged (#102) —
- *    it is catalog-only here purely because nothing has needed to declare one yet.
+ *    it is catalog-only purely because nothing has needed to declare one yet.
  *
  * The remaining scoped dimensions (`ccm_data_category`, `oauth_client`, `cc_calcategory`, …) stay
  * numeric-only because this tool has no way to address their values by a host-independent name today —
@@ -85,7 +81,7 @@ export const SCOPE_REF_KIND: Readonly<Record<string, { kind: RefKind; type: stri
   cdb_station: { kind: "campus", type: "campus", managed: true },
   cdb_gruppentyp: { kind: "group-type", type: "group-type", managed: true },
   cdb_bereich: { kind: "department", type: "department", managed: false },
-  cc_securitylevel: { kind: "security-level", type: "security-level", managed: false },
+  cc_securitylevel: { kind: "security-level", type: "security-level", managed: true },
   cdb_comment_viewer: { kind: "comment-viewer", type: "comment-viewer", managed: false },
 };
 

@@ -266,6 +266,25 @@ export interface ConfigContext {
    * Master data, not people — a status is the enumeration, never a person or a membership.
    */
   personStatus(input: ResourceInput): void;
+  /**
+   * A SECURITY LEVEL (`/securitylevels` — "Stufe 1 (Niedrig)" … ), #110. The **only** declaration
+   * whose `id` you choose yourself, and it is REQUIRED:
+   *
+   * ```ts
+   * ct.securityLevel({ key: "stufe_3_hoch", id: 3, name: "Stufe 3 (Hoch)" });
+   * ```
+   *
+   * ChurchTools creates a level with `POST /securitylevels/{id}` — the client picks the id and CT
+   * 409s if it is taken. That is deliberate on CT's side: the id IS the level (person fields carry a
+   * `securityLevelId`, grants scope by `cc_securitylevel`), so it has to be reproducible rather than
+   * whatever a fresh instance happens to auto-increment to. Declaring it is what makes a numeric
+   * `scope: [1, 2, 3]` genuinely portable for a config that owns its levels.
+   *
+   * Changing a declared `id` later is refused at plan time: that is a renumber, which rewrites what
+   * every existing grant on that dimension means. Master data, never people — but note the
+   * `destroyWarning`: a delete reaches every person field and grant referencing the level.
+   */
+  securityLevel(input: ResourceInput): void;
   /** Master-data group role (`/group/roles`). Named `roleDefinition` to avoid colliding
    *  with the `groupRole` permission function below. */
   roleDefinition(input: ResourceInput): void;
@@ -544,6 +563,7 @@ export function createContext(): {
     targetGroup: define("target-group"),
     relationshipType: define("relationship-type"),
     personStatus: define("person-status"),
+    securityLevel: define("security-level"),
     roleDefinition: define("group-role"),
     groupRole: definePermission("group_role"),
     groupTypeRole: definePermission("group_type_role"),

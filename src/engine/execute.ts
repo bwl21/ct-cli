@@ -161,8 +161,11 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         // CT's same-name group-creation guard (#75): opt-in only, via `force: true` on the POST body.
         // Never a managed field — not in `body`/state, so it never diffs and never touches update.
         const createBody = item.allowDuplicateName ? { ...defaultedBody, force: true } : defaultedBody;
-        assertNotPeople(spec.collectionPath);
-        const res = await client.request<{ id: number }>("POST", spec.collectionPath, createBody);
+        // A caller-assigned-id type (#110: security levels) POSTs to the DECLARED id, not the
+        // collection — `createPath` reads it out of the body. Everything else posts to the collection.
+        const createTarget = spec.createPath ? spec.createPath(createBody) : spec.collectionPath;
+        assertNotPeople(createTarget);
+        const res = await client.request<{ id: number }>("POST", createTarget, createBody);
         if (typeof res.id !== "number") {
           throw new Error(`create returned no numeric id (got ${JSON.stringify(res.id)})`);
         }

@@ -56,6 +56,12 @@ const REF_KIND_TYPE: Partial<Record<RefKind, string>> = {
   // status declared in the same config usable as a permission domain (it resolves to a PendingRef,
   // which buildPermissionPlan carries as a pending domain, #69).
   "person-status": "person-status",
+  // Security levels became a managed resource in #110, so — exactly like person statuses above — a
+  // `{ securityLevel: "…" }` ref resolves from managed state / this run's declarations FIRST and only
+  // falls through to the `/securitylevels` catalog for a level this config does not own. That
+  // ordering is what lets a config declare a level and scope a grant to it in the same run (the ref
+  // resolves to a PendingRef, carried as a pending scope).
+  "security-level": "security-level",
   "role-def": "group-role",
   group: "group",
 };
@@ -83,12 +89,11 @@ const CATALOG_PATH: Partial<Record<RefKind, string>> = {
   department: "/departments",
   // Security levels — the `cc_securitylevel` scope dimension (#110). `GET /securitylevels` returns a
   // flat `[{id, name, sortKey}]` array ("Stufe 1 (Niedrig)" … "Stufe 4 (Sehr hoch)"), live-verified on
-  // eqrm prod (CT 3.135.2, 2026-08-13) and eqrm-dev (2026-08-14). Read here because the ids are NOT a
-  // protocol constant — `cc_securitylevel` is an editable master-data table with an auto-increment id
-  // and a supported reorder (`PATCH …/{id}` with `newid`), so a hard-coded `scope: [1, 2, 3]` is
-  // portable only by convention. Unlike `department`, catalog-only is OUR limit, not CT's:
-  // `/securitylevels/{id}` has POST/PATCH/DELETE, but its create is id-bearing and does not fit the
-  // registry's `collectionPath` contract, so promotion to a managed resource is a separate call (#110).
+  // eqrm prod (CT 3.135.2, 2026-08-13) and eqrm-dev (2026-08-14). Unlike `department` this kind ALSO
+  // has a REF_KIND_TYPE entry: levels are a managed resource, so this catalog is the fallback for a
+  // level the config does not own, not the only source. Reading it by name matters because the ids
+  // are not a protocol constant — an editable table with an auto-increment id and a supported
+  // reorder, so a hard-coded `scope: [1, 2, 3]` is portable only by convention.
   "security-level": "/securitylevels",
   // Comment viewers — the `cdb_comment_viewer` scope dimension (#102). `[{id, name, sortKey}]`,
   // live-verified on eqrm-dev CT 3.135.2, 2026-08-14. NB `id: 0` is a real row here ("Alle"), which
