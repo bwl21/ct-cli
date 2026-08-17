@@ -42,6 +42,8 @@ const groupRows = [
     ],
   },
   { id: 11, name: "Ops", information: { groupTypeId: 2 }, roles: [{ id: 200, groupTypeRoleId: 16 }] },
+  // `youth` (#12, managed) carries its rights ONLY as inherited rows — the #119 shape.
+  { id: 12, name: "Youth", information: { groupTypeId: 2 }, roles: [{ id: 300, groupTypeRoleId: 16 }] },
 ];
 const roleDefRows = [
   { id: 16, name: "Leiter", groupTypeId: 2 },
@@ -53,6 +55,8 @@ const permissions: RawPermission[] = [
   perm(UNSCOPED, 101),
   perm(HTML_TEMPLATE, 101, 3), // blocks role instance 101
   perm(UNSCOPED, 200),
+  { ...perm(UNSCOPED, 300), isInherited: true },
+  { ...perm(VIEW_GROUP, 300, 12), isInherited: true },
 ];
 
 const getMock = vi.fn(async (path: string): Promise<unknown> => {
@@ -83,6 +87,7 @@ const state: State = {
   host: HOST,
   resources: {
     kids: { type: "group", id: 10, key: "kids", fields: { name: "Kids" }, adoptedAt: "t", updatedAt: "t" },
+    youth: { type: "group", id: 12, key: "youth", fields: { name: "Youth" }, adoptedAt: "t", updatedAt: "t" },
   },
 };
 
@@ -163,6 +168,17 @@ describe("ct adopt grants --all-declarable (#104)", () => {
     expect(stdout).toContain('key: "kids_leiter"');
     expect(stdout).toContain("id: 200"); // the unmanaged group's declarable role, numeric form
     expect(stdout).not.toContain("kids_mitglied");
+  });
+
+  // The bulk counterpart of #119. The single-domain path emits the effective set; the bulk path used
+  // to decide whether to emit at all from the OWNED set, so a domain whose rights are all inherited
+  // here counted as "no authored grants" and was skipped. Its rights then stay undeclared — and on the
+  // host that materialises the same rights as DIRECT rows, the next plan puts them in toDelete.
+  it("emits a domain whose grants are all inherited, rather than counting it empty", async () => {
+    const { stdout } = await run(["grants", "--all-declarable"]);
+    expect(stdout).toContain('key: "youth_leiter"');
+    expect(stdout).toContain('group: "youth"');
+    expect(stdout).toContain("churchgroup:view group");
   });
 
   it("--write appends the blocks to a file instead of printing them", async () => {

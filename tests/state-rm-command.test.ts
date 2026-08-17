@@ -58,6 +58,14 @@ async function seedState(): Promise<void> {
     adoptedAt: "t",
     updatedAt: "t",
   };
+  state.resources.youth = {
+    type: "group",
+    id: 3090,
+    key: "youth",
+    fields: { name: "Youth" },
+    adoptedAt: "t",
+    updatedAt: "t",
+  };
   await saveState(statePath, state);
 }
 
@@ -94,8 +102,45 @@ describe("ct state rm (#122)", () => {
   it("leaves every other entry untouched", async () => {
     await run(["group-role", "appmodule_write", "--state", statePath]);
     const state = await loadState(statePath, HOST);
-    expect(Object.keys(state.resources).sort()).toEqual(["appmodule_read", "mainz"]);
+    expect(Object.keys(state.resources).sort()).toEqual(["appmodule_read", "mainz", "youth"]);
     expect(state.resources.mainz?.id).toBe(0);
+  });
+
+  // A key can be named by a PERMISSION declaration without being declared as a resource. A
+  // resources-only guard waves those through, and the breakage surfaces one command later as a
+  // `ct plan` hard error ("does not resolve to a managed group") — after the state file was written.
+  it("refuses a key a permission DOMAIN still names, not just a declared resource", async () => {
+    await writeFile(
+      configPath,
+      `export default (ct) => { ct.groupRole({ key: "youth_leiter", group: "youth", role: "Leiter", grants: ["churchcore:administer settings"] }); };`,
+    );
+    await expect(run(["group", "youth", "--state", statePath])).rejects.toThrow(
+      /still declared in the config/,
+    );
+    const state = await loadState(statePath, HOST);
+    expect(state.resources.youth).toBeDefined();
+  });
+
+  it("refuses a key a permission SCOPE still names", async () => {
+    await writeFile(
+      configPath,
+      `export default (ct) => { ct.groupRole({ key: "p", id: 77, grants: [{ right: "churchgroup:view group", scope: ["youth"] }] }); };`,
+    );
+    await expect(run(["group", "youth", "--state", statePath])).rejects.toThrow(
+      /still declared in the config/,
+    );
+    const state = await loadState(statePath, HOST);
+    expect(state.resources.youth).toBeDefined();
+  });
+
+  it("still removes a key no declaration — resource or permission — mentions", async () => {
+    await writeFile(
+      configPath,
+      `export default (ct) => { ct.groupRole({ key: "p", id: 77, grants: [{ right: "churchgroup:view group", scope: ["someone_else"] }] }); };`,
+    );
+    await run(["group", "youth", "--state", statePath]);
+    const state = await loadState(statePath, HOST);
+    expect(state.resources.youth).toBeUndefined();
   });
 
   it("refuses a key the config still declares — that would plan a CREATE for a live resource", async () => {

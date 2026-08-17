@@ -4,6 +4,7 @@ import { loadConfig, resolveConfigPath } from "../config/load.js";
 import { prepareEnv } from "../env/context.js";
 import { loadState, saveState } from "../state/state.js";
 import { resourceType } from "../resources/registry.js";
+import { collectRefs, isRef, type Ref } from "../resolve/refs.js";
 import { info, out, success, warn } from "../ui.js";
 
 interface StateOptions {
@@ -114,10 +115,48 @@ export function stateCommand(): Command {
  * when the config is mid-edit. So a load failure downgrades the guard to a warning rather than
  * failing the command.
  */
+/**
+ * Every logical key the config still names — as a declared resource, AND as a reference from a
+ * permission declaration.
+ *
+ * The permission half matters because a key can be referenced without being declared as a resource in
+ * the same breath: a `ct.groupRole({ group: "<key>" })` domain, or a group-dimension
+ * `scope: ["<key>"]`. Removing such a key from state passes a resources-only guard and then hard-errors
+ * on the next `ct plan` in `resolveScope` ("does not resolve to a managed group") — which is precisely
+ * the broken-config outcome this guard exists to catch before the write, not after it.
+ *
+ * Embedded `{ __ctRef }` markers are collected structurally, so a new referencing position is covered
+ * the day it is added; compound refs contribute the key they actually name (`group-role` a group,
+ * `group-type-role` a group type). The scope sugar (`{ group: "x" }`) and the bare-string group key
+ * are NOT refs, so they are picked up explicitly — leniently, since a malformed entry is `ct plan`'s
+ * to report, and this guard must not turn it into a failure to read the config at all.
+ */
 async function declaredKeys(configOpt: string | undefined): Promise<Set<string> | undefined> {
   try {
-    const { resources } = await loadConfig(resolveConfigPath(configOpt));
-    return new Set(resources.map((r) => r.key));
+    const { resources, permissions } = await loadConfig(resolveConfigPath(configOpt));
+    const keys = new Set(resources.map((r) => r.key));
+    const addRef = (r: Ref): void => {
+      if (r.kind === "group-role") keys.add(r.group);
+      else if (r.kind === "group-type-role") keys.add(r.groupType);
+      else keys.add(r.key);
+    };
+    for (const ref of collectRefs(permissions)) addRef(ref);
+    for (const p of permissions) {
+      for (const g of p.grants) {
+        if (typeof g === "string" || !Array.isArray(g.scope)) continue;
+        for (const entry of g.scope) {
+          // A bare string is a logical GROUP key; one-field sugar names a key on its dimension.
+          if (typeof entry === "string" && entry.length > 0) keys.add(entry);
+          else if (entry !== null && typeof entry === "object" && !isRef(entry)) {
+            const values = Object.values(entry as Record<string, unknown>);
+            if (values.length === 1 && typeof values[0] === "string" && values[0].length > 0) {
+              keys.add(values[0]);
+            }
+          }
+        }
+      }
+    }
+    return keys;
   } catch (err) {
     warn(
       `Could not read the config to check whether "${configOpt ?? "the default config"}" still ` +

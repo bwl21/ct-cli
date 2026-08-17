@@ -93,8 +93,9 @@ export function adoptGrantsCommand(): Command {
         const config = await resolveConfig();
         const statePath = cmdEnv.statePath;
         const state = await loadState(statePath, config.host);
-        // Bulk selection runs the same declarability verdict as `ct coverage`, so it needs this
-        // host's catalog for the same reason (#105): under the bundled one, `--all-declarable`
+        // Bulk selection runs the same declarability verdict as `ct coverage` (over the effective
+        // rather than the authored rows — see the call below), so it needs this host's catalog for
+        // the same reason (#105): under the bundled one, `--all-declarable`
         // silently SKIPS role instances `ct plan` would manage, filed under an authId the active
         // catalog can name perfectly well.
         const hostCatalog = await loadHostCatalog(config.host);
@@ -203,7 +204,12 @@ async function emitBulk(
 
   for (const role of candidates) {
     const rows = rowsByDomainId.get(role.domainId) ?? [];
-    const verdict = declarability(rows);
+    // Judged on the EFFECTIVE set, because that is what `buildAdoptedGrants` emits (#114/#119). An
+    // owned-rows verdict here would disagree with the emitter in both directions: it would skip a
+    // domain whose rights are all inherited on THIS host (18 of 63 group_role domains, measured) and
+    // leave them undeclared for the other one to revoke, and it would wave through an inherited grant
+    // on a dimension with no logical form, which the gate below exists to stop.
+    const verdict = declarability(rows, { scope: "effective" });
     if (verdict.grantCount === 0) {
       skippedEmpty += 1;
       continue; // nothing authored on this domain — an empty block is not worth a paste

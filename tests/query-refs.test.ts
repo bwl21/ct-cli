@@ -417,20 +417,33 @@ describe("person.id is reported by the portability audit (#127)", () => {
   });
 });
 
-describe("ruleset role refs prefer a managed role-def over the ambiguous name pair (#125)", () => {
-  // `role.id` used to portablize to a (group type, role NAME) pair, resolved by filtering
-  // `/group/roles` on (groupTypeId, slug(name)). Two rows sharing a name on one group type made that
-  // a hard error — and neither remedy the error offered works for a config shared across hosts:
-  // "rename" edits ChurchTools master data (here, CT's own stock `leader`), and "pass a numeric id"
-  // cannot work because the roles have different ids per host with no env to branch on.
-  const ruleset = { oneof: [{ var: "role.id" }, [207]] };
-  const roleCatalog = new Map([[207, { groupTypeId: 30, name: "leader" }]]);
+describe("ruleset role refs fall back to a managed role-def only when the name pair is ambiguous (#125)", () => {
+  // `role.id` portablizes to a (group type, role NAME) pair, resolved by filtering `/group/roles` on
+  // (groupTypeId, slug(name)). Two rows sharing a name on ONE group type make that a hard error — and
+  // neither remedy the error offered works for a config shared across hosts: "rename" edits
+  // ChurchTools master data (here, CT's own stock `leader`), and "pass a numeric id" cannot work
+  // because the roles have different ids per host with no env to branch on. A managed `role-def` key
+  // is the way out of THAT case.
+  //
+  // It is only a way out of that case, though. Off this host a `role-def` ref is the WEAKER of the
+  // two: the resolver falls back to a `/group/roles` lookup keyed on slug(name) alone, so on a host
+  // where the role was never adopted under the shared key it can resolve silently to a role on a
+  // different group type. The pair cannot fail that way. So the pair stays the default and `role-def`
+  // is reserved for the ids the pair genuinely cannot name.
   const groupTypeIdToKey = new Map([[30, "community"]]);
+  // Two rows, same group type, same name — the collision #125 is actually about.
+  const ambiguousCatalog = new Map([
+    [207, { groupTypeId: 30, name: "leader" }],
+    [208, { groupTypeId: 30, name: "Leader" }],
+  ]);
+  // One row — the common case: unique across all 46 prod roles.
+  const uniqueCatalog = new Map([[207, { groupTypeId: 30, name: "leader" }]]);
+  const ruleset = { oneof: [{ var: "role.id" }, [207]] };
 
-  it("emits a role-def ref when the role is under management", () => {
+  it("emits a role-def ref when the name pair is ambiguous and the role is under management", () => {
     const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
       idToKeyByKind: { "role-def": new Map([[207, "community_leader"]]) },
-      roleCatalog,
+      roleCatalog: ambiguousCatalog,
       groupTypeIdToKey,
     });
     expect(warnings).toEqual([]);
@@ -439,11 +452,44 @@ describe("ruleset role refs prefer a managed role-def over the ambiguous name pa
     });
   });
 
+  it("keeps the (group-type, role) pair when it is unambiguous, EVEN IF the role is managed", () => {
+    // The safety property: a `role-def` ref can mis-resolve to another group type's role on a host
+    // that never adopted the key, and the pair cannot. Nothing is gained by trading down here, so a
+    // managed role-def must not win by default.
+    const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
+      idToKeyByKind: { "role-def": new Map([[207, "community_leader"]]) },
+      roleCatalog: uniqueCatalog,
+      groupTypeIdToKey,
+    });
+    expect(warnings).toEqual([]);
+    expect(out).toEqual({
+      oneof: [
+        { var: "role.id" },
+        [{ __ctRef: true, kind: "group-type-role", groupType: "community", role: "leader" }],
+      ],
+    });
+  });
+
   it("still emits the (group-type, role) pair when the role is NOT managed", () => {
-    // The common case is unchanged: the pair is unique across all 46 prod roles.
     const { ruleset: out } = portablizeRuleset(ruleset, {
       idToKeyByKind: {},
-      roleCatalog,
+      roleCatalog: uniqueCatalog,
+      groupTypeIdToKey,
+    });
+    expect(out).toEqual({
+      oneof: [
+        { var: "role.id" },
+        [{ __ctRef: true, kind: "group-type-role", groupType: "community", role: "leader" }],
+      ],
+    });
+  });
+
+  it("leaves an ambiguous, unmanaged role to the pair — which hard-errors at plan time, honestly", () => {
+    // Nothing portable to emit: the pair cannot name it and there is no shared key yet. Emitting the
+    // pair anyway is right — the resolver's ambiguity error is what tells the author to adopt it.
+    const { ruleset: out } = portablizeRuleset(ruleset, {
+      idToKeyByKind: {},
+      roleCatalog: ambiguousCatalog,
       groupTypeIdToKey,
     });
     expect(out).toEqual({
@@ -461,16 +507,22 @@ describe("ruleset role refs prefer a managed role-def over the ambiguous name pa
       { oneof: [{ var: "role.id" }, [127]] },
       {
         idToKeyByKind: { "role-def": new Map([[127, "community_leader"]]) },
-        roleCatalog: new Map([[127, { groupTypeId: 30, name: "leader" }]]),
+        roleCatalog: new Map([
+          [127, { groupTypeId: 30, name: "leader" }],
+          [128, { groupTypeId: 30, name: "Leader" }],
+        ]),
         groupTypeIdToKey,
       },
     ).ruleset;
     const dev = portablizeRuleset(ruleset, {
       idToKeyByKind: { "role-def": new Map([[207, "community_leader"]]) },
-      roleCatalog,
+      roleCatalog: ambiguousCatalog,
       groupTypeIdToKey,
     }).ruleset;
     expect(prod).toEqual(dev);
+    expect(prod).toEqual({
+      oneof: [{ var: "role.id" }, [{ __ctRef: true, kind: "role-def", key: "community_leader" }]],
+    });
   });
 
   it("also portablizes the out-of-query handleMembership.groupTypeRoleId field", () => {
@@ -478,7 +530,7 @@ describe("ruleset role refs prefer a managed role-def over the ambiguous name pa
       { process: { x: { handleMembership: { groupTypeRoleId: 207 } } } },
       {
         idToKeyByKind: { "role-def": new Map([[207, "community_leader"]]) },
-        roleCatalog,
+        roleCatalog: ambiguousCatalog,
         groupTypeIdToKey,
       },
     );
