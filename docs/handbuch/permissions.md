@@ -5,7 +5,7 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: 614b981fa6011b17
+sources_hash: 5f9ed09f1e3793b0
 reviewed: 2026-08-17
 ---
 
@@ -285,6 +285,21 @@ Now the domain resolves as pending and completes in the same run. Role
 definitions are **tier 3**, which executes before permission reconciliation, so
 by the time the pending domain is finished the role is already on the group's
 role list and the grant lands on its fresh pairing id.
+
+The declaration has to be for **this group's group type**, not merely for a role
+of the same name. Role names repeat across group types — live prod carries three
+`Leiter`, six `Organisator` and six `Mitglied`, each on a different type — so a
+name match alone would read a genuine mistake (a `ct.groupRole` on a group whose
+type has no such role, next to a `roleDefinition` for some other type) as
+"pending", and defer the failure past `executePlan` to the post-apply fetch. It
+fails there with the same message, but only after resources have been written;
+matching the group's own `groupTypeId` keeps it a **plan-time** error.
+
+Where the answer is not knowable offline the pending path is kept: a
+`roleDefinition` that states no group type, or a group whose state entry does
+not record `groupTypeId` (adopted before it was managed). The check only ever
+turns a would-be pending back into the hard error it used to be, and only on
+positive evidence.
 
 Creating a role definition also needs fields CT validates but the tool does not
 otherwise diff (#121). `ct` supplies them at **create only**, so they are never
