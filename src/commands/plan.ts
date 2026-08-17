@@ -79,6 +79,10 @@ export function planCommand(): Command {
           summary: {
             resources: summarize(plan),
             drifted: plan.items.filter((i) => i.drift && i.drift.length > 0).length,
+            // Non-zero means the plan is PARTIAL: these resources could not be read, so their diff
+            // is missing rather than empty. A machine consumer must not treat the plan as complete
+            // while this is > 0 (#126) — `ct plan` also exits 1 in that case.
+            unreadable: plan.items.filter((i) => i.note === "fetch-failed").length,
             permissions: {
               toPut: permItems.reduce((n, i) => n + i.diff.toPut.length, 0),
               toDelete: permItems.reduce((n, i) => n + i.diff.toDelete.length, 0),

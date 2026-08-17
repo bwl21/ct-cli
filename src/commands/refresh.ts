@@ -16,6 +16,7 @@ import { Command } from "commander";
 import { authedSession } from "../api/session.js";
 import type { CtClient } from "../api/ctClient.js";
 import { CtApiError } from "../api/ctClient.js";
+import { fetchDynamicGroupIds } from "../api/dynamicGroups.js";
 import { resolveConfig } from "../config.js";
 import { prepareEnv } from "../env/context.js";
 import { assertNotPeople } from "../engine/guard.js";
@@ -101,12 +102,7 @@ async function selectTargets(
   state: State,
   groupKey: string | undefined,
 ): Promise<ManagedResource[]> {
-  const dynamicIds = new Set<number>();
-  const { data } = await client.getAll<Record<string, unknown>>("/dynamicgroups");
-  for (const row of data) {
-    const id = Number(row.id ?? row.groupId);
-    if (Number.isFinite(id)) dynamicIds.add(id);
-  }
+  const dynamicIds = await fetchDynamicGroupIds(client);
 
   if (groupKey !== undefined) {
     const managed = state.resources[groupKey];

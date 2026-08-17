@@ -157,7 +157,11 @@ export async function executePlan(plan: Plan, deps: ExecuteDeps): Promise<Execut
         // win) for the POST ONLY. State still records `body` (the managed fields), so the defaults
         // stay unmanaged — a later plan neither diffs nor reverts them. A field still missing after
         // this surfaces as CT's HTTP 400 (#71), not a silent omission.
-        const defaultedBody = spec.createDefaults ? { ...spec.createDefaults(body), ...body } : body;
+        // `{ ...body }` last so a DECLARED value always wins — but an explicitly-`undefined` declared
+        // field must not knock out a default CT requires (that turns into an HTTP 400 at create for
+        // no reason), so undefined entries are dropped from the winning side.
+        const declared = Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));
+        const defaultedBody = spec.createDefaults ? { ...spec.createDefaults(body), ...declared } : body;
         // CT's same-name group-creation guard (#75): opt-in only, via `force: true` on the POST body.
         // Never a managed field — not in `body`/state, so it never diffs and never touches update.
         const createBody = item.allowDuplicateName ? { ...defaultedBody, force: true } : defaultedBody;

@@ -235,10 +235,25 @@ describe("createDefaults — required-but-unmanaged create fields (#73)", () => 
     expect(defaults?.shorty).toBe("Team");
   });
 
-  it("group-role fills the required `shorty` from the declared name (truncated to 10)", () => {
+  it("group-role sends every field CT requires at create (#121)", () => {
+    // Verified live on eqrm-dev, CT 3.135.2: POSTing without these four is rejected with one
+    // validation error each (sortKey/type/isDefault/isHidden), so a declared roleDefinition missing
+    // on the target host could not be created at all — and it failed in `apply`, after a green
+    // `plan`. `shorty` is still derived from the name, truncated to 10.
     expect(RESOURCES["group-role"]?.createDefaults?.({ name: "Verantwortlicher", groupTypeId: 2 })).toEqual({
       shorty: "Verantwort",
+      type: "participant", // the conservative half of leader|participant
+      isDefault: false,
+      isHidden: false,
+      sortKey: 0,
     });
+  });
+
+  it("group-role never sends isLeader — CT derives it from `type`", () => {
+    // The probe created a role with `type: "leader"` and it read back `isLeader: true` without
+    // `isLeader` ever being in the body. Sending it would be a second source of truth for one fact.
+    const defaults = RESOURCES["group-role"]?.createDefaults?.({ name: "Leiter", groupTypeId: 2 });
+    expect(defaults).not.toHaveProperty("isLeader");
   });
 
   it("pads a 1-char group-type name's namePlural up to CT's 2-char minimum", () => {

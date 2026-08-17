@@ -5,8 +5,8 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: 5c881a7bede7e01a
-reviewed: 2026-08-13
+sources_hash: 5f9ed09f1e3793b0
+reviewed: 2026-08-17
 ---
 
 # Permissions (`ct.groupRole` / `ct.groupTypeRole` / `ct.status`)
@@ -267,11 +267,80 @@ resulting pairing id — one run, no second merge.
 - `ct plan` renders the domain as
   `<group-role(group=<key>, role=<name>) (created this apply)>`, the same
   pending marker every other deferred reference uses.
-- A `role` name the created group turns out not to have is still a **hard
-  error**, listing the roles it does have — the same message you would get at
-  plan time on a host where the group already exists.
-- Nothing changes on a host where the group already exists: the domain resolves
-  to a concrete pairing id at plan time, exactly as before.
+- A `role` name that is nowhere to be found — not on the group, and not
+  declared as a `roleDefinition` in this config — is still a **hard error**,
+  listing the roles the group does have.
+- Nothing changes on a host where the group already exists and already has the
+  role: the domain resolves to a concrete pairing id at plan time, as before.
+
+**The ROLE half goes pending too, since #120.** #106 covered the case where the
+_group_ is missing; the mirror case is a `ct.groupRole` naming a role that this
+host does not have yet but the config **declares as a `ct.roleDefinition`**.
+That used to hard-error even though the role was declared a few lines above,
+with a message ("Fix the role name, or pass a numeric id") whose two remedies
+are both wrong for a shared config: the name is right, and a numeric id is
+host-specific, which is the very thing the logical form exists to avoid.
+
+Now the domain resolves as pending and completes in the same run. Role
+definitions are **tier 3**, which executes before permission reconciliation, so
+by the time the pending domain is finished the role is already on the group's
+role list and the grant lands on its fresh pairing id.
+
+The declaration has to be for **this group's group type**, not merely for a role
+of the same name. Role names repeat across group types — live prod carries three
+`Leiter`, six `Organisator` and six `Mitglied`, each on a different type — so a
+name match alone would read a genuine mistake (a `ct.groupRole` on a group whose
+type has no such role, next to a `roleDefinition` for some other type) as
+"pending", and defer the failure past `executePlan` to the post-apply fetch. It
+fails there with the same message, but only after resources have been written;
+matching the group's own `groupTypeId` keeps it a **plan-time** error.
+
+Where the answer is not knowable offline the pending path is kept: a
+`roleDefinition` that states no group type, or a group whose state entry does
+not record `groupTypeId` (adopted before it was managed). The check only ever
+turns a would-be pending back into the hard error it used to be, and only on
+positive evidence.
+
+Creating a role definition also needs fields CT validates but the tool does not
+otherwise diff (#121). `ct` supplies them at **create only**, so they are never
+diffed or reverted afterwards:
+
+| Field       | Sent as                  | Notes                                          |
+| ----------- | ------------------------ | ---------------------------------------------- |
+| `shorty`    | the declared `name`, ≤10 | required, 1–10 chars                           |
+| `type`      | `"participant"`          | **declarable** — `"leader"` or `"participant"` |
+| `isDefault` | `false`                  | create default                                 |
+| `isHidden`  | `false`                  | create default                                 |
+| `sortKey`   | `0`                      | create default; every stock role uses `0`      |
+
+All four non-`shorty` fields are genuinely required: verified live on eqrm-dev
+(CT 3.135.2), where a POST without them is rejected with one validation error
+each. `isLeader` is deliberately **not** sent — ChurchTools derives it from
+`type`, and a role created with `type: "leader"` reads back `isLeader: true` on
+its own.
+
+`type` is the one that is a real semantic choice — does holding this role make
+you a _leader_ of the group? — so it is declarable and defaults to the
+conservative half:
+
+```js
+ct.roleDefinition({
+  key: "appmodule_admin",
+  name: "Admin",
+  nameTranslated: "Admin",
+  groupType: "appmodule",
+  type: "leader", // optional; defaults to "participant"
+});
+```
+
+An invalid value is rejected when the config loads, not as an HTTP 400 halfway
+through an unattended apply.
+
+This matters because role definitions are **per group type**, and that is
+exactly the master data that drifts between two hosts of one instance — one
+host has `Read`/`Admin`/`Write` on a type where the other only ever had CT's
+stock roles. Bringing the second host into line is precisely when a `groupRole`
+first names a role the host lacks.
 
 Until #106 this was a hard error, and that made a config **non-portable by
 construction**: declaring a group and a grant on its own role planned clean on

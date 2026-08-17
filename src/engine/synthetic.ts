@@ -50,9 +50,24 @@ export interface SyntheticPostApplyCtx {
   item: PlanItem;
   change: FieldChange;
 }
+/**
+ * What a fold pass produced.
+ *
+ * `unreadable` is the half that keeps a degraded plan HONEST (#126): the logical keys whose ACTUAL
+ * side could not be read. A fold must never fold only the desired side of a field it could not read
+ * the actual of — that manufactures an update out of a transient 429. Reporting the key here makes
+ * `buildPlan` mark the resource fetch-failed, so it renders as "could not be read" instead of
+ * silently joining the `to update` count.
+ */
+export interface SyntheticFoldResult {
+  desired: DesiredResource[];
+  errors: string[];
+  unreadable?: string[];
+}
+
 export interface SyntheticField {
   field: string;
-  fold(ctx: SyntheticFoldCtx): Promise<{ desired: DesiredResource[]; errors: string[] }>;
+  fold(ctx: SyntheticFoldCtx): Promise<SyntheticFoldResult>;
   apply(ctx: SyntheticApplyCtx): Promise<void>;
   /**
    * Optional opt-in side effect run AFTER the whole plan has applied (e.g. `ct apply --refresh`
@@ -87,8 +102,14 @@ const parentsField: SyntheticField = {
     } catch (err) {
       const message = formatError(err);
       warn(`Failed to fetch group hierarchies: ${message}`);
-      // Leave `parents` undiffed rather than fabricate "add all parents" from an empty map.
-      return { desired, errors: [`group hierarchies: ${message}`] };
+      // Leave `parents` undiffed rather than fabricate "add all parents" from an empty map — and
+      // report every opted-in group as unreadable so the plan says so instead of quietly
+      // under-reporting a real hierarchy change as a no-op (#126).
+      return {
+        desired,
+        errors: [`group hierarchies: ${message}`],
+        unreadable: desired.filter((d) => d.type === "group" && d.parents !== undefined).map((d) => d.key),
+      };
     }
   },
   async apply({ client, state, id, change }) {
@@ -128,39 +149,57 @@ const dynamicField: SyntheticField = {
     // sequential: the status GET must run only after the ruleset GET succeeds (a 404 there means
     // "not a dynamic group" and short-circuits). Per-group error strings are collected in input
     // order so the plan-degradation output is deterministic regardless of completion order.
-    const perGroupErrors = await mapConcurrent(targets, DYNAMIC_FETCH_CONCURRENCY, async ({ managed, a }) => {
-      // The ruleset GET and the status GET have distinct failure meanings, so they get distinct
-      // try/catch blocks: only a ruleset 404 means "not a dynamic group". A status GET that fails
-      // AFTER a successful ruleset GET must NOT fabricate the "none" sentinel (that would discard a
-      // real ruleset and propose a spurious re-PUT) — it degrades the plan via `errors` instead.
-      let ruleset: Record<string, unknown>;
-      try {
-        ruleset = await client.get<Record<string, unknown>>(`/dynamicgroups/${managed.id}/ruleset`);
-      } catch (err) {
-        if (err instanceof CtApiError && err.status === 404) {
-          // Group exists but is not (yet) a dynamic group — its ruleset 404s. Sentinel so a promote
-          // (desired active vs actual none) diffs as a real change and demote-to-none is a clean no-op.
-          a.dynamic = { status: "none", ruleset: {} };
-          return [];
+    const perGroupOutcome = await mapConcurrent(
+      targets,
+      DYNAMIC_FETCH_CONCURRENCY,
+      async ({ managed, a }) => {
+        // The ruleset GET and the status GET have distinct failure meanings, so they get distinct
+        // try/catch blocks: only a ruleset 404 means "not a dynamic group". A status GET that fails
+        // AFTER a successful ruleset GET must NOT fabricate the "none" sentinel (that would discard a
+        // real ruleset and propose a spurious re-PUT) — it degrades the plan via `errors` instead.
+        let ruleset: Record<string, unknown>;
+        try {
+          ruleset = await client.get<Record<string, unknown>>(`/dynamicgroups/${managed.id}/ruleset`);
+        } catch (err) {
+          if (err instanceof CtApiError && err.status === 404) {
+            // Group exists but is not (yet) a dynamic group — its ruleset 404s. Sentinel so a promote
+            // (desired active vs actual none) diffs as a real change and demote-to-none is a clean no-op.
+            a.dynamic = { status: "none", ruleset: {} };
+            return { errors: [], unreadable: [] };
+          }
+          // Non-404: we do NOT know this group's ruleset. Folding the desired side now would diff a
+          // declared ruleset against an absent actual and manufacture an update out of a 429 (#126).
+          return {
+            errors: [`dynamic ${managed.key} (#${managed.id}): ${formatError(err)}`],
+            unreadable: [managed.key],
+          };
         }
-        return [`dynamic ${managed.key} (#${managed.id}): ${formatError(err)}`];
-      }
-      try {
-        const statusRes = await client.get<{ dynamicGroupStatus?: string }>(
-          `/dynamicgroups/${managed.id}/status`,
-        );
-        a.dynamic = {
-          status: (statusRes?.dynamicGroupStatus ?? "none") as DynamicStatus,
-          ruleset: normalizeRuleset(ruleset),
-        };
-        return [];
-      } catch (err) {
-        return [`dynamic ${managed.key} status (#${managed.id}): ${formatError(err)}`];
-      }
-    });
-    const errors = perGroupErrors.flat();
+        try {
+          const statusRes = await client.get<{ dynamicGroupStatus?: string }>(
+            `/dynamicgroups/${managed.id}/status`,
+          );
+          a.dynamic = {
+            status: (statusRes?.dynamicGroupStatus ?? "none") as DynamicStatus,
+            ruleset: normalizeRuleset(ruleset),
+          };
+          return { errors: [], unreadable: [] };
+        } catch (err) {
+          // Same reasoning as the ruleset case: an unknown status is not a known-different status.
+          return {
+            errors: [`dynamic ${managed.key} status (#${managed.id}): ${formatError(err)}`],
+            unreadable: [managed.key],
+          };
+        }
+      },
+    );
+    const errors = perGroupOutcome.flatMap((o) => o.errors);
+    const unreadable = perGroupOutcome.flatMap((o) => o.unreadable);
+    const unreadableKeys = new Set(unreadable);
     const augmented = desired.map((d) => {
       if (d.type !== "group" || d.dynamic === undefined) return d;
+      // Actual side unknown → leave the desired side unfolded so nothing diffs. `buildPlan` turns
+      // the key into a fetch-failed no-op, which is the honest rendering of "I could not read this".
+      if (unreadableKeys.has(d.key)) return d;
       // Demote-to-none: fold to the SAME sentinel the actual side uses for a non-dynamic group
       // ({ status: "none", ruleset: {} }). The docs tell users to KEEP the dynamic block when
       // demoting, so their authored ruleset is still present here — but folding it would diff
@@ -184,7 +223,7 @@ const dynamicField: SyntheticField = {
       const dynamic = normalizeDynamic({ status: d.dynamic.status, ruleset: resolvedRuleset });
       return { ...d, fields: { ...d.fields, dynamic } };
     });
-    return { desired: augmented, errors };
+    return { desired: augmented, errors, unreadable };
   },
   async apply({ client, id, change }) {
     const to = change.to as { status: DynamicStatus; ruleset: Record<string, unknown> } | undefined;
@@ -268,13 +307,15 @@ export async function runPostApplyHooks(
 /** Run every registered fold in order, threading the (immutably) augmented desired through each. */
 export async function foldSynthetic(
   ctx: SyntheticFoldCtx,
-): Promise<{ desired: DesiredResource[]; errors: string[] }> {
+): Promise<{ desired: DesiredResource[]; errors: string[]; unreadable: Set<string> }> {
   let desired = ctx.desired;
   const errors: string[] = [];
+  const unreadable = new Set<string>();
   for (const f of SYNTHETIC_FIELDS) {
     const res = await f.fold({ ...ctx, desired });
     desired = res.desired;
     errors.push(...res.errors);
+    for (const key of res.unreadable ?? []) unreadable.add(key);
   }
-  return { desired, errors };
+  return { desired, errors, unreadable };
 }
