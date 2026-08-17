@@ -92,6 +92,38 @@ describe("pending role definition in a group_role domain (#120)", () => {
     );
   });
 
+  // Role NAMES repeat across group types (live prod: 3 "Leiter", 6 "Organisator", 6 "Mitglied"), so
+  // "a roleDefinition by this name is declared" cannot on its own mean "it will land on THIS group".
+  // Reading it that way turns a plain config error into a pending domain, deferring the failure past
+  // executePlan to the post-apply fetch — same message, but only after the resource tier has written.
+  it("hard-errors at PLAN time when the declared role is for a different group type", async () => {
+    const state = stateWithGroup();
+    // The group is of type 99; the declared "Admin" roleDefinition is for type 30.
+    state.resources.amflowsequip!.fields.groupTypeId = 99;
+    const client = mockClient(STOCK_ROLES);
+
+    await expect(buildPermissionPlan(client, state, [grantBlock], desired)).rejects.toThrow(
+      /has no role named "Admin"/,
+    );
+  });
+
+  it("still plans as pending when the declared role IS for this group's type", async () => {
+    const state = stateWithGroup();
+    state.resources.amflowsequip!.fields.groupTypeId = 30; // matches the declaration
+    const client = mockClient(STOCK_ROLES);
+    const { items } = await buildPermissionPlan(client, state, [grantBlock], desired);
+    expect(items[0]?.pendingDomain).toEqual(ref.groupRole("amflowsequip", "Admin"));
+  });
+
+  it("stays lenient when state does not record the group's type — #120 behaviour, unchanged", async () => {
+    // `stateWithGroup` records no groupTypeId, which is the shape of an entry adopted before it was
+    // managed. Nothing offline can contradict the declaration, so the pending path is kept.
+    const state = stateWithGroup();
+    expect(state.resources.amflowsequip?.fields.groupTypeId).toBeUndefined();
+    const { items } = await buildPermissionPlan(mockClient(STOCK_ROLES), state, [grantBlock], desired);
+    expect(items[0]?.pendingDomain).toBeTruthy();
+  });
+
   it("resolves normally once the role exists on the host — no spurious pending", async () => {
     const state = stateWithGroup();
     const client = mockClient([...STOCK_ROLES, { id: 114, name: "Admin" }]);

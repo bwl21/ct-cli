@@ -193,6 +193,14 @@ export class Resolver {
    * this is a separate index from {@link declaredByType}.
    */
   private readonly declaredRoleDefNames = new Set<string>();
+  /**
+   * Slugged roleDefinition name → the group-type id(s) this config declares it on (#120, review).
+   * A role NAME is not unique across group types — see {@link resolveGroupTypeRole}'s note (3 "Leiter",
+   * 6 "Organisator", 6 "Mitglied" on live prod) — so the name alone cannot answer "will this role
+   * appear on THIS group?". The value is whatever the declaration carries: a raw id, or a `group-type`
+   * Ref resolved lazily at check time.
+   */
+  private readonly declaredRoleDefTypes = new Map<string, (number | Ref)[]>();
 
   constructor(deps: ResolverDeps) {
     this.client = deps.client;
@@ -206,7 +214,14 @@ export class Resolver {
       }
       set.add(d.key);
       if (d.type === "group-role" && typeof d.fields.name === "string") {
-        this.declaredRoleDefNames.add(slug(d.fields.name));
+        const name = slug(d.fields.name);
+        this.declaredRoleDefNames.add(name);
+        const gt = d.fields.groupTypeId;
+        if (typeof gt === "number" || isRef(gt)) {
+          const list = this.declaredRoleDefTypes.get(name);
+          if (list) list.push(gt);
+          else this.declaredRoleDefTypes.set(name, [gt]);
+        }
       }
     }
   }
@@ -308,7 +323,7 @@ export class Resolver {
     // declared three lines up. Roles created this run land on the group's role list once the
     // role-def create (tier 3) has run, which is before permissions — so the same post-apply
     // completion that finishes a pending group finishes this too.
-    if (this.declaresRoleNamed(r.role) && !hasRoleNamed(rows, r.role)) {
+    if ((await this.declaresRoleForGroup(r, site)) && !hasRoleNamed(rows, r.role)) {
       if (opts.pendingGroupRole) return pendingRef(r);
       throw new Error(
         `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: "${r.role}" is declared ` +
@@ -322,6 +337,36 @@ export class Resolver {
   /** Does this config declare a `roleDefinition` whose name matches `role` (slug-insensitive)? */
   private declaresRoleNamed(role: string): boolean {
     return this.declaredRoleDefNames.has(slug(role));
+  }
+
+  /**
+   * Will a `roleDefinition` this config declares actually land on THIS group — i.e. is the missing
+   * role plausibly a same-run creation rather than a config error?
+   *
+   * The name alone must not decide it. Role names repeat across group types, so a config declaring
+   * `roleDefinition({ name: "Mitglied", groupType: "kleingruppe" })` next to a `ct.groupRole` on a
+   * group of a DIFFERENT type — one that genuinely has no such role — would otherwise be read as
+   * "pending", deferring a plain config error past `executePlan` to the post-apply live fetch. It
+   * fails there with the same message, but only after the resource tier has already written. Matching
+   * the group's own type restores the plan-time failure.
+   *
+   * Lenient wherever the answer is not knowable offline — an unqualified declaration, or a group whose
+   * state entry predates `groupTypeId` being recorded. Those keep #120's behaviour exactly; the check
+   * only ever turns a would-be pending back into the hard error it used to be, and only on evidence.
+   */
+  private async declaresRoleForGroup(r: GroupRoleRef, site: string): Promise<boolean> {
+    if (!this.declaresRoleNamed(r.role)) return false;
+    const declaredTypes = this.declaredRoleDefTypes.get(slug(r.role));
+    if (declaredTypes === undefined) return true; // declared, but on no stated group type
+    const groupTypeId = this.state.resources[r.group]?.fields.groupTypeId;
+    if (typeof groupTypeId !== "number") return true; // this host's state cannot say — stay lenient
+    for (const t of declaredTypes) {
+      // A group-type Ref that is itself pending cannot be this existing group's type, so a non-number
+      // simply does not match — no need to distinguish it from a mismatch.
+      const id = typeof t === "number" ? t : await this.resolve(t, site);
+      if (id === groupTypeId) return true;
+    }
+    return false;
   }
 
   /**
