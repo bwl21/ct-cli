@@ -29,11 +29,17 @@ export type { RoleCatalogEntry };
  * `role.id` is DELIBERATELY NOT here (fixed in #76, reverting #86's `role-def` mapping). A ruleset's
  * `role.id` is a **groupTypeRoleId** — a role scoped to a group TYPE — not a global role-catalog id.
  * Role NAMES are not globally unique across group types (live prod, 2026-07-11: 3 roles named "Leiter",
- * 6 "Organisator", 6 "Mitglied", each on a different group type), so mapping it to `role-def` (which
- * keys `/group/roles` by `slug(name)` alone) makes the resolver throw "ambiguous". Only the
- * (groupTypeId, name) PAIR is unique (0 collisions across all 46 prod roles), so `role.id` needs the
- * catalog-driven special case in {@link portablizeRuleset} that emits a `group-type-role` marker — a
- * lone name-based table entry cannot express it.
+ * 6 "Organisator", 6 "Mitglied", each on a different group type), so a NAME-KEYED `role-def` mapping
+ * makes the resolver throw "ambiguous". So `role.id` needs the special case in
+ * {@link portablizeRuleset}, which a lone name-based table entry cannot express. That special case
+ * now emits, in order of preference:
+ *
+ *   1. `{ kind: "role-def", key }` when the role is under MANAGEMENT (#125) — a per-host id under a
+ *      shared logical key, resolved from state, so it is unambiguous by construction. This is what
+ *      #86 got wrong: the mapping is right, the name-keyed catalog it used to source it from was not.
+ *   2. `{ kind: "group-type-role", groupType, role }` otherwise. The (groupTypeId, name) PAIR is
+ *      unique in the common case (0 collisions across all 46 prod roles) — but NOT always, and when
+ *      it collides there is no fix available in a shared config, which is precisely why (1) exists.
  *
  * Deliberately absent (the escape hatch — unknown vars are left untouched by {@link portablizeRuleset}):
  *   - `ctgroup.groupStatusId` — group statuses have NO REST catalog (#67; `/group/memberstatus` is a
@@ -107,6 +113,23 @@ export interface PortablizeWarning {
  */
 const UNPORTABLE_ENTITY_VARS: Readonly<Record<string, string>> = {
   "ctgroup.groupStatusId": "group statuses have no REST catalog (#67) — no logical form exists",
+  // #127. A ruleset that includes or excludes specific people by id is common — four of five
+  // auto-group rulesets captured in one week did it — and it was the ONE entity var the audit never
+  // mentioned, so the only way to find it was to read the captured JSON by hand. The absence of a
+  // warning actively implied there was nothing to find.
+  //
+  // Unlike every other entry here, this one is not "pending a catalog": ct correctly does not manage
+  // people, so there is no person catalog to resolve against and no `__ctRef` kind that could express
+  // it. The ask is only that the tool SAY so, and the wording has to make clear it is unfixable
+  // rather than not-yet-fixed — hence a remedy that is a decision ("remove the clause or accept the
+  // divergence"), not a command to run.
+  //
+  // `person.id` 1 is the unluckiest case: it exists on every ChurchTools instance and is almost
+  // always an administrator, so an exclusion clause aimed at one person on the source host lands on
+  // someone real on the target host rather than harmlessly matching nothing.
+  "person.id":
+    "person ids are NEVER portable — ct does not manage people, so this ruleset names DIFFERENT " +
+    "people on another host. Remove the clause or accept the divergence",
 };
 
 /**
@@ -210,6 +233,24 @@ export function portablizeRuleset(
   // group type is unmanaged — the escape hatch, identical in spirit to mapScalar's.
   const mapRoleScalar = (value: unknown, varName: string): unknown => {
     if (typeof value !== "number") return value;
+    // A MANAGED role-def wins over the (group-type, role-name) pair (#125).
+    //
+    // The name pair is resolved by filtering `/group/roles` on (groupTypeId, slug(name)), so two rows
+    // sharing a name on one group type are a hard error — and neither remedy the error suggests works
+    // for a config shared across hosts. "Rename to disambiguate" means editing ChurchTools master
+    // data to work around a config limitation, and in the observed case one of the two rows is CT's
+    // own stock `leader`. "Pass a numeric id" cannot work at all: the roles have different ids per
+    // host (#127 on one, #207 on the other) and `ConfigContext` deliberately exposes no env or host,
+    // so there is nowhere to branch.
+    //
+    // A `role-def` ref carries a per-host id in managed state — the same mechanism `group` and
+    // `campus` refs already use to mean different numbers on different hosts. Emitting it makes the
+    // ambiguous case fixable IN CONFIG, by adopting the role under a shared key on both hosts, which
+    // is the same "adopt the target to portablize it" move that works everywhere else.
+    const roleDefKey = idToKeyByKind["role-def"]?.get(value);
+    if (roleDefKey !== undefined) {
+      return marker("role-def", roleDefKey);
+    }
     const entry = roleCatalog?.get(value);
     const groupTypeKey = entry ? groupTypeIdToKey?.get(entry.groupTypeId) : undefined;
     if (entry && groupTypeKey !== undefined) {

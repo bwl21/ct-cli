@@ -309,7 +309,16 @@ export const RESOURCES: Record<string, AdoptableResource> = {
     tier: 0,
     // CT's campus short name is `shorty` (1–10 chars, required on create) — verified
     // live. `shortName` is a vestigial, usually-null sibling; do not use it for writes.
-    deriveKey: (r) => slug(str(r, "shorty") || str(r, "name")),
+    //
+    // The KEY comes from `name`, like every other resource in this registry (#118). It used to
+    // prefer `shorty`, which made campus the sole exception and produced keys nobody could read:
+    // Idstein → `swa` (abbreviated after the region it used to be named for), Würzburg → `wu`,
+    // Dietzenbach → `of` — and `{ campus: "of" }` inside a grant scope reads as a typo in the tool
+    // rather than as a name. `shorty` is also less stable: it is free text an admin edits in the UI
+    // to make a column fit, and every such edit silently changes what the derived key WOULD be,
+    // splitting new adoptions from the ones already in state. It is still written as a managed field
+    // exactly as before — this is only about the key.
+    deriveKey: (r) => slug(str(r, "name") || str(r, "shorty")),
     managedFields: (r) => ({ name: r.name, shorty: r.shorty }),
   }),
   group: define({

@@ -3,6 +3,7 @@ import { emitAdoptedGrants } from "../src/permissions/adopt.js";
 import {
   diffGrants,
   normalizeActual,
+  normalizeEffective,
   type DomainType,
   type RawPermission,
 } from "../src/permissions/grants.js";
@@ -174,12 +175,27 @@ describe("emitAdoptedGrants", () => {
     expect(parseEmittedGrants(block)).toEqual([]); // comment only, no active grant line
   });
 
-  it("emits an empty grants array when no user-authored grants remain", () => {
+  it("emits an empty grants array only when the domain grants NOTHING", () => {
+    const block = emitAdoptedGrants({
+      domainType: "group_role",
+      domainId: 42,
+      rows: [],
+      state: emptyState(),
+    });
+    expect(block).toContain("grants: [],");
+  });
+
+  it("emits a system-baseline grant and says so, instead of silently dropping it (#114)", () => {
+    // The same right can be system-authored on one host and user-authored on another — the copy that
+    // produced the second host stamps a person id onto rows that are system rows upstream. Dropping
+    // it here produced a config that could not be a clean no-op on both: omitted, it REVOKED the
+    // right on the other host; declared by hand, it planned `+1 grant` on this one.
     const rows: RawPermission[] = [
-      { authId: 2, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: -1 } }, // baseline only
+      { authId: 2, dataId: null, type: "grant", domainId: 42, meta: { modifiedPid: -1 } },
     ];
     const block = emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows, state: emptyState() });
-    expect(block).toContain("grants: [],");
+    expect(block).not.toContain("grants: [],");
+    expect(block).toContain("NOTE: 1 of the grant(s) above are INHERITED or system-baseline");
   });
 
   it("group_type_role admin-authored authId >= 10000 member right IS emitted as an active grant (#65)", () => {
@@ -352,15 +368,58 @@ describe("emitAdoptedGrants", () => {
     expect(block).toContain("churchdb:+add person");
     const grants = parseEmittedGrants(block);
 
-    // Paste-and-plan: diff the emitted declaration against the FULL live row set. normalizeActual
-    // drops the system-baseline + inherited rows, so they never appear as revokes.
+    // Paste-and-plan: diff the emitted declaration against the FULL live row set.
     const desired = grants.flatMap((g) =>
       desiredTuples({ key: "adopted", domainType: "group_type_role", domainId: 9, grants: [g] }, state),
     );
     const actual = normalizeActual(rows);
-    const diff = diffGrants(desired, actual);
+    const diff = diffGrants(desired, actual, undefined, normalizeEffective(rows));
+    // The system-baseline and inherited rows ARE now declared (#114/#119) and are satisfied by the
+    // live rows, so they need no PUT...
     expect(diff.toPut).toEqual([]);
-    expect(diff.toDelete).toEqual([]); // critically: the system/inherited rows are NOT revoked
+    // ...and they are still never revoked: revocation is judged against the OWNED set only.
+    expect(diff.toDelete).toEqual([]);
+  });
+
+  it("declaring an inherited right is a no-op HERE and stops the revoke THERE (#119)", () => {
+    // The measured case: one role instance holds 15 group-member rights that the group's TYPE also
+    // grants. On prod they read `isInherited: true`; on dev, byte-identical effective permissions
+    // read `isInherited: false`. Adoption used to drop them on prod, so planning that config on dev
+    // proposed stripping all 15.
+    const AUTH = 10107; // churchdb:+add person — unscoped, so the block round-trips cleanly
+    const prodRows: RawPermission[] = [
+      { authId: 1113, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
+      { authId: AUTH, dataId: null, type: "grant", domainId: 9, isInherited: true },
+    ];
+    const devRows: RawPermission[] = [
+      { authId: 1113, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: 5 } },
+      { authId: AUTH, dataId: null, type: "grant", domainId: 9, meta: { modifiedPid: 1 } },
+    ];
+
+    // Adopt from prod — the inherited right is emitted, not dropped.
+    const block = emitAdoptedGrants({
+      domainType: "group_type_role",
+      domainId: 9,
+      rows: prodRows,
+      state: emptyState(),
+    });
+    const grants = parseEmittedGrants(block);
+    const desired = grants.flatMap((g) =>
+      desiredTuples(
+        { key: "adopted", domainType: "group_type_role", domainId: 9, grants: [g] },
+        emptyState(),
+      ),
+    );
+
+    // ...and the SAME config is a clean no-op on both hosts.
+    for (const [host, rows] of [
+      ["prod", prodRows],
+      ["dev", devRows],
+    ] as const) {
+      const diff = diffGrants(desired, normalizeActual(rows), undefined, normalizeEffective(rows));
+      expect(diff.toPut, `${host} toPut`).toEqual([]);
+      expect(diff.toDelete, `${host} toDelete`).toEqual([]);
+    }
   });
 
   it("unmanaged group-dimension scope still gets the 'ct adopt group' hint (unchanged behavior)", () => {
@@ -557,5 +616,54 @@ describe("emitAdoptedGrants", () => {
       );
       expect(campusTuple).toBeDefined();
     }
+  });
+});
+
+describe('the `-1` "alle" sentinel is not a host-specific id (#115)', () => {
+  // `churchdb:view alldata` (authId 102) scopes by `cdb_bereich`; `churchdb:view station` (124) by
+  // `cdb_station`. A grant scoped to "alle" comes back as `dataId: -1`.
+  const sentinelRows: RawPermission[] = [
+    { authId: 102, dataId: -1, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+    { authId: 124, dataId: -1, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+  ];
+
+  const block = () =>
+    emitAdoptedGrants({ domainType: "group_role", domainId: 42, rows: sentinelRows, state: emptyState() });
+
+  it("never tells you to adopt it — `ct adopt department -1` cannot work", () => {
+    expect(block()).not.toMatch(/ct adopt \S+ -1/);
+  });
+
+  it("does not call it host-specific, because it is not", () => {
+    expect(block()).not.toMatch(/-1 is not managed/);
+    expect(block()).not.toMatch(/host-specific number/);
+  });
+
+  it("says what it actually is, once per grant", () => {
+    const lines = block()
+      .split("\n")
+      .filter((l) => l.includes('"alle" sentinel'));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("host-independent");
+  });
+
+  it("still emits the scope value itself, so the declaration keeps its meaning", () => {
+    expect(block()).toContain("scope: [-1]");
+  });
+
+  it("still flags a REAL unmanaged id in the same grant", () => {
+    // Mixed scope: -1 is fine, 77 is a genuine host-specific id that does need adopting.
+    const mixed: RawPermission[] = [
+      { authId: 1104, dataId: -1, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+      { authId: 1104, dataId: 77, type: "grant", domainId: 42, meta: { modifiedPid: 5 } },
+    ];
+    const out = emitAdoptedGrants({
+      domainType: "group_role",
+      domainId: 42,
+      rows: mixed,
+      state: emptyState(),
+    });
+    expect(out).toContain("ct adopt group 77");
+    expect(out).not.toContain("ct adopt group -1");
   });
 });

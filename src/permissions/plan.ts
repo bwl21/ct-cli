@@ -19,6 +19,7 @@ import { compareVersions } from "../api/version.js";
 import { resolveScope, resolveScopeRefs, type ScopeRefMap } from "./scope.js";
 import {
   normalizeActual,
+  normalizeEffective,
   diffGrants,
   type GrantTuple,
   type GrantDiff,
@@ -287,7 +288,12 @@ export async function buildPermissionPlan(
     }
     const all = byType.get(p.domainType);
     if (all == null) continue; // fetch failed for this domainType — recorded above
-    const normalizedAll = normalizeActual(all.filter((r) => r.domainId === p.domainId));
+    const domainRows = all.filter((r) => r.domainId === p.domainId);
+    const normalizedAll = normalizeActual(domainRows);
+    // Everything the host grants on this domain by ANY route, provenance included (#114/#119). Only
+    // ever consulted to answer "is this declared grant already satisfied?" — never to decide a
+    // revoke, which stays the owned set below.
+    const effectiveAll = normalizeEffective(domainRows);
     // Actuals are already filtered by `normalizeActual`: the self-re-adding system baseline
     // (`modifiedPid === -1`) and every `isInherited` row are dropped, so what remains is admin-authored
     // DIRECT grants — INCLUDING the writable `authId >= 10000` group-member rights Equippers curates on
@@ -324,6 +330,9 @@ export async function buildPermissionPlan(
         desiredTuples(p, state, declaredGroupKeys, scopeRefs),
         knownActual,
         preservePredicateFor(p.preserveUnknown),
+        // The unknown-authId guard (#25) deliberately does NOT apply here: an unnameable right can
+        // still satisfy a declaration, and excluding it would only re-propose a PUT we cannot name.
+        effectiveAll,
       ),
     });
   }

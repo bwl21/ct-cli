@@ -6,7 +6,7 @@ sources:
   - src/engine/dynamic.ts
   - src/engine/synthetic.ts
   - src/commands/adopt-group.ts
-sources_hash: 3fe32a405c9a8b4f
+sources_hash: 7388c181938fa4b9
 reviewed: 2026-08-10
 ---
 
@@ -140,6 +140,25 @@ ct adopt group <id> --with-dynamic                          # portablized (the d
 ct adopt group <id> --with-dynamic --no-portable-rulesets   # verbatim, this host's ids
 ```
 
+> **A re-adopt refreshes the snapshot, not the key (#123).** Re-running this over
+> a list of ids is the documented way to refresh rulesets once their scope
+> targets become managed — and it is the one mode where `-k` is rejected ("only
+> valid when exactly one group is resolved"). Any resource whose adopted key
+> differed from the derived key therefore used to be **silently re-keyed** by a
+> routine refresh, so the config's declaration matched nothing in state and the
+> next plan read as "one to create, one to destroy" for a resource that was fine
+> and untouched. An already-managed resource now keeps its key, and says what it
+> would have become:
+>
+> ```text
+> ! merkmal_alle_2_5_mz: key would change to "alle_2_bis_5_mz" (derived from the live name).
+>   Keeping the adopted key. Pass --rekey to change it.
+> ```
+>
+> Because the ruleset filename follows the key, this also means the refresh
+> overwrites `rulesets/merkmal_alle_2_5_mz.json` — the file the config already
+> points at — instead of writing a second one beside it.
+
 `ct adopt group --with-dynamic` runs the captured (normalized)
 ruleset through `portablizeRuleset` (`src/config/query-refs.ts`) before writing
 `rulesets/<key>.json`: every numeric id sitting in a known ChurchQuery `var`
@@ -153,6 +172,7 @@ marker; every other id is left numeric. The `var → RefKind` catalog it keys of
 | `ctgroup.campusId`    | `campus`          | `/campuses`                              |
 | `person.campusId`     | `campus`          | `/campuses`                              |
 | `ctgroup.groupTypeId` | `group-type`      | `/group/grouptypes`                      |
+| `role.id`             | `role-def`        | managed state, when the role is adopted  |
 | `role.id`             | `group-type-role` | `/group/roles` (by `groupTypeId` + name) |
 
 The same `group-type-role` rewrite also covers the **out-of-query** integer
@@ -172,7 +192,44 @@ is a **groupTypeRoleId**: a role scoped to a group **type**. Role names are
 marker carries the group-type key + role name, and the resolver picks the one
 `/group/roles` row whose `groupTypeId` matches this host's group type and whose
 name slugs to the role. This corrects the earlier `role-def` mapping (#86),
-which was unresolvable on the real instance.
+which read the role catalog by bare name and was unresolvable on the real
+instance.
+
+##### When the pair collides too — adopt the role (#125)
+
+"Unique in practice" is not "unique". Two rows **can** share a name on one group
+type, and then the pair is a hard error:
+
+```text
+✗ Ambiguous group-type-role(groupType=community, role=leader) referenced at group "4_teamactive":
+  2 roles on group type #30 match — "leader" (#87), "leader" (#207).
+```
+
+Neither obvious remedy works for a config shared across hosts. _Renaming_
+means editing ChurchTools master data to work around a config limitation — and
+in the observed case one of the two rows is CT's own stock `leader`. _Passing a
+numeric id_ cannot work at all: the roles have **different ids per host**
+(`#127` on one, `#207` on the other), and `ConfigContext` deliberately exposes
+no env or host, so there is nowhere to branch.
+
+The fix is the same "adopt the target to portablize it" move that already works
+for groups, campuses and departments — **adopt the role**, under the same
+logical key on every host:
+
+```bash
+ct adopt group-role 127 --env prod -k community_leader
+ct adopt group-role 207 --env dev  -k community_leader
+```
+
+Capture now prefers the managed form, which is unambiguous by construction
+because it resolves from state rather than from a name lookup:
+
+```json
+{ "__ctRef": true, "kind": "role-def", "key": "community_leader" }
+```
+
+The `(groupType, role)` pair remains the fallback for a role the config does not
+own, so nothing changes for the common case.
 
 #### What could not be portablized is REPORTED, never swallowed (#101)
 
@@ -193,10 +250,35 @@ At **capture** time (`ct adopt … --with-dynamic`) the state file and the
 `/group/roles` catalog are both in hand, so the reason is a checked fact:
 
 ```text
-! rulesets/jugend.json keeps 3 host-specific id(s) — NOT portable to another host:
+! rulesets/jugend.json keeps 5 host-specific id(s) — NOT portable to another host:
     ctgroup.id: 1246 left numeric — not under management — `ct adopt group <id>` for each (then re-adopt) makes them portable
     ctgroup.groupStatusId: 1, 2 left numeric — group statuses have no REST catalog (#67) — no logical form exists
+    person.id: 5703, 4389 left numeric — person ids are NEVER portable — ct does not manage people, so this ruleset names DIFFERENT people on another host. Remove the clause or accept the divergence
 ```
+
+##### `person.id` is reported, and it is not fixable (#127)
+
+A ruleset that includes or excludes specific people by id is common — four of
+five auto-groups captured in one week did it:
+
+```json
+{ "oneof": [{ "var": "person.id" }, [5703, 4389]] }
+{ "!": [{ "oneof": [{ "var": "person.id" }, [12, 1]] }] }
+```
+
+Those are the source host's person ids written verbatim into the other host's
+ruleset, where they name entirely different people — the same failure mode as a
+raw `ctgroup.id`. `person.id 1` is the unluckiest case: it exists on every
+ChurchTools instance and is almost always an administrator, so an exclusion
+aimed at one person on the source host lands on someone real on the target host
+rather than harmlessly matching nothing.
+
+Unlike every other entry in the report, this one is **not fixable in config**,
+and the wording says so rather than offering a command. `ct` correctly does not
+manage people, so there is no person catalog to resolve against and no
+`__ctRef` kind that could express it. The ask is only that the tool say so:
+before #127 it was silent, and the absence of a warning actively implied there
+was nothing to find.
 
 At **plan** time the same scan runs over every declared dynamic group, but with
 no state, no catalogs and no network — it can prove that an id sits in an entity

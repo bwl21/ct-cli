@@ -105,10 +105,17 @@ ct get groups                 # JSON to stdout — pipe into jq (every page, not
 ct adopt campus 0             # bring ONE existing resource under management
 ct coverage                   # what the instance has that the config does not manage
 ct state list                 # what is managed
+ct state rm campus mainz      # un-adopt: drop it from state. Never touches ChurchTools.
 ct plan                       # diff the config against ChurchTools (read-only)
 ct apply                      # create + update in dependency order (confirm + backup first)
 ct refresh --group <key>      # make ChurchTools re-evaluate one auto-group now
 ```
+
+`state rm` is the inverse of `adopt`, and only of `adopt`: it removes the entry
+from the state file, makes no HTTP call, and leaves the resource in place in
+ChurchTools, now unmanaged. It refuses a key the config still declares — that
+would make the next plan propose creating a resource that already exists — so
+delete the declaration first, or pass `--force` to do both in one change.
 
 `apply` reconciles **creates and updates** only, saving state after each action
 (crash-safe / resumable). It **never deletes**: a resource dropped from the

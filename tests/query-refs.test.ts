@@ -370,3 +370,126 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
     });
   });
 });
+
+describe("person.id is reported by the portability audit (#127)", () => {
+  // Four of five auto-group rulesets captured in one week included or excluded specific people by
+  // id. Those are the SOURCE host's person ids written verbatim into the other host's ruleset, where
+  // they name entirely different people — the same failure mode as a raw `ctgroup.id`, and the one
+  // the warning did not mention. The absence of a warning implied there was nothing to find.
+
+  it("reports an `oneof` include-list of person ids", () => {
+    const w = scanUnportablized({ oneof: [{ var: "person.id" }, [5703, 4389]] });
+    expect(w.map((x) => x.id).sort((a, b) => a - b)).toEqual([4389, 5703]);
+    expect(w.every((x) => x.var === "person.id")).toBe(true);
+  });
+
+  it("reports a NEGATED exclusion clause too — the dangerous one", () => {
+    // `person.id` 1 exists on every ChurchTools instance and is almost always an administrator, so
+    // an exclusion aimed at one person here lands on someone real there.
+    const w = scanUnportablized({ "!": [{ oneof: [{ var: "person.id" }, [12, 1]] }] });
+    expect(w.map((x) => x.id).sort((a, b) => a - b)).toEqual([1, 12]);
+  });
+
+  it("reports an equality comparison against a single person id", () => {
+    expect(scanUnportablized({ "==": [{ var: "person.id" }, 5703] })).toHaveLength(1);
+  });
+
+  it("words it as unfixable — a decision, not a command that will fail", () => {
+    const lines = formatPortablizeWarnings(scanUnportablized({ oneof: [{ var: "person.id" }, [5703]] }));
+    const text = lines.join("\n");
+    expect(text).toContain("person.id");
+    expect(text).toContain("NEVER portable");
+    expect(text).toContain("DIFFERENT people on another host");
+    // There is no `ct adopt person` and there never will be — people are permanently out of scope.
+    expect(text).not.toMatch(/ct adopt person/);
+  });
+
+  it("does not fire on a non-id person literal", () => {
+    // Reporting `person.age > 18` would bury the real findings in noise.
+    expect(scanUnportablized({ ">": [{ var: "person.age" }, 18] })).toEqual([]);
+  });
+
+  it("reports person ids alongside the ctgroup ids it already found", () => {
+    const w = scanUnportablized({
+      and: [{ oneof: [{ var: "ctgroup.id" }, [3090]] }, { "!": [{ oneof: [{ var: "person.id" }, [1]] }] }],
+    });
+    expect(new Set(w.map((x) => x.var))).toEqual(new Set(["ctgroup.id", "person.id"]));
+  });
+});
+
+describe("ruleset role refs prefer a managed role-def over the ambiguous name pair (#125)", () => {
+  // `role.id` used to portablize to a (group type, role NAME) pair, resolved by filtering
+  // `/group/roles` on (groupTypeId, slug(name)). Two rows sharing a name on one group type made that
+  // a hard error — and neither remedy the error offered works for a config shared across hosts:
+  // "rename" edits ChurchTools master data (here, CT's own stock `leader`), and "pass a numeric id"
+  // cannot work because the roles have different ids per host with no env to branch on.
+  const ruleset = { oneof: [{ var: "role.id" }, [207]] };
+  const roleCatalog = new Map([[207, { groupTypeId: 30, name: "leader" }]]);
+  const groupTypeIdToKey = new Map([[30, "community"]]);
+
+  it("emits a role-def ref when the role is under management", () => {
+    const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
+      idToKeyByKind: { "role-def": new Map([[207, "community_leader"]]) },
+      roleCatalog,
+      groupTypeIdToKey,
+    });
+    expect(warnings).toEqual([]);
+    expect(out).toEqual({
+      oneof: [{ var: "role.id" }, [{ __ctRef: true, kind: "role-def", key: "community_leader" }]],
+    });
+  });
+
+  it("still emits the (group-type, role) pair when the role is NOT managed", () => {
+    // The common case is unchanged: the pair is unique across all 46 prod roles.
+    const { ruleset: out } = portablizeRuleset(ruleset, {
+      idToKeyByKind: {},
+      roleCatalog,
+      groupTypeIdToKey,
+    });
+    expect(out).toEqual({
+      oneof: [
+        { var: "role.id" },
+        [{ __ctRef: true, kind: "group-type-role", groupType: "community", role: "leader" }],
+      ],
+    });
+  });
+
+  it("adopting the role under a shared key is what makes the ambiguous case resolvable", () => {
+    // Two hosts, same logical key, different numeric ids — the whole point. Each host's capture
+    // produces the SAME portable marker.
+    const prod = portablizeRuleset(
+      { oneof: [{ var: "role.id" }, [127]] },
+      {
+        idToKeyByKind: { "role-def": new Map([[127, "community_leader"]]) },
+        roleCatalog: new Map([[127, { groupTypeId: 30, name: "leader" }]]),
+        groupTypeIdToKey,
+      },
+    ).ruleset;
+    const dev = portablizeRuleset(ruleset, {
+      idToKeyByKind: { "role-def": new Map([[207, "community_leader"]]) },
+      roleCatalog,
+      groupTypeIdToKey,
+    }).ruleset;
+    expect(prod).toEqual(dev);
+  });
+
+  it("also portablizes the out-of-query handleMembership.groupTypeRoleId field", () => {
+    const { ruleset: out } = portablizeRuleset(
+      { process: { x: { handleMembership: { groupTypeRoleId: 207 } } } },
+      {
+        idToKeyByKind: { "role-def": new Map([[207, "community_leader"]]) },
+        roleCatalog,
+        groupTypeIdToKey,
+      },
+    );
+    expect(out).toEqual({
+      process: {
+        x: {
+          handleMembership: {
+            groupTypeRoleId: { __ctRef: true, kind: "role-def", key: "community_leader" },
+          },
+        },
+      },
+    });
+  });
+});

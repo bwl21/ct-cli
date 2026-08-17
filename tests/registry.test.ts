@@ -32,8 +32,17 @@ describe("resourceType", () => {
     expect(() => resourceType("nope")).toThrow(/Adoptable types/);
   });
 
-  it("derives a key from campus shorty", () => {
-    expect(RESOURCES.campus?.deriveKey({ name: "Mainz", shorty: "MZ" })).toBe("mz");
+  it("derives a campus key from its NAME, not its shorty (#118)", () => {
+    // `shorty` is a display abbreviation an admin edits to make a UI column fit — often historical
+    // (Idstein is abbreviated "SWA" after the region it used to be named for) and sometimes actively
+    // misleading (Dietzenbach → "OF", which reads as a typo in a config file).
+    expect(RESOURCES.campus?.deriveKey({ name: "Mainz", shorty: "MZ" })).toBe("mainz");
+    expect(RESOURCES.campus?.deriveKey({ name: "Dietzenbach", shorty: "OF" })).toBe("dietzenbach");
+    expect(RESOURCES.campus?.deriveKey({ name: "Würzburg", shorty: "WÜ" })).toBe("wurzburg");
+  });
+
+  it("falls back to shorty only when a campus has no name", () => {
+    expect(RESOURCES.campus?.deriveKey({ name: "", shorty: "MZ" })).toBe("mz");
   });
 
   it("snapshots group ids whether they are nested under information or top-level", () => {

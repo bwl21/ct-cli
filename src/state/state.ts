@@ -154,6 +154,45 @@ export function isManaged(state: State, type: string, id: number): boolean {
   return findByTypeId(state, type, id) !== undefined;
 }
 
+/**
+ * The key a re-adoption should actually use, and whether it differs from the derived one (#123).
+ *
+ * `ct adopt group <id…> --with-dynamic` is the documented way to refresh a dynamic group's ruleset
+ * once its scope targets become managed, and it runs over a LIST of ids — the one mode where `-k` is
+ * rejected ("only valid when exactly one group is resolved"). Any resource whose adopted key differed
+ * from the derived key was therefore silently re-keyed by that refresh: the config's declaration
+ * matched nothing in state, a state entry existed that nothing declared, and the next plan read as
+ * "one to create, one to destroy" for a resource that was fine and untouched on the host. The message
+ * said only that the snapshot was "refreshed", which reads as *nothing else changed*.
+ *
+ * An adopted key was chosen deliberately — very likely with `-k`, to match the config's naming — so a
+ * refresh touches the snapshot, not the identity.
+ */
+export interface AdoptKeyChoice {
+  /** The key to store under. */
+  key: string;
+  /** Set when the derived key differs from the kept one — the caller warns with this. */
+  wouldBecome?: string;
+}
+
+/**
+ * Choose the key for an adoption. A resource already in state keeps its key unless `rekey` is set;
+ * an explicit `--key` is an explicit intent and always wins. New resources just take `derived`.
+ */
+export function chooseAdoptKey(
+  state: State,
+  type: string,
+  id: number,
+  derived: string,
+  opts: { explicitKey?: string; rekey?: boolean } = {},
+): AdoptKeyChoice {
+  const explicit = opts.explicitKey?.trim();
+  if (explicit) return { key: explicit };
+  const existing = findByTypeId(state, type, id);
+  if (!existing || opts.rekey || existing.key === derived) return { key: derived };
+  return { key: existing.key, wouldBecome: derived };
+}
+
 export interface UpsertInput {
   type: string;
   id: number;

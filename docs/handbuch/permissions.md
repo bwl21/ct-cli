@@ -5,7 +5,7 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: 5c881a7bede7e01a
+sources_hash: 590e52f65461036a
 reviewed: 2026-08-13
 ---
 
@@ -568,12 +568,14 @@ In bulk mode:
 ### The single-domain form
 
 It fetches `GET /permissions/<domainType>/<domainId>`, runs the rows through the
-**same** normalization the planner uses (`normalizeActual`), and prints a
-`ct.groupRole` / `ct.groupTypeRole` block whose every emitted grant is guaranteed
-to be accepted by `ct plan` (the round trip is locked by tests):
+**same** normalization the planner reconciles against (`normalizeEffective`), and
+prints a `ct.groupRole` / `ct.groupTypeRole` block whose every emitted grant is
+guaranteed to be accepted by `ct plan` (the round trip is locked by tests):
 
-- **Excluded, as reconciliation excludes them:** the system baseline
-  (`meta.modifiedPid === -1`) and inherited rows.
+- **Everything the host grants is emitted** — direct, inherited and
+  system-baseline rows alike (#114/#119). See [Provenance and
+  portability](#provenance-and-portability-114119) for why this is broader than
+  what `ct` owns.
 - **Revoke/deny rows are preserved, not emitted.** The reconciler never deletes a
   deny it did not author; if any exist, the block ends with a `NOTE` comment
   saying so (authoring denies as config is a separate, unshipped feature).
@@ -604,12 +606,14 @@ to be accepted by `ct plan` (the round trip is locked by tests):
   - A scoped right granted **globally** in CT (row with no `dataId`) is a
     `WARNING` comment either way — the DSL deliberately cannot declare a
     global grant of a scoped right.
-- **System-baseline and inherited rows are dropped, not emitted.** Adoption runs
-  the live rows through `normalizeActual`, which excludes the self-re-adding
-  system baseline (`modifiedPid === -1`) and any `isInherited` row. Admin-authored
-  direct grants — **including** the writable `authId >= 10000` `churchdb:+…`
-  member rights CT lets you set on `group_type_role` — are emitted as active
-  grants (no authId cutoff; #65).
+- **The `-1` "alle" sentinel is not an id** (#115). A grant scoped to "alle"
+  comes back as `dataId: -1`, meaning _every_ value of the dimension on whatever
+  host reads it. It is therefore already portable, and it is emitted with a
+  one-line comment saying what it is — never with an adoption hint, because
+  `ct adopt department -1` names a resource that cannot exist.
+- **Admin-authored member rights are emitted as active grants** — **including**
+  the writable `authId >= 10000` `churchdb:+…` member rights CT lets you set on
+  `group_type_role`. There is no authId cutoff (#65).
 - **Only `group_role` / `group_type_role` / `status`** are valid; people domains
   are refused (the same hard boundary as everywhere else). A `status` block is
   emitted with a numeric `id:` — rename it to the portable
@@ -634,11 +638,13 @@ and `ct plan`.
 - **No authId cutoff.** Admin-authored member rights (`authId >= 10000`, the
   `churchdb:+…` family) ARE writable on `group_type_role` and can be declared
   under `ct.groupTypeRole` — verified live (eqrm prod `group_type_role/9` carries
-  24 such admin-set rows). What ct never reconciles is decided by the live row's
+  24 such admin-set rows). What ct never _writes_ is decided by the live row's
   flags, not its authId: `normalizeActual` drops the system baseline
-  (`modifiedPid === -1`) and every `isInherited` row, so those are neither adopted
-  nor revoked (#65). Earlier versions blocked `authId >= 10000` outright — that was
-  too broad and is removed.
+  (`modifiedPid === -1`) and every `isInherited` row, so those are never authored
+  and never revoked (#65). They are still **emitted by adoption and honoured as
+  satisfying a declaration** — see [Provenance and
+  portability](#provenance-and-portability-114119). Earlier versions blocked
+  `authId >= 10000` outright — that was too broad and is removed.
 - **Revocation is a later extension, not exposed yet.** `GrantTuple.type` is
   typed as `"grant" | "revoke"`, but the DSL and `desiredTuples` currently
   only ever _emit_ `"grant"` tuples — there is no config-level way to declare
@@ -650,17 +656,53 @@ and `ct plan`.
 
 ## The baseline-tolerance model
 
-`ct plan` and `ct apply` reconcile only the grants **you author** on a
-domainId — never the platform's own bookkeeping. `normalizeActual`
-(`src/permissions/grants.ts`) filters two kinds of rows out of every actual
-fetch before diffing, making both invisible to reconciliation:
+`ct plan` and `ct apply` **write** only the grants you author on a domainId —
+never the platform's own bookkeeping. Two kinds of row are never authored and
+never revoked (`normalizeActual` in `src/permissions/grants.ts`):
 
 - **System baseline rows** — any row with `meta.modifiedPid === -1`. These
-  are ChurchTools' own self-re-adding defaults; they are never proposed for
-  deletion and never conflict with a desired grant.
+  are ChurchTools' own self-re-adding defaults.
 - **Inherited rows** — any row with `isInherited: true`. These come from
-  hierarchy/role inheritance, not this domainId's own grant table; they are
-  not owned here either.
+  hierarchy/role inheritance, not this domainId's own grant table.
+
+### Provenance and portability (#114/#119)
+
+Those two rules decide what `ct` **owns**. They do _not_ decide whether a
+declared grant is already **satisfied** — that is judged against the
+**effective** set: every right the host grants, by any route
+(`normalizeEffective`).
+
+The distinction matters because provenance is not stable across hosts of the
+same instance, even when the effective permissions are identical:
+
+|                                                        | one host                        | the other host              |
+| ------------------------------------------------------ | ------------------------------- | --------------------------- |
+| **#114** — same right, same role                       | `meta.modifiedPid: -1` (system) | `modifiedPid: 1` (a person) |
+| **#119** — 15 group-member rights the TYPE also grants | `isInherited: true`             | `isInherited: false`        |
+
+Neither divergence is hand-made: the second host is a copy, and the copy
+stamped a person id onto rows that are system rows upstream. Measured across
+two hosts on CT 3.135.2: 18 of 63 `group_role` domains carried inherited rows
+on one, and **zero anywhere** on the other.
+
+Deciding satisfaction from ownership made such a config impossible to write.
+Omit the right (as adoption used to emit it) and the other host **revokes** it;
+declare it and this host plans `+1 grant` forever. So the domain had to be left
+out of adoption entirely, even though nothing about it is genuinely
+undeclarable.
+
+Reconciling on the effective set removes the dilemma, because the two hosts
+agree on effective permissions even when they disagree on provenance:
+
+- A declared right the host already grants by any route needs **no PUT**.
+- A revoke is still computed from the **owned** set only, so `ct` never revokes
+  a baseline or inherited row.
+- `ct adopt grants` emits the effective set, and names in a footer how many of
+  the emitted grants are inherited or baseline on this host.
+
+The "never fight the platform" property is unchanged. The only thing that
+changed is that `ct` stopped proposing to re-author what the platform already
+grants.
 
 Combined with the **managed-guard** (`buildPermissionPlan` only ever surfaces
 the `domainId`s you've declared — a bulk `GET /permissions/{domainType}`
