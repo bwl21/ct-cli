@@ -4,8 +4,8 @@ sources:
   - src/config/context.ts
   - src/engine/graph.ts
   - src/engine/hierarchy.ts
-sources_hash: bbadf1a728820f5c
-reviewed: 2026-08-13
+sources_hash: 37db6b8730470f73
+reviewed: 2026-08-17
 ---
 
 # Blueprints (parametrized, reusable config)

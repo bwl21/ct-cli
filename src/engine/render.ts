@@ -98,6 +98,14 @@ export function renderPlan(plan: Plan): string {
 
   const s = summarize(plan);
   lines.push("");
-  lines.push(pc.bold(`Plan: ${s.create} to create, ${s.update} to update, ${s.delete} to delete.`));
+  // The summary line is the part that gets pasted into a PR comment and approved, so it must never
+  // read as a complete plan when it is not (#126): a partial plan carries its own caveat inline.
+  const incomplete =
+    fetchFailed.length > 0
+      ? pc.yellow(` INCOMPLETE — ${fetchFailed.length} resource(s) could not be read.`)
+      : "";
+  lines.push(
+    pc.bold(`Plan: ${s.create} to create, ${s.update} to update, ${s.delete} to delete.`) + incomplete,
+  );
   return lines.join("\n");
 }

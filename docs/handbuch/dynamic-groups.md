@@ -6,8 +6,8 @@ sources:
   - src/engine/dynamic.ts
   - src/engine/synthetic.ts
   - src/commands/adopt-group.ts
-sources_hash: 7388c181938fa4b9
-reviewed: 2026-08-10
+sources_hash: 9a8c3091484e9258
+reviewed: 2026-08-17
 ---
 
 # Auto-groups (dynamic groups)
@@ -172,8 +172,8 @@ marker; every other id is left numeric. The `var → RefKind` catalog it keys of
 | `ctgroup.campusId`    | `campus`          | `/campuses`                              |
 | `person.campusId`     | `campus`          | `/campuses`                              |
 | `ctgroup.groupTypeId` | `group-type`      | `/group/grouptypes`                      |
-| `role.id`             | `role-def`        | managed state, when the role is adopted  |
 | `role.id`             | `group-type-role` | `/group/roles` (by `groupTypeId` + name) |
+| `role.id`             | `role-def`        | managed state — only when the pair collides (#125) |
 
 The same `group-type-role` rewrite also covers the **out-of-query** integer
 field `process.*.handleMembership.groupTypeRoleId` (the target role a
@@ -221,15 +221,24 @@ ct adopt group-role 127 --env prod -k community_leader
 ct adopt group-role 207 --env dev  -k community_leader
 ```
 
-Capture now prefers the managed form, which is unambiguous by construction
-because it resolves from state rather than from a name lookup:
+Capture then emits the managed form, which this host resolves from state rather
+than from a name lookup:
 
 ```json
 { "__ctRef": true, "kind": "role-def", "key": "community_leader" }
 ```
 
-The `(groupType, role)` pair remains the fallback for a role the config does not
-own, so nothing changes for the common case.
+**Only when the pair actually collides, though.** The `(groupType, role)` pair
+stays the default for every role whose pair is unique — even one the config
+owns. Off this host `role-def` is the **weaker** reference of the two: the
+resolver falls back to `resolveFromCatalog`, which keys `/group/roles` by
+`slug(name)` **alone**. On a host where the role was never adopted under the
+shared key, a name matching exactly one row therefore resolves _silently_ to a
+role on a different group type (only a multi-row match errors) — the same bare
+name lookup that #76 reverted #86 for. The pair cannot fail that way, because it
+matches on `(groupTypeId, name)`. So the safe reference is never traded away for
+the weaker one; `role-def` is reserved for the ids the pair genuinely cannot
+name, where there is no safe reference to lose.
 
 #### What could not be portablized is REPORTED, never swallowed (#101)
 
@@ -425,6 +434,28 @@ ruleset/status — any auto-group configuration it happens to have in
 ChurchTools stays completely invisible to `ct plan` / `ct apply`, exactly
 like any other resource this tool doesn't manage.
 
+## When the ruleset cannot be read (#126)
+
+A group's ruleset and status are read as a **sub-resource**, separately from the
+group's own `GET`. If that read fails for any reason other than a 404 — a 429
+under rate limiting is the common one — `ct` does **not** fold the declared
+ruleset into the diff on its own. Folding only the desired side would diff a
+declared ruleset against an absent actual and report the group as `to update`,
+manufacturing a change out of a transient failure.
+
+Instead the group is marked `fetch-failed`: it renders as a no-op under
+_"Fetch failed (could not read from ChurchTools — diff unavailable, left
+untouched)"_, the summary line carries
+`INCOMPLETE — N resource(s) could not be read.`, `ct plan` exits `1`, and
+`ct apply` refuses to run at all. A 404 on the ruleset keeps its old meaning —
+"this group is not a dynamic group" — and is not a failure.
+
+The distinction is the point: **"I could not read the current state of X" and
+"X differs from config" are different facts, and only the second belongs in a
+diff.** A plan is the artefact a human approves, so a fabricated `to update` in
+a PR comment is indistinguishable from a real drift and invites the same
+response.
+
 ## Applying and refreshing membership
 
 `ct apply` writes the ruleset (`PUT /dynamicgroups/{id}/ruleset`) and status
@@ -464,6 +495,16 @@ ct refresh --env prod --all            # every managed dynamic group
 never the default. `ct refresh` only ever touches **managed** groups, refuses a
 group that has no ruleset on this host (rather than POSTing into a 404), and
 keeps going after a per-group failure (exiting non-zero).
+
+> **Fixed in #124.** "Which groups are dynamic on this host?" is answered by
+> `GET /dynamicgroups`, which returns a flat array of **bare group ids**
+> (`[159, 1698, …]`) — not objects. Both readers parsed it as
+> `Number(row.id ?? row.groupId)`, i.e. `NaN` for every element, so the id set
+> came out empty on every host: `ct refresh` answered "not a dynamic group" for
+> every group and could not succeed at all, and `ct coverage` reported
+> `dynamic: 0` on an instance with 70 auto-groups (#113 — the same bug read a
+> second time). There is now one parser for that endpoint
+> (`src/api/dynamicGroups.ts`) with a test pinning the scalar shape.
 
 > **The scheduler ping is NOT fired by `ct`.** ChurchTools' admin cron page hits
 > `GET https://<host>/?q=cron&standby=true`, which runs **every due scheduled

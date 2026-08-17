@@ -10,6 +10,7 @@
 import { Command } from "commander";
 import { authedSession } from "../api/session.js";
 import type { CtClient } from "../api/ctClient.js";
+import { parseDynamicGroupIds } from "../api/dynamicGroups.js";
 import { resolveConfig } from "../config.js";
 import { prepareEnv } from "../env/context.js";
 import {
@@ -106,7 +107,7 @@ export async function collectCoverage(
   const [groupRows, groupTypeRows, dynamicRows, roleDefRows] = await Promise.all([
     client.getAll<Record<string, unknown>>(GROUPS_WITH_ROLES),
     client.getAll<Record<string, unknown>>("/group/grouptypes"),
-    client.getAll<Record<string, unknown>>("/dynamicgroups"),
+    client.getAll<unknown>("/dynamicgroups"),
     client.getAll<Record<string, unknown>>("/group/roles"),
   ]);
   // Same guarded read the planner performs: one request while the endpoint stays un-paged, and a
@@ -123,12 +124,8 @@ export async function collectCoverage(
     const id = Number(row.id);
     if (Number.isFinite(id) && typeof row.name === "string") roleNamesById.set(id, row.name);
   }
-  const dynamicGroupIds = new Set<number>();
-  for (const row of dynamicRows.data) {
-    // `/dynamicgroups` rows are keyed by the GROUP id they belong to; tolerate either spelling.
-    const id = Number(row.id ?? row.groupId);
-    if (Number.isFinite(id)) dynamicGroupIds.add(id);
-  }
+  // `/dynamicgroups` returns BARE group ids, not objects — see api/dynamicGroups.ts (#113/#124).
+  const dynamicGroupIds = parseDynamicGroupIds(dynamicRows.data);
 
   return buildCoverageReport({
     host,

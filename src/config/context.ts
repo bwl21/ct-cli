@@ -439,6 +439,19 @@ function toDesired(type: string, input: ResourceInput, location?: string): Desir
       );
     }
   }
+  // `roleDefinition.type` is a closed set on CT's side ("Die Eingabe sollte eine der folgenden Werte
+  // sein: leader, participant"), and getting it wrong is only discovered as an HTTP 400 halfway
+  // through an unattended apply (#121). Reject it at config load instead, where it costs nothing.
+  if (type === "group-role" && fields.type !== undefined) {
+    if (fields.type !== "leader" && fields.type !== "participant") {
+      throw new Error(
+        located(
+          location,
+          `roleDefinition "${key}": "type" must be "leader" or "participant" (got ${JSON.stringify(fields.type)}).`,
+        ),
+      );
+    }
+  }
   // Warn (never throw) on a declared field the registry does not manage for this type — e.g. a
   // seeded config using campus's vestigial `shortName` instead of the real `shorty` (#51). The
   // field still passes through into `fields` unchanged (unrecognised fields have always been sent
