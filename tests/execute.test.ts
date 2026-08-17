@@ -185,7 +185,16 @@ describe("executePlan", () => {
     expect(calls[0]).toEqual({
       method: "POST",
       path: "/group/roles",
-      body: { name: "Verantwortlicher", groupTypeId: 2, shorty: "Verantwort" },
+      // `type`/`isDefault`/`isHidden` are create-only defaults CT validates (#121) — sent on the
+      // POST, absent from state, so they are never diffed or reverted afterwards.
+      body: {
+        name: "Verantwortlicher",
+        groupTypeId: 2,
+        shorty: "Verantwort",
+        type: "participant",
+        isDefault: false,
+        isHidden: false,
+      },
     });
     expect(state.resources.leiter?.fields).toEqual({ name: "Verantwortlicher", groupTypeId: 2 });
   });

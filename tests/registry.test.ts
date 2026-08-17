@@ -235,9 +235,15 @@ describe("createDefaults — required-but-unmanaged create fields (#73)", () => 
     expect(defaults?.shorty).toBe("Team");
   });
 
-  it("group-role fills the required `shorty` from the declared name (truncated to 10)", () => {
+  it("group-role sends every field CT requires at create (#121)", () => {
+    // Live CT 3.135.2 rejects the POST without `type`/`isDefault`/`isHidden`, so a declared
+    // roleDefinition missing on the target host could not be created at all — and it failed in
+    // `apply`, after a green `plan`. `shorty` is still derived from the name, truncated to 10.
     expect(RESOURCES["group-role"]?.createDefaults?.({ name: "Verantwortlicher", groupTypeId: 2 })).toEqual({
       shorty: "Verantwort",
+      type: "participant", // the conservative half of leader|participant
+      isDefault: false,
+      isHidden: false,
     });
   });
 

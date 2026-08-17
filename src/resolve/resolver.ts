@@ -187,6 +187,12 @@ export class Resolver {
   private readonly groupRoleLists = new Map<number, Promise<CatalogRecord[]>>();
   /** Declared logical keys indexed by resource type — a same-run target that resolves to pending. */
   private readonly declaredByType = new Map<string, Set<string>>();
+  /**
+   * Slugged NAMES of the `roleDefinition`s this config declares (#120). A `ct.groupRole` names its
+   * role by name, not by logical key, so the pending check has to match on the name — which is why
+   * this is a separate index from {@link declaredByType}.
+   */
+  private readonly declaredRoleDefNames = new Set<string>();
 
   constructor(deps: ResolverDeps) {
     this.client = deps.client;
@@ -199,6 +205,9 @@ export class Resolver {
         this.declaredByType.set(d.type, set);
       }
       set.add(d.key);
+      if (d.type === "group-role" && typeof d.fields.name === "string") {
+        this.declaredRoleDefNames.add(slug(d.fields.name));
+      }
     }
   }
 
@@ -292,7 +301,27 @@ export class Resolver {
     const groupId = this.groupIdForRole(r, site, opts);
     if (typeof groupId !== "number") return groupId;
     const rows = await this.groupRoleList(groupId);
+    // #106 made a same-run GROUP resolve as pending. #120: the ROLE half needs the same treatment.
+    // Role definitions are per group type and drift easily between two hosts of one instance, so a
+    // `groupRole` naming a custom role hard-errored on the host that lacks it — with a message
+    // ("Fix the role name, or pass a numeric id") whose two remedies are both wrong when the role is
+    // declared three lines up. Roles created this run land on the group's role list once the
+    // role-def create (tier 3) has run, which is before permissions — so the same post-apply
+    // completion that finishes a pending group finishes this too.
+    if (this.declaresRoleNamed(r.role) && !hasRoleNamed(rows, r.role)) {
+      if (opts.pendingGroupRole) return pendingRef(r);
+      throw new Error(
+        `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: "${r.role}" is declared ` +
+          `as a roleDefinition in this config but does not exist on this host yet. Apply the master ` +
+          `data first, then declare the grants — or pass a numeric id.`,
+      );
+    }
     return pickGroupRolePairingId(rows, r, groupId, site, this.host);
+  }
+
+  /** Does this config declare a `roleDefinition` whose name matches `role` (slug-insensitive)? */
+  private declaresRoleNamed(role: string): boolean {
+    return this.declaredRoleDefNames.has(slug(role));
   }
 
   /**
@@ -452,6 +481,21 @@ function fetchGroupRoleRows(client: RoleListReader, groupId: number): Promise<Ca
  * rules and — importantly — the error messages are identical whichever side a config lands on.
  * slug-primary, exact-name secondary, matching every other catalog lookup in this file.
  */
+/**
+ * The role rows on a group matching a ref's role name — slug-primary, exact-name secondary, the same
+ * two-step every other catalog lookup uses. Shared with the pending check (#120) so "is this role
+ * missing?" and "which row is it?" can never answer differently.
+ */
+function matchRoleRows(rows: CatalogRecord[], role: string): CatalogRecord[] {
+  const bySlug = rows.filter((row) => typeof row.name === "string" && slug(row.name) === slug(role));
+  return bySlug.length >= 1 ? bySlug : rows.filter((row) => row.name === role);
+}
+
+/** Whether the group's live role list already holds a role by this name. */
+function hasRoleNamed(rows: CatalogRecord[], role: string): boolean {
+  return matchRoleRows(rows, role).length > 0;
+}
+
 function pickGroupRolePairingId(
   rows: CatalogRecord[],
   r: GroupRoleRef,
@@ -459,8 +503,7 @@ function pickGroupRolePairingId(
   site: string,
   host: string,
 ): number {
-  const bySlug = rows.filter((row) => typeof row.name === "string" && slug(row.name) === slug(r.role));
-  const matches = bySlug.length >= 1 ? bySlug : rows.filter((row) => row.name === r.role);
+  const matches = matchRoleRows(rows, r.role);
   if (matches.length === 0) {
     const available = rows
       .map((row) => (typeof row.name === "string" ? JSON.stringify(row.name) : `#${row.id}`))

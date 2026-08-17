@@ -510,12 +510,37 @@ export const RESOURCES: Record<string, AdoptableResource> = {
     updateMethod: "PUT",
     tier: 3,
     deriveKey: (r) => slug(str(r, "name")),
-    managedFields: (r) => ({ name: r.name, nameTranslated: r.nameTranslated, groupTypeId: r.groupTypeId }),
-    // POST /group/roles requires `shorty` (1–10 chars, non-nullable in CT's OpenAPI POST schema) which
-    // the tool does not manage (#73 audit). Sent at CREATE only, derived from the declared `name`; not
-    // diffed afterward. (`type`/`isLeader`/`sortKey` are all optional/nullable — no default needed.)
-    // Padded up to the 1-char floor for the same empty-name edge case as group-type's shorty above.
-    createDefaults: (r) => ({ shorty: truncatePadded(str(r, "name"), 10, 1) }),
+    managedFields: (r) => ({
+      name: r.name,
+      nameTranslated: r.nameTranslated,
+      groupTypeId: r.groupTypeId,
+      // `type` is `leader` | `participant` — a real semantic choice (does holding this role make you
+      // a leader of the group?), so it is declarable rather than defaulted-and-forgotten (#121). It
+      // only diffs when the config declares it: `diffFields` walks the DESIRED keys.
+      type: r.type,
+    }),
+    // Fields CT REQUIRES at create but the tool does not otherwise manage (#73/#121). The old comment
+    // here claimed `type` was "optional/nullable — no default needed"; live CT 3.135.2 disagrees and
+    // rejects the POST with three validation errors:
+    //
+    //   type       "Die Eingabe sollte eine der folgenden Werte sein: leader, participant"
+    //   isDefault  "Eingabe muss TRUE oder FALSE sein."
+    //   isHidden   "Eingabe muss TRUE oder FALSE sein."
+    //
+    // so a declared `roleDefinition` that did not exist on the target host could not be created at
+    // all — and it failed in `apply`, on the host the pipeline writes to, after `plan` had been green.
+    //
+    // `shorty` is 1–10 chars, non-nullable, derived from the declared `name`; padded up to the 1-char
+    // floor for the same empty-name edge case as group-type's shorty above.
+    // `type` defaults to `participant`: the conservative half of the choice, since `leader` confers
+    // group leadership. A config that wants the other one declares `type: "leader"` and wins here
+    // (createDefaults merges UNDER the declared body).
+    createDefaults: (r) => ({
+      shorty: truncatePadded(str(r, "name"), 10, 1),
+      type: "participant",
+      isDefault: false,
+      isHidden: false,
+    }),
     // `groupRole` is taken by the permissions DSL (`ct.groupRole` = definePermission("group_role")),
     // so the master-data role resource declares under a distinct name.
     dslName: "roleDefinition",

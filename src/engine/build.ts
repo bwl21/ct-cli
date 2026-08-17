@@ -118,6 +118,12 @@ export async function buildPlan(
   // Synthetic sub-resource fields (parents, dynamic, …) fold into the diff on both sides.
   const folded = await foldSynthetic({ client, state, desired, actual, configDir: opts.configDir });
   fetchErrors.push(...folded.errors);
+  // A synthetic field whose ACTUAL side could not be read makes its resource undiffable, exactly
+  // like a failed top-level GET. Marking it fetch-failed is what stops a transient 429 on
+  // `/dynamicgroups/{id}/ruleset` from surfacing as a fabricated `to update` (#126).
+  for (const key of folded.unreadable) {
+    if (!fetchFailed.has(key)) fetchFailed.set(key, "sub-resource read failed");
+  }
 
   // Resolution pass (#20): rewrite Ref-valued fields (and the dynamic ruleset, walked deeply) to
   // numbers / pending markers AFTER folding, BEFORE computePlan — so the diff stays number↔number.
