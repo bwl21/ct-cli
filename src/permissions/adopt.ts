@@ -4,12 +4,22 @@
  * instance's rights structure comes under management without hand-transcription
  * (issue #25).
  *
- * The live rows are run through the SAME normalization the planner uses
- * (`normalizeActual`) so what is emitted is exactly what a subsequent `ct plan`
- * would consider managed: the system baseline (`modifiedPid === -1`) and
- * inherited rows are dropped, and pre-existing revoke/deny rows are surfaced as
- * a note rather than emitted (the reconciler preserves them; re-authoring them
- * is out of scope here).
+ * The live rows are run through the SAME normalization the planner reconciles
+ * against — `normalizeEffective` (#114/#119) — so what is emitted is exactly
+ * what a subsequent `ct plan` would consider SATISFIED: every right the host
+ * grants, whether directly, by inheritance, or as system baseline.
+ *
+ * That is deliberately broader than what ct OWNS. Emitting only the owned rows
+ * encoded one host's provenance into a config meant to drive several, and the
+ * same right can be inherited on one host and direct on another — so a right
+ * dropped here would be undeclared there, land in `toDelete`, and be revoked.
+ * Declaring it keeps the block a clean no-op on both, and ct still never
+ * authors or revokes a row it does not own (that is `normalizeActual`'s job,
+ * not adoption's). A footer names how many of the emitted grants are in that
+ * category.
+ *
+ * Pre-existing revoke/deny rows are surfaced as a note rather than emitted (the
+ * reconciler preserves them; re-authoring them is out of scope here).
  *
  * Grants are NOT state-tracked resources, so adoption prints config only — it
  * never writes the state file. The caller makes that explicit in its output.
@@ -17,8 +27,15 @@
 import type { State } from "../state/state.js";
 import { findByTypeId } from "../state/state.js";
 import { CATALOG } from "./catalog.js";
-import { normalizeActual, type DomainType, type GrantTuple, type RawPermission } from "./grants.js";
-import { GROUP_SCOPE_FIELD, SCOPE_REF_KIND } from "./scope.js";
+import {
+  normalizeActual,
+  normalizeEffective,
+  unownedGrantCount,
+  type DomainType,
+  type GrantTuple,
+  type RawPermission,
+} from "./grants.js";
+import { ALL_SCOPE_SENTINEL, GROUP_SCOPE_FIELD, SCOPE_REF_KIND } from "./scope.js";
 
 /** DSL function name for each domain type — the call the emitted block should be pasted as. */
 const DSL_FN: Record<DomainType, string> = {
@@ -119,6 +136,12 @@ export interface AdoptedGrantsBlock {
   omitted: number;
   /** Pre-existing deny rows on this domain; preserved by the reconciler, never emitted. */
   revokes: number;
+  /**
+   * How many emitted grants are INHERITED or system-baseline on this host (#114/#119) — declared so
+   * the block is a no-op on a host that materializes them as direct rows, but never authored or
+   * revoked by ct on this one.
+   */
+  unowned: number;
 }
 
 export function emitAdoptedGrants(args: AdoptGrantsArgs): string {
@@ -127,9 +150,23 @@ export function emitAdoptedGrants(args: AdoptGrantsArgs): string {
 
 export function buildAdoptedGrants(args: AdoptGrantsArgs): AdoptedGrantsBlock {
   const { domainType, domainId, rows, state, domain, key } = args;
-  const normalized = normalizeActual(rows);
+  // Emit the EFFECTIVE set — direct, inherited and system-baseline rows alike (#114/#119).
+  //
+  // Adoption used to emit only the rows ct owns, which encoded THIS host's provenance into a config
+  // meant to drive several. On a host that materializes the same rights differently — as direct rows
+  // rather than inherited ones — every dropped right is undeclared, so it lands in `toDelete` and
+  // apply strips it. Measured on two hosts of one instance: adopting one and planning the other
+  // proposed removing 15 group-member rights from the largest role instance in the estate.
+  //
+  // Emitting the effective set makes the block a no-op on BOTH: the reconciler now treats a right the
+  // host grants by any route as satisfied (see `normalizeEffective`), so a declared-but-inherited
+  // right causes no PUT here and no revoke there. ct still never authors or revokes a row it does not
+  // own — that is decided by `normalizeActual`, not by what adoption prints.
+  const normalized = normalizeEffective(rows);
   const grants = normalized.filter((t) => t.type === "grant");
-  const revokes = normalized.filter((t) => t.type !== "grant");
+  // Deny rows stay owned-only: an inherited deny is not this domain's to restate.
+  const revokes = normalizeActual(rows).filter((t) => t.type !== "grant");
+  const unowned = unownedGrantCount(rows);
   const rev = reverseCatalog();
 
   const body: string[] = [];
@@ -151,7 +188,7 @@ export function buildAdoptedGrants(args: AdoptGrantsArgs): AdoptedGrantsBlock {
   }
 
   if (grants.length === 0) {
-    body.push("  grants: [], // no user-authored grants on this domain (baseline/inherited rows excluded)");
+    body.push("  grants: [], // this domain grants nothing");
   } else {
     body.push("  grants: [");
     for (const g of collapse(grants)) {
@@ -182,6 +219,21 @@ export function buildAdoptedGrants(args: AdoptGrantsArgs): AdoptedGrantsBlock {
   }
   lines.push(...body);
 
+  if (unowned > 0) {
+    // #114/#119 asked for exactly this: the asymmetry named UP FRONT, not discovered later as an
+    // unexplained revoke in the other host's plan after the config has already been written.
+    lines.push(
+      `// NOTE: ${unowned} of the grant(s) above are INHERITED or system-baseline on this host — ct never`,
+    );
+    lines.push(
+      "// authors or revokes those rows. They are emitted anyway because another host of the same instance",
+    );
+    lines.push(
+      "// may materialize the same rights as direct rows; declaring them is what keeps this block a clean",
+    );
+    lines.push("// no-op on BOTH hosts instead of a 15-right revoke on one of them (#114/#119).");
+  }
+
   if (revokes.length > 0) {
     lines.push(
       `// NOTE: ${revokes.length} revoke/deny row(s) exist on this domain. The reconciler PRESERVES them (it never`,
@@ -192,7 +244,7 @@ export function buildAdoptedGrants(args: AdoptGrantsArgs): AdoptedGrantsBlock {
     lines.push("// config is not supported yet (see issue #25 stretch goal).");
   }
 
-  return { block: lines.join("\n"), omitted, revokes: revokes.length };
+  return { block: lines.join("\n"), omitted, revokes: revokes.length, unowned };
 }
 
 /** The lines emitted for one collapsed grant, plus whether a LIVE grant was left as a comment
@@ -257,7 +309,18 @@ function grantLines(g: CollapsedGrant, rev: Map<number, ReverseEntry>, state: St
       // emitter is deliberately pure — no client, no fetch — so it cannot turn the id into a name.
       // Emit the number and point at the portable form the author can write by hand.
       const sugar = dimension?.managed ? SCOPE_SUGAR_FIELD[dimension.type] : undefined;
-      if (dimension && !dimension.managed) {
+      // #115: `-1` is not an id at all — it is ChurchTools' "alle" sentinel, meaning every value of
+      // the dimension on whatever host reads it. So it is ALREADY portable, and none of the
+      // host-specific-id advice below applies to it. Emitting `ct adopt department -1` sent people
+      // looking for a resource that cannot exist, and in a real adoption run this fires on most of
+      // the broadly-scoped grants — the interesting ones.
+      const realIds = g.dataIds.filter((id) => id !== ALL_SCOPE_SENTINEL);
+      const hasSentinel = g.dataIds.length > realIds.length;
+      if (hasSentinel) {
+        const what = dimension ? `every ${dimension.type}` : `every value of "${entry.scopeField}"`;
+        out.push(`    // scope -1 is ChurchTools' "alle" sentinel — ${what}; host-independent.`);
+      }
+      if (dimension && !dimension.managed && realIds.length > 0) {
         const field = SCOPE_SUGAR_FIELD[dimension.type] ?? dimension.type;
         out.push(
           `    // NOTE: "${entry.name}" scopes by "${entry.scopeField}" (${dimension.type}), a catalog ct reads but does not manage —`,
@@ -269,6 +332,11 @@ function grantLines(g: CollapsedGrant, rev: Map<number, ReverseEntry>, state: St
       const entries: string[] = [];
       const unmanaged: number[] = [];
       for (const id of [...g.dataIds].sort((a, b) => a - b)) {
+        if (id === ALL_SCOPE_SENTINEL) {
+          // Portable as-is (see above) — emitted, but never counted as an unmanaged host-specific id.
+          entries.push(String(id));
+          continue;
+        }
         const managed = dimension && sugar ? findByTypeId(state, dimension.type, id) : undefined;
         if (managed && sugar) {
           entries.push(`{ ${sugar}: ${JSON.stringify(managed.key)} }`);
@@ -313,7 +381,15 @@ function grantLines(g: CollapsedGrant, rev: Map<number, ReverseEntry>, state: St
     // bring it under management (rather than silently declaring an opaque numeric scope for it).
     const resolvedKeys: string[] = [];
     const unmanaged: number[] = [];
+    // #115: `-1` is the "alle" sentinel — every group on whatever host reads it — not an id that
+    // could ever be adopted. It is already portable, so it is emitted verbatim through the numeric
+    // escape hatch and never counted as an unmanaged target.
+    let sentinel = false;
     for (const id of g.dataIds) {
+      if (id === ALL_SCOPE_SENTINEL) {
+        sentinel = true;
+        continue;
+      }
       const group = findByTypeId(state, "group", id);
       if (group) resolvedKeys.push(group.key);
       else unmanaged.push(id);
@@ -341,8 +417,14 @@ function grantLines(g: CollapsedGrant, rev: Map<number, ReverseEntry>, state: St
       out.push(`    //          then add its logical key to the scope array below.`);
       omitted = true;
     }
-    if (resolvedKeys.length > 0) {
-      const scope = resolvedKeys.map((k) => JSON.stringify(k)).join(", ");
+    if (sentinel) {
+      out.push(`    // scope -1 is ChurchTools' "alle" sentinel — every group; host-independent.`);
+    }
+    if (resolvedKeys.length > 0 || sentinel) {
+      const scope = [
+        ...(sentinel ? [String(ALL_SCOPE_SENTINEL)] : []),
+        ...resolvedKeys.map((k) => JSON.stringify(k)),
+      ].join(", ");
       out.push(`    { right: ${JSON.stringify(entry.name)}, scope: [${scope}] },`);
     } else if (unmanaged.length > 0) {
       // Every scope target is unmanaged: there is no valid key to emit, so the grant itself is a

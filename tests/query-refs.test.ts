@@ -370,3 +370,178 @@ describe("portablizeRuleset (#76 Stage 2)", () => {
     });
   });
 });
+
+describe("person.id is reported by the portability audit (#127)", () => {
+  // Four of five auto-group rulesets captured in one week included or excluded specific people by
+  // id. Those are the SOURCE host's person ids written verbatim into the other host's ruleset, where
+  // they name entirely different people — the same failure mode as a raw `ctgroup.id`, and the one
+  // the warning did not mention. The absence of a warning implied there was nothing to find.
+
+  it("reports an `oneof` include-list of person ids", () => {
+    const w = scanUnportablized({ oneof: [{ var: "person.id" }, [5703, 4389]] });
+    expect(w.map((x) => x.id).sort((a, b) => a - b)).toEqual([4389, 5703]);
+    expect(w.every((x) => x.var === "person.id")).toBe(true);
+  });
+
+  it("reports a NEGATED exclusion clause too — the dangerous one", () => {
+    // `person.id` 1 exists on every ChurchTools instance and is almost always an administrator, so
+    // an exclusion aimed at one person here lands on someone real there.
+    const w = scanUnportablized({ "!": [{ oneof: [{ var: "person.id" }, [12, 1]] }] });
+    expect(w.map((x) => x.id).sort((a, b) => a - b)).toEqual([1, 12]);
+  });
+
+  it("reports an equality comparison against a single person id", () => {
+    expect(scanUnportablized({ "==": [{ var: "person.id" }, 5703] })).toHaveLength(1);
+  });
+
+  it("words it as unfixable — a decision, not a command that will fail", () => {
+    const lines = formatPortablizeWarnings(scanUnportablized({ oneof: [{ var: "person.id" }, [5703]] }));
+    const text = lines.join("\n");
+    expect(text).toContain("person.id");
+    expect(text).toContain("NEVER portable");
+    expect(text).toContain("DIFFERENT people on another host");
+    // There is no `ct adopt person` and there never will be — people are permanently out of scope.
+    expect(text).not.toMatch(/ct adopt person/);
+  });
+
+  it("does not fire on a non-id person literal", () => {
+    // Reporting `person.age > 18` would bury the real findings in noise.
+    expect(scanUnportablized({ ">": [{ var: "person.age" }, 18] })).toEqual([]);
+  });
+
+  it("reports person ids alongside the ctgroup ids it already found", () => {
+    const w = scanUnportablized({
+      and: [{ oneof: [{ var: "ctgroup.id" }, [3090]] }, { "!": [{ oneof: [{ var: "person.id" }, [1]] }] }],
+    });
+    expect(new Set(w.map((x) => x.var))).toEqual(new Set(["ctgroup.id", "person.id"]));
+  });
+});
+
+describe("ruleset role refs fall back to a managed role-def only when the name pair is ambiguous (#125)", () => {
+  // `role.id` portablizes to a (group type, role NAME) pair, resolved by filtering `/group/roles` on
+  // (groupTypeId, slug(name)). Two rows sharing a name on ONE group type make that a hard error — and
+  // neither remedy the error offered works for a config shared across hosts: "rename" edits
+  // ChurchTools master data (here, CT's own stock `leader`), and "pass a numeric id" cannot work
+  // because the roles have different ids per host with no env to branch on. A managed `role-def` key
+  // is the way out of THAT case.
+  //
+  // It is only a way out of that case, though. Off this host a `role-def` ref is the WEAKER of the
+  // two: the resolver falls back to a `/group/roles` lookup keyed on slug(name) alone, so on a host
+  // where the role was never adopted under the shared key it can resolve silently to a role on a
+  // different group type. The pair cannot fail that way. So the pair stays the default and `role-def`
+  // is reserved for the ids the pair genuinely cannot name.
+  const groupTypeIdToKey = new Map([[30, "community"]]);
+  // Two rows, same group type, same name — the collision #125 is actually about.
+  const ambiguousCatalog = new Map([
+    [207, { groupTypeId: 30, name: "leader" }],
+    [208, { groupTypeId: 30, name: "Leader" }],
+  ]);
+  // One row — the common case: unique across all 46 prod roles.
+  const uniqueCatalog = new Map([[207, { groupTypeId: 30, name: "leader" }]]);
+  const ruleset = { oneof: [{ var: "role.id" }, [207]] };
+
+  it("emits a role-def ref when the name pair is ambiguous and the role is under management", () => {
+    const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
+      idToKeyByKind: { "role-def": new Map([[207, "community_leader"]]) },
+      roleCatalog: ambiguousCatalog,
+      groupTypeIdToKey,
+    });
+    expect(warnings).toEqual([]);
+    expect(out).toEqual({
+      oneof: [{ var: "role.id" }, [{ __ctRef: true, kind: "role-def", key: "community_leader" }]],
+    });
+  });
+
+  it("keeps the (group-type, role) pair when it is unambiguous, EVEN IF the role is managed", () => {
+    // The safety property: a `role-def` ref can mis-resolve to another group type's role on a host
+    // that never adopted the key, and the pair cannot. Nothing is gained by trading down here, so a
+    // managed role-def must not win by default.
+    const { ruleset: out, warnings } = portablizeRuleset(ruleset, {
+      idToKeyByKind: { "role-def": new Map([[207, "community_leader"]]) },
+      roleCatalog: uniqueCatalog,
+      groupTypeIdToKey,
+    });
+    expect(warnings).toEqual([]);
+    expect(out).toEqual({
+      oneof: [
+        { var: "role.id" },
+        [{ __ctRef: true, kind: "group-type-role", groupType: "community", role: "leader" }],
+      ],
+    });
+  });
+
+  it("still emits the (group-type, role) pair when the role is NOT managed", () => {
+    const { ruleset: out } = portablizeRuleset(ruleset, {
+      idToKeyByKind: {},
+      roleCatalog: uniqueCatalog,
+      groupTypeIdToKey,
+    });
+    expect(out).toEqual({
+      oneof: [
+        { var: "role.id" },
+        [{ __ctRef: true, kind: "group-type-role", groupType: "community", role: "leader" }],
+      ],
+    });
+  });
+
+  it("leaves an ambiguous, unmanaged role to the pair — which hard-errors at plan time, honestly", () => {
+    // Nothing portable to emit: the pair cannot name it and there is no shared key yet. Emitting the
+    // pair anyway is right — the resolver's ambiguity error is what tells the author to adopt it.
+    const { ruleset: out } = portablizeRuleset(ruleset, {
+      idToKeyByKind: {},
+      roleCatalog: ambiguousCatalog,
+      groupTypeIdToKey,
+    });
+    expect(out).toEqual({
+      oneof: [
+        { var: "role.id" },
+        [{ __ctRef: true, kind: "group-type-role", groupType: "community", role: "leader" }],
+      ],
+    });
+  });
+
+  it("adopting the role under a shared key is what makes the ambiguous case resolvable", () => {
+    // Two hosts, same logical key, different numeric ids — the whole point. Each host's capture
+    // produces the SAME portable marker.
+    const prod = portablizeRuleset(
+      { oneof: [{ var: "role.id" }, [127]] },
+      {
+        idToKeyByKind: { "role-def": new Map([[127, "community_leader"]]) },
+        roleCatalog: new Map([
+          [127, { groupTypeId: 30, name: "leader" }],
+          [128, { groupTypeId: 30, name: "Leader" }],
+        ]),
+        groupTypeIdToKey,
+      },
+    ).ruleset;
+    const dev = portablizeRuleset(ruleset, {
+      idToKeyByKind: { "role-def": new Map([[207, "community_leader"]]) },
+      roleCatalog: ambiguousCatalog,
+      groupTypeIdToKey,
+    }).ruleset;
+    expect(prod).toEqual(dev);
+    expect(prod).toEqual({
+      oneof: [{ var: "role.id" }, [{ __ctRef: true, kind: "role-def", key: "community_leader" }]],
+    });
+  });
+
+  it("also portablizes the out-of-query handleMembership.groupTypeRoleId field", () => {
+    const { ruleset: out } = portablizeRuleset(
+      { process: { x: { handleMembership: { groupTypeRoleId: 207 } } } },
+      {
+        idToKeyByKind: { "role-def": new Map([[207, "community_leader"]]) },
+        roleCatalog: ambiguousCatalog,
+        groupTypeIdToKey,
+      },
+    );
+    expect(out).toEqual({
+      process: {
+        x: {
+          handleMembership: {
+            groupTypeRoleId: { __ctRef: true, kind: "role-def", key: "community_leader" },
+          },
+        },
+      },
+    });
+  });
+});

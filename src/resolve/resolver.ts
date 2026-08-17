@@ -399,9 +399,17 @@ export class Resolver {
     }
     if (matches.length > 1) {
       const list = matches.map((c) => `${JSON.stringify(c.name)} (#${c.id})`).join(", ");
+      // #125: the old message offered "rename to disambiguate, or pass a numeric id", and BOTH are
+      // dead ends for a config shared across hosts — a rename edits ChurchTools master data (often
+      // CT's own stock role) to work around a config limitation, and the roles have different ids per
+      // host with no env to branch on. Adopting the role is the remedy that actually works, and it is
+      // the same "adopt the target to portablize it" move groups and campuses already use.
+      const adopts = matches.map((c) => `\`ct adopt group-role ${c.id} -k <shared-key>\``).join(" / ");
       throw new Error(
         `Ambiguous ${refLabel(r)} referenced at ${site} on ${this.host}: ${matches.length} roles on group ` +
-          `type #${groupTypeId} match — ${list}. Rename to disambiguate, or pass a numeric id.`,
+          `type #${groupTypeId} match — ${list}. Adopt the one you mean under a logical key, on EVERY ` +
+          `host, and reference it as { kind: "role-def", key: "<shared-key>" } — ${adopts}. ` +
+          `(Renaming in ChurchTools and passing a numeric id both work on one host only.)`,
       );
     }
     return matches[0]!.id;

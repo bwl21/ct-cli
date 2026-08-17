@@ -75,16 +75,72 @@ export function tupleKey(t: {
   return `${t.type}:${t.authId}:${scope}`;
 }
 
+/** One raw row → its tuple. dataId is `[]` or a single element (CT reads scoped grants back one row
+ *  per dataId), so there is nothing to sort — `tupleKey` sorts defensively anyway. */
+function toTuple(r: RawPermission): GrantTuple {
+  return { authId: r.authId, dataId: r.dataId == null ? [] : [r.dataId], type: r.type };
+}
+
+/** Is this row one ct may WRITE or REVOKE — i.e. a direct, user-authored row? */
+function isOwnable(r: RawPermission): boolean {
+  if (r.meta?.modifiedPid === -1) return false; // system baseline — ct never authors or revokes it
+  if (r.isInherited) return false; // granted via the type — ct never authors or revokes it
+  return true;
+}
+
+/**
+ * The rows reconciliation OWNS: direct, user-authored grants. These are the only rows `ct` will ever
+ * write or revoke, and the only candidates for `toDelete`.
+ */
 export function normalizeActual(rows: RawPermission[]): GrantTuple[] {
-  const out: GrantTuple[] = [];
+  return rows.filter(isOwnable).map(toTuple);
+}
+
+/**
+ * The rows that describe what the host EFFECTIVELY grants — direct, inherited and system-baseline
+ * alike (#114/#119).
+ *
+ * `ct` used to decide "is this declared grant already satisfied?" from the owned set alone, which
+ * meant it decided from **how a row was recorded**. That differs per host for identical effective
+ * permissions, and it is what made a config unable to be a clean no-op on two hosts of one instance:
+ *
+ *   - #114 — the same right is system-authored (`meta.modifiedPid === -1`) on one host and
+ *     user-authored on the other, because the copy that produced the second host stamped a person id
+ *     onto rows that are system rows upstream. Declaring the right planned `+1 grant` on the first
+ *     host; omitting it planned a **revoke** on the second.
+ *   - #119 — the same right is `isInherited: true` on one host and `false` on the other. Measured on
+ *     two hosts of one instance, both CT 3.135.2: 18 of 63 `group_role` domains carried inherited
+ *     rows on one, and **zero** anywhere on the other. Adoption dropped the inherited rows, so
+ *     planning the result elsewhere proposed stripping 15 rights from the largest role instance in
+ *     the estate.
+ *
+ * Reconciling against the effective set fixes both, because the two hosts agree on effective
+ * permissions even when they disagree on provenance. The "never fight the platform" property still
+ * holds: {@link normalizeActual} still decides what may be written or revoked, so ct never authors
+ * and never revokes a baseline or inherited row — it only stops proposing to re-author something the
+ * platform already grants.
+ */
+export function normalizeEffective(rows: RawPermission[]): GrantTuple[] {
+  // DEDUPED by identity: a right can appear both as a direct row and as an inherited one on the same
+  // domain, and "effective" is a set, not a tally. Without this, `adopt grants` would print the same
+  // grant twice. The OWNED row wins when both exist, so anything downstream that reads a tuple's
+  // provenance-adjacent fields sees the writable one.
+  const byKey = new Map<string, GrantTuple>();
   for (const r of rows) {
-    if (r.meta?.modifiedPid === -1) continue; // system baseline — invisible to reconciliation
-    if (r.isInherited) continue; // inherited — not directly owned here
-    // dataId is [] or a single element (CT reads scoped grants back one row per dataId), so there is
-    // nothing to sort here — and tupleKey sorts defensively anyway when it builds the identity key.
-    out.push({ authId: r.authId, dataId: r.dataId == null ? [] : [r.dataId], type: r.type });
+    const t = toTuple(r);
+    const k = tupleKey(t);
+    if (!byKey.has(k) || isOwnable(r)) byKey.set(k, t);
   }
-  return out;
+  return [...byKey.values()];
+}
+
+/** How many of a domain's effective grants ct does NOT own — inherited or system-baseline rows. */
+export function unownedGrantCount(rows: RawPermission[]): number {
+  const owned = new Set(rows.filter(isOwnable).map((r) => tupleKey(toTuple(r))));
+  const unowned = new Set(
+    rows.filter((r) => !isOwnable(r) && r.type === "grant").map((r) => tupleKey(toTuple(r))),
+  );
+  return [...unowned].filter((k) => !owned.has(k)).length;
 }
 
 export interface GrantDiff {
@@ -111,6 +167,13 @@ export function diffGrants(
   desired: GrantTuple[],
   actual: GrantTuple[],
   preserveUnknown?: PreservePredicate,
+  /**
+   * What the host effectively grants, including rows ct does not own (inherited, system baseline) —
+   * see {@link normalizeEffective}. Used ONLY to decide whether a declared grant is already
+   * satisfied, never to decide what to revoke. Defaults to `actual`, which is the pre-#114/#119
+   * behaviour and keeps every existing caller and test honest.
+   */
+  effective: GrantTuple[] = actual,
 ): GrantDiff {
   // Reconciliation owns only user-authored GRANT rows. `desiredTuples` only ever emits
   // `type: "grant"`, so an explicit deny row (`type: "revoke"`) has no desired counterpart and
@@ -120,7 +183,11 @@ export function diffGrants(
   const preserved = actual.filter((t) => t.type !== "grant");
   const desiredKeys = new Map(desired.map((t) => [tupleKey(t), t]));
   const actualKeys = new Map(managedActual.map((t) => [tupleKey(t), t]));
-  const toPut = [...desiredKeys].filter(([k]) => !actualKeys.has(k)).map(([, t]) => t);
+  // SATISFACTION is judged against the EFFECTIVE set (#114/#119): a right the host already grants by
+  // ANY route — directly, by inheritance, or as system baseline — needs no PUT. REVOCATION below is
+  // still judged against the owned set only, so ct never revokes a row it did not author.
+  const effectiveKeys = new Set(effective.filter((t) => t.type === "grant").map(tupleKey));
+  const toPut = [...desiredKeys].filter(([k]) => !effectiveKeys.has(k)).map(([, t]) => t);
   const undeclared = [...actualKeys].filter(([k]) => !desiredKeys.has(k)).map(([, t]) => t);
   // Opt-in partial ownership (#102). Without it, ONE live grant on a dimension this tool has no
   // business managing (a wiki category, an HTML template) makes the whole role instance undeclarable,

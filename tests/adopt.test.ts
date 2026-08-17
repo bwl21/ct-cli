@@ -49,12 +49,14 @@ describe("ct adopt", () => {
   it("adopts a campus (id 0) into the state file", async () => {
     await runAdopt(["campus", "0", "--state", statePath]);
     const state = await loadState(statePath, HOST);
-    expect(state.resources.mz).toMatchObject({
+    // The key comes from `name`, like every other resource (#118) — not from `shorty` ("MZ").
+    expect(state.resources.mainz).toMatchObject({
       type: "campus",
       id: 0,
-      key: "mz",
+      key: "mainz",
       fields: { name: "Mainz", shorty: "MZ" },
     });
+    expect(state.resources.mz).toBeUndefined();
   });
 
   it("captures a campus-assigned group's campusId from information (#21)", async () => {

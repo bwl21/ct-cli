@@ -4,7 +4,7 @@ import { resolveConfig } from "../config.js";
 import { prepareEnv } from "../env/context.js";
 import { resourceType, configSnippet } from "../resources/registry.js";
 import { ReverseResolver } from "../resolve/reverse.js";
-import { loadState, saveState, upsert } from "../state/state.js";
+import { chooseAdoptKey, loadState, saveState, upsert } from "../state/state.js";
 import { success, info, warn, out } from "../ui.js";
 import { adoptGrantsCommand } from "./adopt-grants.js";
 import { adoptGroupCommand } from "./adopt-group.js";
@@ -13,6 +13,8 @@ interface AdoptOptions {
   key?: string;
   state?: string;
   env?: string;
+  /** Opt in to changing an already-managed resource's logical key (#123). Never the default. */
+  rekey?: boolean;
   dryRun?: boolean;
 }
 
@@ -24,6 +26,10 @@ export function adoptCommand(): Command {
     .option("-k, --key <key>", "logical key (defaults to a slug of the resource name)")
     .option("-s, --state <path>", "state file path (or set CT_STATE)")
     .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
+    .option(
+      "--rekey",
+      "let a re-adoption change an already-managed resource's logical key to the derived one (#123)",
+    )
     .option("--dry-run", "preview the config entry and state change without writing")
     .action(async (type: string, rawId: string, opts: AdoptOptions) => {
       const spec = resourceType(type);
@@ -50,9 +56,21 @@ export function adoptCommand(): Command {
         throw new Error(`No ${type} with id ${id} exists in ChurchTools.`);
       }
 
-      const key = opts.key?.trim() || spec.deriveKey(resource);
+      const derived = spec.deriveKey(resource);
+      // An already-managed resource keeps its adopted key unless --rekey says otherwise (#123).
+      const choice = chooseAdoptKey(state, type, id, derived, {
+        explicitKey: opts.key,
+        rekey: opts.rekey,
+      });
+      const key = choice.key;
       if (!key) {
         throw new Error("Could not derive a logical key — pass --key explicitly.");
+      }
+      if (choice.wouldBecome) {
+        warn(
+          `${key}: key would change to "${choice.wouldBecome}" (derived from the live name). ` +
+            `Keeping the adopted key. Pass --rekey to change it.`,
+        );
       }
       const fields = spec.managedFields(resource);
       // Reverse-resolve numeric ids (campusId/groupTypeId/groupStatusId) to logical sugar so the

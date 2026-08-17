@@ -72,6 +72,43 @@ describe("declarability (#103)", () => {
   });
 });
 
+describe("declarability scope (#114/#119)", () => {
+  // `ct adopt grants` emits the EFFECTIVE set, so its gate has to judge the effective set too.
+  // Judging owned rows while emitting effective ones desynchronises the two in both directions.
+  it("counts inherited grants under scope: effective, so an all-inherited domain is not 'empty'", () => {
+    // The measured shape: a domain carrying its rights ONLY as inherited rows on this host. Under the
+    // authored count it looks empty, bulk adoption skips it, the rights stay undeclared — and the next
+    // apply on the host that materialises them as DIRECT rows puts them in toDelete and revokes them.
+    const rows = [
+      row({ authId: VIEW_GROUP, dataId: 42, domainId: 1, isInherited: true }),
+      row({ authId: UNSCOPED, domainId: 1, isInherited: true }),
+    ];
+    expect(declarability(rows).grantCount).toBe(0);
+    expect(declarability(rows, { scope: "effective" }).grantCount).toBe(2);
+    expect(declarability(rows, { scope: "effective" }).declarable).toBe(true);
+  });
+
+  it("blocks on an inherited grant with no logical form under scope: effective", () => {
+    // The opposite desync: the emitter prints this row as a host-specific numeric dataId, so the gate
+    // must see it. Under the authored verdict it is invisible and the domain passes --all-declarable.
+    const rows = [
+      row({ authId: VIEW_GROUP, dataId: 42, domainId: 1 }),
+      row({ authId: HTML_TEMPLATE, dataId: 3, domainId: 1, isInherited: true }),
+    ];
+    expect(declarability(rows)).toMatchObject({ declarable: true, blockedBy: [] });
+    expect(declarability(rows, { scope: "effective" })).toMatchObject({
+      declarable: false,
+      blockedBy: ["cc_html_template"],
+    });
+  });
+
+  it("defaults to the authored set, so `ct coverage` is untouched", () => {
+    const rows = [row({ authId: VIEW_GROUP, dataId: 42, domainId: 1, isInherited: true })];
+    expect(declarability(rows)).toEqual(declarability(rows, { scope: "authored" }));
+    expect(declarability(rows).grantCount).toBe(0);
+  });
+});
+
 describe("buildCoverageReport (#103)", () => {
   const state: State = {
     version: 1,

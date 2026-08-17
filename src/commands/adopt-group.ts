@@ -21,7 +21,7 @@ import { RESOURCES, configSnippet, fromInformation, slug } from "../resources/re
 import { ReverseResolver, type RoleCatalogEntry } from "../resolve/reverse.js";
 import type { RefKind } from "../resolve/refs.js";
 import { formatPortablizeWarnings, portablizeRuleset, scanUnportablized } from "../config/query-refs.js";
-import { loadState, saveState, upsert, type State } from "../state/state.js";
+import { chooseAdoptKey, loadState, saveState, upsert, type State } from "../state/state.js";
 import { success, info, warn, out } from "../ui.js";
 
 interface AdoptGroupOptions {
@@ -32,6 +32,8 @@ interface AdoptGroupOptions {
   type?: string;
   childrenOf?: string;
   withDynamic?: boolean;
+  /** Opt in to changing an already-managed group's logical key (#123). Never the default. */
+  rekey?: boolean;
   /** Commander's negatable `--no-portable-rulesets`: true unless the flag was passed (#101). */
   portableRulesets?: boolean;
   strictRulesets?: boolean;
@@ -174,6 +176,10 @@ export function adoptGroupCommand(): Command {
     .option("-k, --key <key>", "logical key (only valid when exactly one group is resolved)")
     .option("-s, --state <path>", "state file path (or set CT_STATE)")
     .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
+    .option(
+      "--rekey",
+      "let a re-adoption change an already-managed group's logical key to the derived one (#123)",
+    )
     .option("--dry-run", "preview the config entries and state changes without writing")
     .option("--type <groupTypeIdOrKey>", "adopt every group of this group type (numeric id or logical key)")
     .option(
@@ -281,10 +287,24 @@ export function adoptGroupCommand(): Command {
 
       for (const id of resolvedIds) {
         const resource = await client.get<Record<string, unknown>>(GROUP_SPEC.itemPath(id));
-        const key =
-          (resolvedIds.length === 1 ? opts.key?.trim() : undefined) || GROUP_SPEC.deriveKey(resource);
+        // An already-managed group keeps its adopted key unless --rekey says otherwise (#123). This
+        // is the mode that made the bug bite: the documented ruleset-refresh workflow passes a LIST
+        // of ids, which is exactly when `-k` is rejected, so there was no way to prevent the re-key.
+        // Because `relPath` below is built from `key`, preserving it also makes the refresh overwrite
+        // the ruleset file the config already points at instead of writing a second one.
+        const choice = chooseAdoptKey(state, "group", id, GROUP_SPEC.deriveKey(resource), {
+          explicitKey: resolvedIds.length === 1 ? opts.key : undefined,
+          rekey: opts.rekey,
+        });
+        const key = choice.key;
         if (!key) {
           throw new Error(`Could not derive a logical key for group #${id} — pass --key explicitly.`);
+        }
+        if (choice.wouldBecome) {
+          warn(
+            `${key}: key would change to "${choice.wouldBecome}" (derived from the live name). ` +
+              `Keeping the adopted key. Pass --rekey to change it.`,
+          );
         }
         const fields = GROUP_SPEC.managedFields(resource);
 
@@ -301,11 +321,18 @@ export function adoptGroupCommand(): Command {
               // Managed group ids come from state (no catalog for `group`), including any group this
               // same run already adopted; the master-data kinds come from the catalog maps above.
               const groupMap = new Map<number, string>();
+              // Managed role definitions, likewise from STATE rather than the live catalog (#125):
+              // state gives a per-host id under a shared logical key, which is what makes a
+              // duplicate role name fixable by adopting the role instead of renaming master data.
+              // (`ReverseResolver.idToKeyByKind("role-def")` keys by slug(name) off the catalog and
+              // is exactly the ambiguous mapping this replaces.)
+              const roleDefMap = new Map<number, string>();
               for (const r of Object.values(state.resources)) {
                 if (r.type === "group") groupMap.set(r.id, r.key);
+                if (r.type === "group-role") roleDefMap.set(r.id, r.key);
               }
               const { ruleset, warnings } = portablizeRuleset(captured.normalizedRuleset, {
-                idToKeyByKind: { ...portableCatalogMaps, group: groupMap },
+                idToKeyByKind: { ...portableCatalogMaps, group: groupMap, "role-def": roleDefMap },
                 roleCatalog,
                 groupTypeIdToKey,
               });

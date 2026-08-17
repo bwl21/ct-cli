@@ -19,7 +19,7 @@
  * the I/O, so the whole verdict is unit-testable without a network.
  */
 import { KNOWN_AUTH_IDS, SCOPE_FIELD_BY_AUTH_ID } from "../permissions/catalog.js";
-import { normalizeActual, type RawPermission } from "../permissions/grants.js";
+import { normalizeActual, normalizeEffective, type RawPermission } from "../permissions/grants.js";
 import { ALL_SCOPE_SENTINEL, SCOPE_REF_KIND } from "../permissions/scope.js";
 import { fromInformation } from "../resources/registry.js";
 import type { State } from "../state/state.js";
@@ -114,11 +114,26 @@ export interface CoverageInput {
  * ownership default. (With `preserveUnknown` (#102) those same instances become declarable while
  * leaving the module grants alone; the verdict below is the strict one, and the command surfaces the
  * blocking dimensions precisely so they can be passed to `preserveUnknown`.)
+ *
+ * `scope` picks WHICH rows the verdict is about, and the two callers genuinely need different ones:
+ *  - `"authored"` (default) — `ct coverage`, whose headline number is "grants an admin authored here".
+ *    Inherited rows are somebody else's authorship and would inflate it.
+ *  - `"effective"` — `ct adopt grants`, which since #114/#119 EMITS the effective set. The verdict has
+ *    to be about the same rows the emitter will print, or it decides on rows that never reach the
+ *    block: a domain carrying rights only as inherited rows counts as empty and is skipped (so the
+ *    rights stay undeclared and the next apply on the other host revokes them), and an inherited grant
+ *    on an unnameable dimension is invisible to the `blockedBy` gate that exists to stop exactly that
+ *    line from being emitted as a host-specific number.
  */
-export function declarability(rows: RawPermission[]): DeclarabilityVerdict {
-  // `normalizeActual` is what makes the count right: it drops the self-re-adding system baseline and
-  // every inherited row, so the verdict is about ADMIN-AUTHORED grants — the only ones ct ever owns.
-  const tuples = normalizeActual(rows).filter((t) => t.type === "grant");
+export function declarability(
+  rows: RawPermission[],
+  { scope = "authored" }: { scope?: "authored" | "effective" } = {},
+): DeclarabilityVerdict {
+  // Both normalizers drop the self-re-adding system baseline; they differ only on inherited rows,
+  // which `normalizeActual` also drops. Neither decides ownership — that stays `normalizeActual`'s
+  // job at plan time, so widening the verdict here never widens what ct writes or revokes.
+  const normalize = scope === "effective" ? normalizeEffective : normalizeActual;
+  const tuples = normalize(rows).filter((t) => t.type === "grant");
   const blockedBy = new Set<string>();
   const unknownAuthIds = new Set<number>();
   for (const t of tuples) {

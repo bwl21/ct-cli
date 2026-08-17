@@ -12,6 +12,7 @@
  */
 import type { GroupTypeRoleRef, RefKind, SimpleRef } from "../resolve/refs.js";
 import type { RoleCatalogEntry } from "../resolve/reverse.js";
+import { slug } from "../resources/registry.js";
 
 export type { RoleCatalogEntry };
 
@@ -29,11 +30,17 @@ export type { RoleCatalogEntry };
  * `role.id` is DELIBERATELY NOT here (fixed in #76, reverting #86's `role-def` mapping). A ruleset's
  * `role.id` is a **groupTypeRoleId** — a role scoped to a group TYPE — not a global role-catalog id.
  * Role NAMES are not globally unique across group types (live prod, 2026-07-11: 3 roles named "Leiter",
- * 6 "Organisator", 6 "Mitglied", each on a different group type), so mapping it to `role-def` (which
- * keys `/group/roles` by `slug(name)` alone) makes the resolver throw "ambiguous". Only the
- * (groupTypeId, name) PAIR is unique (0 collisions across all 46 prod roles), so `role.id` needs the
- * catalog-driven special case in {@link portablizeRuleset} that emits a `group-type-role` marker — a
- * lone name-based table entry cannot express it.
+ * 6 "Organisator", 6 "Mitglied", each on a different group type), so a NAME-KEYED `role-def` mapping
+ * makes the resolver throw "ambiguous". So `role.id` needs the special case in
+ * {@link portablizeRuleset}, which a lone name-based table entry cannot express. That special case
+ * now emits, in order of preference:
+ *
+ *   1. `{ kind: "role-def", key }` when the role is under MANAGEMENT (#125) — a per-host id under a
+ *      shared logical key, resolved from state, so it is unambiguous by construction. This is what
+ *      #86 got wrong: the mapping is right, the name-keyed catalog it used to source it from was not.
+ *   2. `{ kind: "group-type-role", groupType, role }` otherwise. The (groupTypeId, name) PAIR is
+ *      unique in the common case (0 collisions across all 46 prod roles) — but NOT always, and when
+ *      it collides there is no fix available in a shared config, which is precisely why (1) exists.
  *
  * Deliberately absent (the escape hatch — unknown vars are left untouched by {@link portablizeRuleset}):
  *   - `ctgroup.groupStatusId` — group statuses have NO REST catalog (#67; `/group/memberstatus` is a
@@ -107,6 +114,23 @@ export interface PortablizeWarning {
  */
 const UNPORTABLE_ENTITY_VARS: Readonly<Record<string, string>> = {
   "ctgroup.groupStatusId": "group statuses have no REST catalog (#67) — no logical form exists",
+  // #127. A ruleset that includes or excludes specific people by id is common — four of five
+  // auto-group rulesets captured in one week did it — and it was the ONE entity var the audit never
+  // mentioned, so the only way to find it was to read the captured JSON by hand. The absence of a
+  // warning actively implied there was nothing to find.
+  //
+  // Unlike every other entry here, this one is not "pending a catalog": ct correctly does not manage
+  // people, so there is no person catalog to resolve against and no `__ctRef` kind that could express
+  // it. The ask is only that the tool SAY so, and the wording has to make clear it is unfixable
+  // rather than not-yet-fixed — hence a remedy that is a decision ("remove the clause or accept the
+  // divergence"), not a command to run.
+  //
+  // `person.id` 1 is the unluckiest case: it exists on every ChurchTools instance and is almost
+  // always an administrator, so an exclusion clause aimed at one person on the source host lands on
+  // someone real on the target host rather than harmlessly matching nothing.
+  "person.id":
+    "person ids are NEVER portable — ct does not manage people, so this ruleset names DIFFERENT " +
+    "people on another host. Remove the clause or accept the divergence",
 };
 
 /**
@@ -197,6 +221,21 @@ export function portablizeRuleset(
 
   const marker = (kind: RefKind, key: string): SimpleRef => ({ __ctRef: true, kind, key }) as SimpleRef;
 
+  /**
+   * Does this role's (groupTypeId, slug(name)) pair match more than one catalog row — i.e. is the
+   * `group-type-role` marker unable to name it? Counted once per call, over the whole catalog, using
+   * the SAME key the resolver filters on (`resolveGroupTypeRole`), so the two agree by construction.
+   */
+  const pairCounts = new Map<string, number>();
+  const pairKey = (e: RoleCatalogEntry): string => `${e.groupTypeId} ${slug(e.name)}`;
+  if (roleCatalog) {
+    for (const e of roleCatalog.values()) {
+      const k = pairKey(e);
+      pairCounts.set(k, (pairCounts.get(k) ?? 0) + 1);
+    }
+  }
+  const roleNameAmbiguous = (e: RoleCatalogEntry): boolean => (pairCounts.get(pairKey(e)) ?? 0) > 1;
+
   const mapScalar = (value: unknown, kind: RefKind, varName: string): unknown => {
     if (typeof value !== "number") return value; // booleans/strings/nulls are literals, never entity ids
     const key = idToKeyByKind[kind]?.get(value);
@@ -212,6 +251,36 @@ export function portablizeRuleset(
     if (typeof value !== "number") return value;
     const entry = roleCatalog?.get(value);
     const groupTypeKey = entry ? groupTypeIdToKey?.get(entry.groupTypeId) : undefined;
+
+    // A MANAGED role-def wins over the (group-type, role-name) pair — but ONLY when that pair is
+    // genuinely ambiguous (#125, narrowed).
+    //
+    // The pair is resolved by filtering `/group/roles` on (groupTypeId, slug(name)), so two rows
+    // sharing a name on one group type are a hard error — and neither remedy the error suggests works
+    // for a config shared across hosts. "Rename to disambiguate" means editing ChurchTools master
+    // data to work around a config limitation, and in the observed case one of the two rows is CT's
+    // own stock `leader`. "Pass a numeric id" cannot work at all: the roles have different ids per
+    // host (#127 on one, #207 on the other) and `ConfigContext` deliberately exposes no env or host,
+    // so there is nowhere to branch. A `role-def` ref carries a per-host id in managed state — the
+    // same mechanism `group` and `campus` refs already use — so it makes that case fixable IN CONFIG,
+    // by adopting the role under a shared key on both hosts.
+    //
+    // Why it must NOT win unconditionally: `role-def` is the WEAKER reference of the two off this
+    // host. `Resolver.resolveSimple` falls back to `resolveFromCatalog`, which keys `/group/roles` by
+    // slug(name) ALONE — the very mapping this module's header calls wrong for a `role.id`, and the
+    // reason #76 reverted #86. So on a host where the role was never adopted under the shared key, a
+    // name matching exactly one row resolves SILENTLY to a role on a different group type (only a
+    // multi-row match errors), and the ruleset then matches the wrong role. The `group-type-role`
+    // marker cannot fail that way: it resolves on the (groupTypeId, name) pair, which is unique by
+    // construction. So the safe pair stays the safe pair, and `role-def` is reserved for the case
+    // that has no safe pair to lose.
+    const ambiguous = entry !== undefined && roleNameAmbiguous(entry);
+    if (ambiguous || groupTypeKey === undefined) {
+      const roleDefKey = idToKeyByKind["role-def"]?.get(value);
+      if (roleDefKey !== undefined) {
+        return marker("role-def", roleDefKey);
+      }
+    }
     if (entry && groupTypeKey !== undefined) {
       return {
         __ctRef: true,
