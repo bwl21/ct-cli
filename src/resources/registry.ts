@@ -520,26 +520,37 @@ export const RESOURCES: Record<string, AdoptableResource> = {
       type: r.type,
     }),
     // Fields CT REQUIRES at create but the tool does not otherwise manage (#73/#121). The old comment
-    // here claimed `type` was "optional/nullable — no default needed"; live CT 3.135.2 disagrees and
-    // rejects the POST with three validation errors:
+    // here claimed `type`/`isLeader`/`sortKey` were "all optional/nullable — no default needed", which
+    // is what made this look supported. VERIFIED LIVE on eqrm-dev, CT 3.135.2 (2026-08-17): POSTing
+    // the old body (`{name, nameTranslated, groupTypeId, shorty}`) is rejected with FOUR validation
+    // errors, not three —
     //
+    //   sortKey    "Bitte eine ganze Zahl eingeben (ohne Punkt und Komma)."   validation.integer
     //   type       "Die Eingabe sollte eine der folgenden Werte sein: leader, participant"
-    //   isDefault  "Eingabe muss TRUE oder FALSE sein."
-    //   isHidden   "Eingabe muss TRUE oder FALSE sein."
+    //   isDefault  "Eingabe muss TRUE oder FALSE sein."                       validation.boolean
+    //   isHidden   "Eingabe muss TRUE oder FALSE sein."                       validation.boolean
     //
-    // so a declared `roleDefinition` that did not exist on the target host could not be created at
-    // all — and it failed in `apply`, on the host the pipeline writes to, after `plan` had been green.
+    // so a declared `roleDefinition` missing from the target host could not be created at all — and it
+    // failed in `apply`, on the host the pipeline writes to, after `plan` had been green. Adding all
+    // four succeeds (probe created and deleted role #288, instance left as found).
     //
     // `shorty` is 1–10 chars, non-nullable, derived from the declared `name`; padded up to the 1-char
     // floor for the same empty-name edge case as group-type's shorty above.
     // `type` defaults to `participant`: the conservative half of the choice, since `leader` confers
     // group leadership. A config that wants the other one declares `type: "leader"` and wins here
     // (createDefaults merges UNDER the declared body).
+    // `sortKey: 0` matches every stock role on the probed instance (all 87 carry `sortKey: 0`), so it
+    // is a neutral default rather than a position claim.
+    //
+    // `isLeader` is deliberately NOT sent: CT DERIVES it from `type`. The probe confirmed a role
+    // created with `type: "leader"` reads back `isLeader: true` without it ever being in the body, so
+    // sending it would be a second, redundant source of truth for the same fact.
     createDefaults: (r) => ({
       shorty: truncatePadded(str(r, "name"), 10, 1),
       type: "participant",
       isDefault: false,
       isHidden: false,
+      sortKey: 0,
     }),
     // `groupRole` is taken by the permissions DSL (`ct.groupRole` = definePermission("group_role")),
     // so the master-data role resource declares under a distinct name.

@@ -296,6 +296,13 @@ diffed or reverted afterwards:
 | `type`      | `"participant"`          | **declarable** — `"leader"` or `"participant"` |
 | `isDefault` | `false`                  | create default                                 |
 | `isHidden`  | `false`                  | create default                                 |
+| `sortKey`   | `0`                      | create default; every stock role uses `0`      |
+
+All four non-`shorty` fields are genuinely required: verified live on eqrm-dev
+(CT 3.135.2), where a POST without them is rejected with one validation error
+each. `isLeader` is deliberately **not** sent — ChurchTools derives it from
+`type`, and a role created with `type: "leader"` reads back `isLeader: true` on
+its own.
 
 `type` is the one that is a real semantic choice — does holding this role make
 you a _leader_ of the group? — so it is declarable and defaults to the

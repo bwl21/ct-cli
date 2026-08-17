@@ -164,7 +164,7 @@ describe("executePlan", () => {
     });
   });
 
-  it("group-role create POST carries the required `shorty` default (#73 audit)", async () => {
+  it("group-role create POST carries every create-required default (#73 audit, #121)", async () => {
     const state = emptyState("h");
     const { client, calls } = recorder({ "POST /group/roles": { id: 4 } });
     const plan: Plan = {
@@ -185,8 +185,9 @@ describe("executePlan", () => {
     expect(calls[0]).toEqual({
       method: "POST",
       path: "/group/roles",
-      // `type`/`isDefault`/`isHidden` are create-only defaults CT validates (#121) — sent on the
-      // POST, absent from state, so they are never diffed or reverted afterwards.
+      // `sortKey`/`type`/`isDefault`/`isHidden` are create-only defaults CT validates (#121, all four
+      // confirmed live on eqrm-dev) — sent on the POST, absent from state, so they are never diffed
+      // or reverted afterwards.
       body: {
         name: "Verantwortlicher",
         groupTypeId: 2,
@@ -194,6 +195,7 @@ describe("executePlan", () => {
         type: "participant",
         isDefault: false,
         isHidden: false,
+        sortKey: 0,
       },
     });
     expect(state.resources.leiter?.fields).toEqual({ name: "Verantwortlicher", groupTypeId: 2 });
