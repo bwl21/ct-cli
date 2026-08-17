@@ -5,7 +5,7 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: 5f9ed09f1e3793b0
+sources_hash: 87fe6c847d70d89c
 reviewed: 2026-08-17
 ---
 

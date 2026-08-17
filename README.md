@@ -116,6 +116,9 @@ from the state file, makes no HTTP call, and leaves the resource in place in
 ChurchTools, now unmanaged. It refuses a key the config still declares — that
 would make the next plan propose creating a resource that already exists — so
 delete the declaration first, or pass `--force` to do both in one change.
+"Declares" covers permission declarations too, not only resources: a key named
+by a `ct.groupRole` domain or a group scope is just as broken to remove, and the
+refusal is what keeps that from surfacing one command later as a plan error.
 
 `apply` reconciles **creates and updates** only, saving state after each action
 (crash-safe / resumable). It **never deletes**: a resource dropped from the

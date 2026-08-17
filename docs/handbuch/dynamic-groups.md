@@ -6,7 +6,7 @@ sources:
   - src/engine/dynamic.ts
   - src/engine/synthetic.ts
   - src/commands/adopt-group.ts
-sources_hash: 9a8c3091484e9258
+sources_hash: d67f76530e841833
 reviewed: 2026-08-17
 ---
 
@@ -166,13 +166,13 @@ position that maps to a **managed** logical key is rewritten to its `{ __ctRef }
 marker; every other id is left numeric. The `var → RefKind` catalog it keys off
 (`VAR_REF_KINDS`) is:
 
-| ChurchQuery `var`     | marker `kind`     | source catalog / state                   |
-| --------------------- | ----------------- | ---------------------------------------- |
-| `ctgroup.id`          | `group`           | managed state (no REST catalog)          |
-| `ctgroup.campusId`    | `campus`          | `/campuses`                              |
-| `person.campusId`     | `campus`          | `/campuses`                              |
-| `ctgroup.groupTypeId` | `group-type`      | `/group/grouptypes`                      |
-| `role.id`             | `group-type-role` | `/group/roles` (by `groupTypeId` + name) |
+| ChurchQuery `var`     | marker `kind`     | source catalog / state                             |
+| --------------------- | ----------------- | -------------------------------------------------- |
+| `ctgroup.id`          | `group`           | managed state (no REST catalog)                    |
+| `ctgroup.campusId`    | `campus`          | `/campuses`                                        |
+| `person.campusId`     | `campus`          | `/campuses`                                        |
+| `ctgroup.groupTypeId` | `group-type`      | `/group/grouptypes`                                |
+| `role.id`             | `group-type-role` | `/group/roles` (by `groupTypeId` + name)           |
 | `role.id`             | `role-def`        | managed state — only when the pair collides (#125) |
 
 The same `group-type-role` rewrite also covers the **out-of-query** integer
