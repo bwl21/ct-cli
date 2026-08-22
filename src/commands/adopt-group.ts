@@ -107,22 +107,62 @@ async function resolveGroupId(
  * hierarchy (a live-API bug, not a valid DAG state) with a `visited` set — never re-descends into
  * an id already seen, so a back-reference to an ancestor cannot loop forever.
  */
+export function extractChildren(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw;
+  if (raw !== null && typeof raw === "object" && Array.isArray((raw as Record<string, unknown>).data)) {
+    return (raw as { data: unknown[] }).data;
+  }
+
+  const shape =
+    raw === null
+      ? "null"
+      : typeof raw === "object"
+        ? `{ ${Object.keys(raw as Record<string, unknown>).join(", ")} }`
+        : typeof raw;
+  throw new Error(
+    `GET /groups/{id}/children returned an unsupported response (${shape}); expected an array or { data: [...] }.`,
+  );
+}
+
+function childId(raw: unknown): number {
+  let candidate: unknown = raw;
+  if (raw !== null && typeof raw === "object") {
+    const child = raw as Record<string, unknown>;
+    candidate = child.id ?? child.domainIdentifier;
+    if (candidate === undefined && typeof child.apiUrl === "string") {
+      candidate = /\/groups\/(\d+)(?:[/?#]|$)/.exec(child.apiUrl)?.[1];
+    }
+  }
+
+  const id =
+    typeof candidate === "number"
+      ? candidate
+      : typeof candidate === "string" && /^\d+$/.test(candidate.trim())
+        ? Number.parseInt(candidate, 10)
+        : Number.NaN;
+  if (!Number.isSafeInteger(id) || id < 0) {
+    const shape =
+      raw !== null && typeof raw === "object"
+        ? `{ ${Object.keys(raw as Record<string, unknown>).join(", ")} }`
+        : JSON.stringify(raw);
+    throw new Error(
+      `GET /groups/{id}/children returned a child without a usable id (${shape}); ` +
+        `expected a number or an object with id, domainIdentifier, or apiUrl.`,
+    );
+  }
+  return id;
+}
+
 async function collectSubtreeIds(rootId: number, client: Pick<CtClient, "get">): Promise<number[]> {
   const visited = new Set<number>([rootId]);
   const order: number[] = [];
 
   async function walk(id: number): Promise<void> {
-    let raw: unknown;
-    try {
-      raw = await client.get(`/groups/${id}/children`);
-    } catch (err) {
-      if (err instanceof CtApiError && err.status === 404) return; // no children (leaf, or unknown group)
-      throw err;
-    }
-    const children = Array.isArray(raw) ? raw : [];
+    const raw = await client.get(`/groups/${id}/children`);
+    const children = extractChildren(raw);
     for (const c of children) {
-      const cid = typeof c === "number" ? c : Number((c as Record<string, unknown> | null)?.id);
-      if (!Number.isFinite(cid) || visited.has(cid)) continue;
+      const cid = childId(c);
+      if (visited.has(cid)) continue;
       visited.add(cid);
       order.push(cid);
       await walk(cid);
