@@ -15,7 +15,7 @@
 import type { Argument, Command, Option } from "commander";
 import { defaultEnvStatePath, resolveEnvsPath } from "../env/envs.js";
 import { resolveStatePath } from "../state/state.js";
-import { envNames, paths, resourceTypes, stateKeys } from "./sources.js";
+import { envNames, envStatePath, paths, resourceTypes, stateKeys } from "./sources.js";
 
 /** Where the cursor is: the resolved command plus the words already typed for it. */
 interface Position {
@@ -38,17 +38,28 @@ type DynamicSource = (position: Position, partial: string) => Promise<string[]> 
  * the walker keeps the dynamic surface reviewable in one place.
  */
 const DYNAMIC_ARGUMENTS: Record<string, DynamicSource> = {
+  "ct adopt type": () => resourceTypes(),
   "ct state rm type": () => resourceTypes(),
-  "ct state rm key": (position) => stateKeys(statePathFor(position)),
+  // `ct state rm <type> <key>` refuses a key belonging to another type, so the type
+  // already typed narrows the keys — completing into a guaranteed error helps nobody.
+  "ct state rm key": async (position) =>
+    stateKeys(await statePathFor(position), position.positionals[0]),
 };
 
-/** The state file the typed `--state`/`--env` words point at (same precedence as the commands). */
-function statePathFor(position: Position): string {
+/**
+ * The state file the typed `--state`/`--env` words point at, with the same precedence
+ * the commands use (`prepareEnv` → `resolveStatePath`): explicit `--state`, then
+ * `CT_STATE`, then the env profile's own `state` field, then the `ct-state.<env>.json`
+ * convention. Reading the profile's override matters — a repo that sets it would
+ * otherwise be offered the keys of a state file it does not use.
+ */
+async function statePathFor(position: Position): Promise<string> {
   const env = position.options.get("--env");
+  const declared = env ? await envStatePath(resolveEnvsPath(), env) : undefined;
   return resolveStatePath(
     position.options.get("--state"),
     process.env,
-    env ? defaultEnvStatePath(env) : undefined,
+    env ? (declared ?? defaultEnvStatePath(env)) : undefined,
   );
 }
 
@@ -189,13 +200,23 @@ export async function completionCandidates(
 /**
  * Split a shell command line into the completed words plus the word under the cursor.
  *
- * `fragment` is the shell's index of the word being completed, which is what
- * distinguishes `ct plan<TAB>` (completing `plan`) from `ct plan <TAB>` (completing a
- * new, empty word) without having to trust that a trailing space survived the trip
- * through three different shell quoting regimes.
+ * `fragment` is the shell's index of the word under the cursor. It is what locates the
+ * cursor at all: `line` is the whole buffer, so it also holds whatever the user has
+ * typed *after* the cursor, and a trailing space in it says nothing about where the
+ * cursor sits. Splitting at `fragment` is therefore what makes Tab in the middle of a
+ * line complete the word it is actually on.
+ *
+ * The index is trustworthy in zsh and fish. bash's hook derives it from `COMP_CWORD`
+ * minus a fudge for colons, and `COMP_WORDBREAKS` breaks on more than colons (`=`, `:`
+ * after the cursor), so it can come in inflated past the end of the line. That case is
+ * detectable — the index points past the last token — and falls back to the shape of
+ * the line itself, which is what the previous behaviour did for every line.
  */
 export function splitCompletionLine(line: string, fragment: number): { words: string[]; partial: string } {
   const tokens = line.split(/\s+/).filter(Boolean);
-  if (tokens.length > fragment) return { words: tokens.slice(0, -1), partial: tokens.at(-1) ?? "" };
-  return { words: tokens, partial: "" };
+  if (fragment >= 0 && fragment < tokens.length) {
+    return { words: tokens.slice(0, fragment), partial: tokens[fragment] ?? "" };
+  }
+  if (tokens.length === 0 || /\s$/.test(line)) return { words: tokens, partial: "" };
+  return { words: tokens.slice(0, -1), partial: tokens.at(-1) ?? "" };
 }

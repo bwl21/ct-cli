@@ -8,7 +8,9 @@
  * this way:
  *
  * - The per-shell syntax (zsh `compdef`/`compadd`, bash `complete`/`compgen`, fish
- *   `complete -a`) lives in the library. This repo owns no shell dialect.
+ *   `complete -a`) lives in the library. The only dialect this repo writes itself is
+ *   {@link BASH_COMPLETION_FALLBACKS}, and only because omelette's bash branch depends
+ *   on a package stock macOS bash does not ship.
  * - The candidates are computed live, so they follow the command tree of the binary
  *   that is actually installed and can include things a static script could never
  *   know — the environments in *this* `ct.envs.json`, the keys in *this* state file.
@@ -56,11 +58,34 @@ function hook(program: Command): CompletionHook {
   return omelette(program.name()) as unknown as CompletionHook;
 }
 
+/**
+ * The one piece of shell dialect this repo does own.
+ *
+ * omelette's `complete`-based branch calls `_get_comp_words_by_ref` and
+ * `__ltrim_colon_completions`, which ship with the `bash-completion` package rather
+ * than with bash. Stock macOS bash (3.2, the one `~/.bash_profile` in the README gets
+ * you) has neither, so without this every single Tab prints two `command not found`
+ * lines into the command line — exactly the failure mode the rest of this module goes
+ * out of its way to avoid. These stand-ins do what that one call site asks for and
+ * nothing more, and they only ever define a name that is not already defined, so a
+ * machine that does have bash-completion keeps the real ones.
+ */
+const BASH_COMPLETION_FALLBACKS = `### ct completion fallbacks - begin ###
+if ! type compdef >/dev/null 2>&1 && type complete >/dev/null 2>&1; then
+  if ! declare -F _get_comp_words_by_ref >/dev/null 2>&1; then
+    _get_comp_words_by_ref() { cur=\${COMP_WORDS[COMP_CWORD]}; prev=\${COMP_WORDS[COMP_CWORD-1]}; }
+  fi
+  if ! declare -F __ltrim_colon_completions >/dev/null 2>&1; then
+    __ltrim_colon_completions() { :; }
+  fi
+fi
+### ct completion fallbacks - end ###`;
+
 /** The hook to paste into a shell startup file. zsh and bash share one (it branches itself). */
 export function completionScript(program: Command, shell: CompletionShell): string {
   const instance = hook(program);
-  const script = shell === "fish" ? instance.generateCompletionCodeFish() : instance.generateCompletionCode();
-  return `${script}\n`;
+  if (shell === "fish") return `${instance.generateCompletionCodeFish()}\n`;
+  return `${BASH_COMPLETION_FALLBACKS}\n${instance.generateCompletionCode()}\n`;
 }
 
 /** True when this invocation is a shell asking for candidates rather than a user running a command. */

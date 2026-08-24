@@ -114,6 +114,9 @@ echo '. <(ct completion zsh)' >> ~/.zshrc
 echo '. <(ct completion bash)' >> ~/.bashrc     # macOS: ~/.bash_profile
 ```
 
+The bash hook runs on the bash macOS ships (3.2); the `bash-completion` package is
+not required.
+
 ```fish
 # fish
 ct completion fish > ~/.config/fish/completions/ct.fish

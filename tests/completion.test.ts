@@ -123,7 +123,7 @@ describe("dynamic completion", () => {
     expect(await complete(buildProgram(), "ct plan --env ")).toEqual(["dev", "prod"]);
   });
 
-  it("completes `state rm` with the keys actually under management", async () => {
+  it("completes `state rm` with the keys actually under management, of the typed type", async () => {
     process.env.CT_STATE = join(dir, "ct-state.json");
     await writeFile(
       process.env.CT_STATE,
@@ -133,7 +133,50 @@ describe("dynamic completion", () => {
         resources: { mainz: { type: "campus", id: 1 }, youth: { type: "group", id: 2 } },
       }),
     );
-    expect(await complete(buildProgram(), "ct state rm campus ")).toEqual(["mainz", "youth"]);
+    // `youth` is a group; `state rm campus youth` is refused, so it is not offered.
+    expect(await complete(buildProgram(), "ct state rm campus ")).toEqual(["mainz"]);
+    expect(await complete(buildProgram(), "ct state rm group ")).toEqual(["youth"]);
+  });
+
+  it("completes `state rm` from the state file the env profile declares", async () => {
+    // The profile's own `state` field is what the command will edit, so it is what
+    // completion has to read — not the `ct-state.<env>.json` convention it overrides.
+    process.env.CT_ENVS = join(dir, "ct.envs.json");
+    await writeFile(
+      process.env.CT_ENVS,
+      JSON.stringify({
+        environments: { dev: { host: "https://x-dev.church.tools", state: "declared.json" } },
+      }),
+    );
+    await writeFile(
+      join(dir, "declared.json"),
+      JSON.stringify({
+        version: 1,
+        host: "https://x-dev.church.tools",
+        resources: { mainz: { type: "campus", id: 1 } },
+      }),
+    );
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(await complete(buildProgram(), "ct state rm --env dev campus ")).toEqual(["mainz"]);
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it("completes `adopt` with the resource types the registry knows", async () => {
+    expect(await complete(buildProgram(), "ct adopt ")).toEqual(
+      expect.arrayContaining(["campus", "group", "group-role"]),
+    );
+  });
+
+  it("completes a path option under the home directory", async () => {
+    // The hooks turn off the shell's own filename fallback, so `ct` must expand `~`
+    // itself or a tilde path completes to nothing at all.
+    const candidates = await complete(buildProgram(), "ct apply --backup-dir ~/");
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const candidate of candidates) expect(candidate.startsWith("~/")).toBe(true);
   });
 
   it("completes `state rm` with the resource types the registry knows", async () => {
@@ -170,6 +213,28 @@ describe("splitCompletionLine", () => {
   it("treats the cursor after a space as a new, empty word", () => {
     expect(splitCompletionLine("ct state ", 2)).toEqual({ words: ["ct", "state"], partial: "" });
   });
+
+  it("splits at the cursor, not at the end of the line", () => {
+    // The line the shells hand over is the whole buffer, including what is typed after
+    // the cursor; only `fragment` says which word Tab was pressed on.
+    expect(splitCompletionLine("ct state rm campus mainz", 3)).toEqual({
+      words: ["ct", "state", "rm"],
+      partial: "campus",
+    });
+  });
+
+  it("falls back to the shape of the line when the index overshoots it", () => {
+    // bash derives the index from COMP_CWORD, which breaks on more characters than the
+    // hook's colon fudge accounts for, so it can arrive past the end of the line.
+    expect(splitCompletionLine("ct plan --config a", 9)).toEqual({
+      words: ["ct", "plan", "--config"],
+      partial: "a",
+    });
+    expect(splitCompletionLine("ct plan --config a ", 9)).toEqual({
+      words: ["ct", "plan", "--config", "a"],
+      partial: "",
+    });
+  });
 });
 
 describe("the installed shell hook", () => {
@@ -178,8 +243,9 @@ describe("the installed shell hook", () => {
       const script = completionScript(buildProgram(), shell);
       expect(script).toContain("--compgen");
       expect(script).toContain("ct");
-      // The whole hook is small because the shell dialect lives in the library, not here.
-      expect(script.split("\n").length).toBeLessThan(40);
+      // The whole hook stays small because the shell dialect lives in the library —
+      // apart from the handful of bash-completion stand-ins prepended for stock bash.
+      expect(script.split("\n").length).toBeLessThan(60);
     }
   });
 
@@ -187,6 +253,16 @@ describe("the installed shell hook", () => {
     expect(completionScript(buildProgram(), "zsh")).toContain("compdef");
     expect(completionScript(buildProgram(), "bash")).toContain("complete -F");
     expect(completionScript(buildProgram(), "fish")).toContain("complete -f -c ct");
+  });
+
+  it("does not depend on the bash-completion package being installed", () => {
+    // Stock macOS bash has neither helper; without stand-ins every Tab would print
+    // two "command not found" lines into the command line.
+    const script = completionScript(buildProgram(), "bash");
+    for (const helper of ["_get_comp_words_by_ref", "__ltrim_colon_completions"]) {
+      // Defined only when absent, so a machine with bash-completion keeps the real one.
+      expect(script).toContain(`if ! declare -F ${helper} >/dev/null 2>&1; then`);
+    }
   });
 
   it("recognises a Tab keypress by the hook's plumbing flag", () => {
