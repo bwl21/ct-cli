@@ -7,6 +7,7 @@ import {
   clearCredentials,
   isSecureStorageAvailable,
 } from "../auth/tokenStore.js";
+import { keychainSessionCache } from "../auth/sessionStore.js";
 import { bootstrapLoginToken } from "../auth/login.js";
 import { askVisible } from "../ui/prompt.js";
 import { checkAllEnvAuth, renderEnvAuth, allEnvsAuthenticated } from "../auth/status.js";
@@ -95,8 +96,10 @@ export function authCommand(): Command {
         token = outcome.token;
       }
 
-      const client = new CtClient(config);
-      const me = await client.authenticate(token);
+      const client = new CtClient(config, { sessionCache: keychainSessionCache() });
+      // `fresh`: a login must actually prove the token, never be answered from a
+      // cached session — but the session it buys is cached for the next command.
+      const me = await client.authenticate(token, { fresh: true });
       const location = await storeCredentials({ host: config.host, token });
       success(`Logged in to ${config.host} as ${me.firstName ?? ""} ${me.lastName ?? ""} (#${me.id})`.trim());
       info(`Host + token stored in ${location}.`);
