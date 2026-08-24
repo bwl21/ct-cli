@@ -82,6 +82,7 @@ curl -L -o ct https://github.com/eqrm/ct-cli/releases/latest/download/ct-linux-x
 chmod +x ct
 sudo mv ct /usr/local/bin/ct   # or anywhere on your PATH
 ct --help
+ct --version                   # e.g. 1.7.0 (/usr/local/bin/ct) — version AND which binary
 ```
 
 With Node ≥ 20 already installed, the npm-pack tarball works too:
@@ -129,7 +130,7 @@ Open a new shell, then try `ct sta<Tab>`, `ct state rm <Tab>` or `ct plan --env 
 ```bash
 # The host is captured at login and stored with the token; CT_HOST overrides it for CI.
 ct auth login --host https://mychurch.church.tools --token <personal-login-token>
-ct auth status                # who am I?
+ct auth status                # who am I? (`--env <name>` asks on another instance)
 
 ct get groups                 # JSON to stdout — pipe into jq (every page, not just the first)
 ct adopt campus 0             # bring ONE existing resource under management
