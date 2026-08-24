@@ -102,34 +102,21 @@ async function resolveGroupId(
 }
 
 /**
- * Recursively collect a group's full hierarchy subtree via `/groups/{id}/children`, in
- * parent-before-child (pre-order) sequence, excluding the root itself. Guards against a cyclic
- * hierarchy (a live-API bug, not a valid DAG state) with a `visited` set — never re-descends into
- * an id already seen, so a back-reference to an ancestor cannot loop forever.
+ * Resolve one `/groups/{id}/children` row to the group id it points at.
+ *
+ * CT answers this endpoint with either plain group rows (`{ id }`) or domain resources
+ * (`{ domainType: "group", domainIdentifier, apiUrl }`). For a domain resource the authoritative
+ * group id is `domainIdentifier` — a sibling `id`, if CT ever emits one, is the hierarchy edge's
+ * own id — so `domainIdentifier` is read first and `id` only backs it up. `apiUrl` is the last
+ * resort. `parentId` is threaded in purely so the error names the group that actually failed:
+ * `--children-of` walks whole subtrees, and "some group somewhere" is not actionable.
  */
-export function extractChildren(raw: unknown): unknown[] {
-  if (Array.isArray(raw)) return raw;
-  if (raw !== null && typeof raw === "object" && Array.isArray((raw as Record<string, unknown>).data)) {
-    return (raw as { data: unknown[] }).data;
-  }
-
-  const shape =
-    raw === null
-      ? "null"
-      : typeof raw === "object"
-        ? `{ ${Object.keys(raw as Record<string, unknown>).join(", ")} }`
-        : typeof raw;
-  throw new Error(
-    `GET /groups/{id}/children returned an unsupported response (${shape}); expected an array or { data: [...] }.`,
-  );
-}
-
-function childId(raw: unknown): number {
+function childId(raw: unknown, parentId: number): number {
   let candidate: unknown = raw;
   if (raw !== null && typeof raw === "object") {
     const child = raw as Record<string, unknown>;
-    candidate = child.id ?? child.domainIdentifier;
-    if (candidate === undefined && typeof child.apiUrl === "string") {
+    candidate = child.domainIdentifier ?? child.id;
+    if (candidate == null && typeof child.apiUrl === "string") {
       candidate = /\/groups\/(\d+)(?:[/?#]|$)/.exec(child.apiUrl)?.[1];
     }
   }
@@ -146,22 +133,33 @@ function childId(raw: unknown): number {
         ? `{ ${Object.keys(raw as Record<string, unknown>).join(", ")} }`
         : JSON.stringify(raw);
     throw new Error(
-      `GET /groups/{id}/children returned a child without a usable id (${shape}); ` +
+      `GET /groups/${parentId}/children returned a child without a usable id (${shape}); ` +
         `expected a number or an object with id, domainIdentifier, or apiUrl.`,
     );
   }
   return id;
 }
 
-async function collectSubtreeIds(rootId: number, client: Pick<CtClient, "get">): Promise<number[]> {
+/**
+ * Recursively collect a group's full hierarchy subtree via `/groups/{id}/children`, in
+ * parent-before-child (pre-order) sequence, excluding the root itself. Guards against a cyclic
+ * hierarchy (a live-API bug, not a valid DAG state) with a `visited` set — never re-descends into
+ * an id already seen, so a back-reference to an ancestor cannot loop forever.
+ *
+ * `/groups/{id}/children` is a paginated list endpoint, so it is read with `getAll`, never a plain
+ * `get` (#101): a plain GET returns only CT's default first page, which would silently drop the
+ * tail of a wide Bereich and every subtree hanging off it. `getAll` also absorbs CT's inconsistent
+ * page shapes (bare array vs. `{ data: [...] }`) and an empty 204 body, which for a leaf group is
+ * simply "no children".
+ */
+async function collectSubtreeIds(rootId: number, client: Pick<CtClient, "getAll">): Promise<number[]> {
   const visited = new Set<number>([rootId]);
   const order: number[] = [];
 
   async function walk(id: number): Promise<void> {
-    const raw = await client.get(`/groups/${id}/children`);
-    const children = extractChildren(raw);
-    for (const c of children) {
-      const cid = childId(c);
+    const page = await client.getAll<unknown>(`/groups/${id}/children`);
+    for (const c of page.data) {
+      const cid = childId(c, id);
       if (visited.has(cid)) continue;
       visited.add(cid);
       order.push(cid);

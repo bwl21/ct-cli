@@ -15,7 +15,7 @@ import type { CtClient } from "../src/api/ctClient.js";
  *  - `/group/grouptypes` (for --type's logical-key resolution)
  *  - `/dynamicgroups/{id}/ruleset` + `/status` (for --with-dynamic; #31 is deliberately NOT dynamic)
  */
-type ChildrenResponse = "array" | "envelope" | "domain-envelope" | "unknown" | "root-404";
+type ChildrenResponse = "array" | "envelope" | "domain-envelope" | "root-404";
 
 function makeClient(childrenResponse: ChildrenResponse = "array") {
   const groups: Record<number, Record<string, unknown>> = {
@@ -97,7 +97,6 @@ function makeClient(childrenResponse: ChildrenResponse = "array") {
           })),
         };
       }
-      if (childrenResponse === "unknown" && parentId === 40) return { items: rows };
       return rows;
     }
     if (path === "/group/grouptypes") return groupTypes;
@@ -117,10 +116,13 @@ function makeClient(childrenResponse: ChildrenResponse = "array") {
 
   const getAll = vi.fn(async (path: string) => {
     if (path === "/groups") return { data: Object.values(groups) };
-    // The Resolver reads master-data catalogs paginated (#99 review), so serve them here too —
-    // same rows as `get`, wrapped in the page envelope.
+    // The Resolver reads master-data catalogs paginated (#99 review), and `--children-of` reads
+    // `/groups/{id}/children` paginated (#101), so serve them here too — same rows as `get`, with
+    // the real client's envelope normalization (bare array or `{ data: [...] }` -> page items).
     const single = await get(path);
-    return { data: Array.isArray(single) ? single : [single] };
+    if (Array.isArray(single)) return { data: single };
+    const inner = (single as { data?: unknown }).data;
+    return { data: Array.isArray(inner) ? inner : [single] };
   });
 
   return { get, getAll };
@@ -266,6 +268,10 @@ describe("ct adopt group --children-of", () => {
     // 41 (child of root) must be adopted before 43 (child of 41).
     const order = Object.values(state.resources).map((r) => r.id);
     expect(order.indexOf(41)).toBeLessThan(order.indexOf(43));
+    // `/groups/{id}/children` is a paginated list endpoint: read via `getAll`, never a plain `get`
+    // (#101), or a wide Bereich silently loses everything past CT's default first page.
+    expect(client.getAll).toHaveBeenCalledWith("/groups/40/children");
+    expect(client.getAll).toHaveBeenCalledWith("/groups/41/children");
   });
 
   it("terminates on a cyclic hierarchy instead of looping forever (cycle guard)", async () => {
@@ -289,13 +295,6 @@ describe("ct adopt group --children-of", () => {
 
     const state = await loadState(statePath, HOST);
     expect(Object.values(state.resources).map((r) => r.id)).toEqual([41, 43, 42]);
-  });
-
-  it("rejects an unknown object response instead of silently treating it as an empty subtree", async () => {
-    client = makeClient("unknown");
-    await expect(run(["group", "--children-of", "40", "--state", statePath])).rejects.toThrow(
-      /unsupported response.*items/,
-    );
   });
 
   it("propagates a children endpoint 404 instead of treating the group as a leaf", async () => {
