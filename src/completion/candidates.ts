@@ -42,8 +42,7 @@ const DYNAMIC_ARGUMENTS: Record<string, DynamicSource> = {
   "ct state rm type": () => resourceTypes(),
   // `ct state rm <type> <key>` refuses a key belonging to another type, so the type
   // already typed narrows the keys — completing into a guaranteed error helps nobody.
-  "ct state rm key": async (position) =>
-    stateKeys(await statePathFor(position), position.positionals[0]),
+  "ct state rm key": async (position) => stateKeys(await statePathFor(position), position.positionals[0]),
 };
 
 /**

@@ -53,7 +53,10 @@ function objectField(value: unknown, field: string): Record<string, unknown> {
 
 /** The environment names declared in the profile file — the values `--env` accepts. */
 export function envNames(path: string): Promise<string[]> {
-  return offline(async () => Object.keys(objectField(JSON.parse(await readFile(path, "utf8")), "environments")), []);
+  return offline(
+    async () => Object.keys(objectField(JSON.parse(await readFile(path, "utf8")), "environments")),
+    [],
+  );
 }
 
 /**
