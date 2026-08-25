@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServerApp } from "../../src/server/app.js";
 import type { ServerOperationCatalog } from "../../src/server/operations.js";
 import { OperationEventStore } from "../../src/server/operation-store.js";
@@ -6,7 +9,7 @@ import { LocalServerSession } from "../../src/server/session.js";
 
 const origin = "http://127.0.0.1:8765";
 
-function harness() {
+function harness(webRoot?: string) {
   const session = new LocalServerSession({ bootstrapSecret: "bootstrap", sessionSecret: "session" });
   const plan = vi.fn(async (request) => ({ operation: "plan", request }));
   const coverage = vi.fn(async (request) => ({ operation: "coverage", request }));
@@ -37,6 +40,7 @@ function harness() {
       executeDestroy,
     } as unknown as ServerOperationCatalog,
     events,
+    webRoot,
   });
   return {
     app,
@@ -63,6 +67,28 @@ async function bootstrap(app: ReturnType<typeof createServerApp>): Promise<strin
 }
 
 describe("local server security boundary", () => {
+  it("serves a built web entry and its hashed asset", async () => {
+    const webRoot = await mkdtemp(join(tmpdir(), "ct-web-"));
+    try {
+      await mkdir(join(webRoot, "assets"));
+      await writeFile(
+        join(webRoot, "index.html"),
+        '<!doctype html><div id="app"></div><script type="module" src="/assets/app-123.js"></script>',
+      );
+      await writeFile(join(webRoot, "assets/app-123.js"), "export const ready = true;");
+      const { app } = harness(webRoot);
+
+      const root = await app.request("/");
+      expect(root.status).toBe(200);
+      expect(await root.text()).toContain('id="app"');
+      const asset = await app.request("/assets/app-123.js");
+      expect(asset.status).toBe(200);
+      expect(asset.headers.get("content-type")).toContain("javascript");
+    } finally {
+      await rm(webRoot, { recursive: true, force: true });
+    }
+  });
+
   it("serves health with restrictive browser headers", async () => {
     const { app } = harness();
     const response = await app.request("/api/health");

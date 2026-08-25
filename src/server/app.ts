@@ -1,5 +1,9 @@
 import { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
+import { serveStatic } from "@hono/node-server/serve-static";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CtApplicationError } from "../application/errors.js";
 import type { PlanRequest } from "../application/operations/plan.js";
 import { createServerOperationCatalog, type ServerOperationCatalog } from "./operations.js";
@@ -24,6 +28,7 @@ export interface CreateServerAppOptions {
   project?: PlanRequest;
   operations?: ServerOperationCatalog;
   events?: OperationEventStore;
+  webRoot?: string;
 }
 
 /** Local-only HTTP projection. Handlers call operations; they never access CT/state primitives. */
@@ -34,6 +39,11 @@ export function createServerApp(options: CreateServerAppOptions): Hono {
   const events = options.events ?? new OperationEventStore();
   const operations = options.operations ?? createServerOperationCatalog({ events });
   const project = options.project ?? {};
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const adjacentWebRoot = join(moduleDir, "web");
+  const webRoot =
+    options.webRoot ??
+    (existsSync(adjacentWebRoot) ? adjacentWebRoot : join(moduleDir, "..", "..", "dist", "web"));
 
   app.use("*", async (context, next) => {
     await next();
@@ -58,6 +68,10 @@ export function createServerApp(options: CreateServerAppOptions): Hono {
     return next();
   });
 
+  if (existsSync(webRoot)) {
+    app.use("/assets/*", serveStatic({ root: webRoot }));
+    app.get("/", serveStatic({ root: webRoot, path: "index.html" }));
+  }
   app.get("/", (context) => context.html(placeholderHtml));
   app.get("/bootstrap.js", (context) =>
     context.body(bootstrapScript, 200, { "content-type": "text/javascript" }),
