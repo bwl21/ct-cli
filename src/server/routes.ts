@@ -1,7 +1,9 @@
 import type { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import type { ConfirmationProof } from "../application/operations/apply.js";
 import type { PlanRequest } from "../application/operations/plan.js";
 import type { ServerOperationCatalog } from "./operations.js";
+import type { OperationEventStore } from "./operation-store.js";
 
 export class ServerInputError extends Error {}
 
@@ -44,6 +46,7 @@ export function registerOperationRoutes(
   app: Hono,
   operations: ServerOperationCatalog,
   baseProject: PlanRequest,
+  events: OperationEventStore,
 ): void {
   app.post("/api/auth/status", async (context) => {
     const body = await bodyOf(context);
@@ -83,5 +86,23 @@ export function registerOperationRoutes(
     return context.json(
       await operations.executeDestroy(context.req.param("id"), confirmationProof(body.proof)),
     );
+  });
+  app.get("/api/operations/:id/events", (context) => {
+    const id = context.req.param("id");
+    if (!events.has(id)) return context.json({ error: { code: "OPERATION_NOT_FOUND" } }, 404);
+    return streamSSE(context, async (stream) => {
+      let chain = Promise.resolve();
+      await new Promise<void>((resolve) => {
+        const stop = events.listen(id, (event, finished) => {
+          chain = chain.then(() => stream.writeSSE({ event: "operation", data: JSON.stringify(event) }));
+          if (finished) void chain.then(resolve);
+        });
+        stream.onAbort(() => {
+          stop();
+          resolve();
+        });
+      });
+      await chain;
+    });
   });
 }
