@@ -13,6 +13,11 @@ import {
   type AuthStatusResult,
 } from "../application/operations/auth.js";
 import {
+  runCoverage,
+  type CoverageRequest,
+  type CoverageResult,
+} from "../application/operations/coverage.js";
+import {
   executePreparedDestroy,
   prepareDestroy,
   type DestroyRequest,
@@ -21,13 +26,17 @@ import {
   type PreparedDestroyExecution,
 } from "../application/operations/destroy.js";
 import { runPlan, type PlanRequest, type PlanResult } from "../application/operations/plan.js";
+import { listState, type StateListResult } from "../application/operations/state.js";
 import { InMemoryMutationLock, PreparedOperationStore } from "../application/prepared-operation-store.js";
+import type { ProjectRequest } from "../application/contracts.js";
 import type { OperationObserver } from "../application/ports.js";
 import type { OperationEventStore } from "./operation-store.js";
 
 export interface ServerOperationCatalog {
   authStatus(request: AuthStatusRequest): Promise<AuthStatusResult>;
   plan(request: PlanRequest): Promise<PlanResult>;
+  coverage(request: CoverageRequest): Promise<CoverageResult>;
+  state(request: ProjectRequest): Promise<StateListResult>;
   prepareApply(request: ApplyRequest): Promise<PreparedApply>;
   executeApply(id: string, proof?: ConfirmationProof): Promise<ApplyResult>;
   prepareDestroy(request: DestroyRequest): Promise<PreparedDestroy>;
@@ -65,6 +74,8 @@ export function createServerOperationCatalog(
   return {
     authStatus: (request) => runAuthStatus(request),
     plan: (request) => runPlan(request),
+    coverage: (request) => runCoverage(request),
+    state: (request) => listState(request),
     prepareApply: async (request) => {
       const prepared = await core.prepareApply(request, { store: applyStore });
       options.events?.open(prepared.id);

@@ -9,6 +9,8 @@ const origin = "http://127.0.0.1:8765";
 function harness() {
   const session = new LocalServerSession({ bootstrapSecret: "bootstrap", sessionSecret: "session" });
   const plan = vi.fn(async (request) => ({ operation: "plan", request }));
+  const coverage = vi.fn(async (request) => ({ operation: "coverage", request }));
+  const state = vi.fn(async (request) => ({ operation: "state", request }));
   const authStatus = vi.fn(async (request) => ({ operation: "auth", request }));
   const prepareApply = vi.fn(async (request) => ({ id: "apply-1", request }));
   const executeApply = vi.fn(async (id, proof) => ({ operation: "apply", id, proof }));
@@ -26,6 +28,8 @@ function harness() {
     },
     operations: {
       plan,
+      coverage,
+      state,
       authStatus,
       prepareApply,
       executeApply,
@@ -37,6 +41,8 @@ function harness() {
   return {
     app,
     plan,
+    coverage,
+    state,
     authStatus,
     prepareApply,
     executeApply,
@@ -178,6 +184,60 @@ describe("local server security boundary", () => {
     });
     expect(destroyed.status).toBe(200);
     expect(executeDestroy).toHaveBeenCalledWith("destroy-1", { type: "yes" });
+  });
+
+  it("projects coverage and state reads with validated filters and server-owned project paths", async () => {
+    const { app, coverage, state } = harness();
+    const cookie = await bootstrap(app);
+    const headers = { origin, cookie, "content-type": "application/json" };
+
+    const coverageResponse = await app.request("/api/coverage", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        environment: "prod",
+        type: "team",
+        declarable: true,
+        blocked: false,
+        statePath: "/escape.json",
+      }),
+    });
+    expect(coverageResponse.status).toBe(200);
+    expect(coverage).toHaveBeenCalledWith({
+      cwd: "/project",
+      configPath: "fixed.config.ts",
+      statePath: "fixed.state.json",
+      environment: "prod",
+      type: "team",
+      declarable: true,
+      blocked: false,
+    });
+
+    const stateResponse = await app.request("/api/state", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ environment: "prod", cwd: "/escape" }),
+    });
+    expect(stateResponse.status).toBe(200);
+    expect(state).toHaveBeenCalledWith({
+      cwd: "/project",
+      configPath: "fixed.config.ts",
+      statePath: "fixed.state.json",
+      environment: "prod",
+    });
+  });
+
+  it("rejects malformed coverage filters before invoking the operation", async () => {
+    const { app, coverage } = harness();
+    const cookie = await bootstrap(app);
+    const response = await app.request("/api/coverage", {
+      method: "POST",
+      headers: { origin, cookie, "content-type": "application/json" },
+      body: JSON.stringify({ blocked: "yes" }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+    expect(coverage).not.toHaveBeenCalled();
   });
 
   it("rejects malformed destructive targets at the transport boundary", async () => {
