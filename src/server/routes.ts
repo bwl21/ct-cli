@@ -31,6 +31,18 @@ function stringList(value: unknown, name: string): string[] | undefined {
   return value;
 }
 
+function optionalString(value: unknown, name: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new ServerInputError(`${name} must be a string.`);
+  return value;
+}
+
+function optionalBoolean(value: unknown, name: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") throw new ServerInputError(`${name} must be a boolean.`);
+  return value;
+}
+
 function confirmationProof(value: unknown): ConfirmationProof | undefined {
   if (value === undefined) return undefined;
   const proof = record(value);
@@ -55,6 +67,21 @@ export function registerOperationRoutes(
   app.post("/api/plan", async (context) => {
     const body = await bodyOf(context);
     return context.json(await operations.plan(projectRequest(baseProject, body)));
+  });
+  app.post("/api/coverage", async (context) => {
+    const body = await bodyOf(context);
+    return context.json(
+      await operations.coverage({
+        ...projectRequest(baseProject, body),
+        type: optionalString(body.type, "type"),
+        declarable: optionalBoolean(body.declarable, "declarable"),
+        blocked: optionalBoolean(body.blocked, "blocked"),
+      }),
+    );
+  });
+  app.post("/api/state", async (context) => {
+    const body = await bodyOf(context);
+    return context.json(await operations.state(projectRequest(baseProject, body)));
   });
   app.post("/api/apply/prepare", async (context) => {
     const body = await bodyOf(context);
