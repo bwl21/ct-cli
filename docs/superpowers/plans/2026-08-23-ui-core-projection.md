@@ -200,21 +200,21 @@ the complete plan without importing an engine, resolver, state store or ChurchTo
 - Create: `tests/application/apply-operation.test.ts`
 - Modify: existing apply and environment protection tests
 
-- [ ] Implement `prepareApply(request)` using the same plan-building primitives as `runPlan`.
+- [x] Implement `prepareApply(request)` using the same plan-building primitives as `runPlan`.
       Factor a private/shared plan builder rather than copy the orchestration.
-- [ ] Return the rendered-independent proposal, exact prepared execution data, change count,
+- [x] Return the rendered-independent proposal, exact prepared execution data, change count,
       warnings and a core-decided confirmation requirement (`yes` or exact environment name).
-- [ ] Implement `executePreparedApply(prepared, proof)` so the core validates completeness,
+- [x] Implement `executePreparedApply(prepared, proof)` so the core validates completeness,
       confirmation, expiry, state-file identity and mutation lock before any write.
-- [ ] Keep backup-before-write, crash-safe state saves, dependency order, permission reconciliation
+- [x] Keep backup-before-write, crash-safe state saves, dependency order, permission reconciliation
       and optional dynamic-group refresh in this operation.
-- [ ] Convert informational milestones to optional `OperationEvent`s. Terminal rendering must remain
+- [x] Convert informational milestones to optional `OperationEvent`s. Terminal rendering must remain
       byte-compatible where covered by tests.
-- [ ] Reduce the Commander action to prepare, render, prompt, execute and map result/errors to exit
+- [x] Reduce the Commander action to prepare, render, prompt, execute and map result/errors to exit
       status.
-- [ ] Test that CLI and direct operation calls produce identical writes, backup behavior and
+- [x] Test that CLI and direct operation calls produce identical writes, backup behavior and
       protected-environment refusal.
-- [ ] Test that an expired/reused prepared operation and a changed state file are refused.
+- [x] Test that an expired/reused prepared operation and a changed state file are refused.
 
 **Exit criterion:** There is no safety decision or mutation orchestration unique to the CLI.
 

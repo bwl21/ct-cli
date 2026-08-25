@@ -6,7 +6,8 @@ import { summarize, type Plan, type PlanAction } from "../../engine/types.js";
 import { CATALOG_DIR, loadHostCatalog } from "../../permissions/catalog-store.js";
 import { buildPermissionPlan, type PermissionPlanItem } from "../../permissions/plan.js";
 import { Resolver } from "../../resolve/resolver.js";
-import { loadState } from "../../state/state.js";
+import { loadState, type State } from "../../state/state.js";
+import type { CtClient } from "../../api/ctClient.js";
 import type { CtWarning, OperationResult, ProjectRequest } from "../contracts.js";
 import { noopObserver, type OperationObserver } from "../ports.js";
 import { resolveProject, type ProjectResolutionDependencies } from "../project.js";
@@ -53,6 +54,14 @@ export interface PlanOperationDependencies {
   observer?: OperationObserver;
 }
 
+/** Internal execution context shared with prepared mutations; never serialize this object. */
+export interface BuiltPlanContext {
+  result: PlanResult;
+  client: CtClient;
+  state: State;
+  actual: Map<string, Record<string, unknown>>;
+}
+
 function summarizePlan(plan: Plan, permissions: PermissionPlanItem[]): PlanSummary {
   const hasResourceChanges = plan.items.some((item) => item.action !== "no-op");
   const hasPermissionChanges = permissions.some(
@@ -76,6 +85,14 @@ export async function runPlan(
   request: PlanRequest = {},
   dependencies: PlanOperationDependencies = {},
 ): Promise<PlanResult> {
+  return (await buildPlanContext(request, dependencies)).result;
+}
+
+/** Build once for both the read-only plan and the exact snapshot later consumed by apply. */
+export async function buildPlanContext(
+  request: PlanRequest = {},
+  dependencies: PlanOperationDependencies = {},
+): Promise<BuiltPlanContext> {
   const observer = dependencies.observer ?? noopObserver;
   observer.emit({ type: "phase-started", phase: "resolve-project" });
   const project = await (dependencies.resolveProject ?? resolveProject)(request, dependencies.project);
@@ -118,18 +135,23 @@ export async function runPlan(
   }));
 
   return {
-    operation: "plan",
-    project,
-    warnings,
-    value: {
-      plan: resourceResult.plan,
-      permissions: permissionResult.items,
-      summary: summarizePlan(resourceResult.plan, permissionResult.items),
-      complete: fetchErrors.length === 0,
-      fetchErrors,
-      churchToolsVersion: client.version,
-      stateHost: state.host,
-      permissionCatalogPath: catalogPath,
+    client,
+    state,
+    actual: resourceResult.actual,
+    result: {
+      operation: "plan",
+      project,
+      warnings,
+      value: {
+        plan: resourceResult.plan,
+        permissions: permissionResult.items,
+        summary: summarizePlan(resourceResult.plan, permissionResult.items),
+        complete: fetchErrors.length === 0,
+        fetchErrors,
+        churchToolsVersion: client.version,
+        stateHost: state.host,
+        permissionCatalogPath: catalogPath,
+      },
     },
   };
 }

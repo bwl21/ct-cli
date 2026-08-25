@@ -61,10 +61,6 @@ describe("application architecture boundaries", () => {
       [
         "src/commands/adopt-group.ts:saveState",
         "src/commands/adopt.ts:saveState",
-        "src/commands/apply.ts:applyPermissionPlan",
-        "src/commands/apply.ts:executePlan",
-        "src/commands/apply.ts:saveState",
-        "src/commands/apply.ts:writeBackup",
         "src/commands/destroy.ts:saveState",
         "src/commands/destroy.ts:writeBackup",
         "src/commands/state.ts:saveState",
