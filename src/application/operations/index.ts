@@ -6,3 +6,4 @@ export * from "./state.js";
 export * from "./adopt.js";
 export * from "./auth.js";
 export * from "./adopt-group.js";
+export * from "./adopt-grants.js";
