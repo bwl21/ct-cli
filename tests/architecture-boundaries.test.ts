@@ -63,7 +63,6 @@ describe("application architecture boundaries", () => {
         "src/commands/adopt.ts:saveState",
         "src/commands/destroy.ts:saveState",
         "src/commands/destroy.ts:writeBackup",
-        "src/commands/state.ts:saveState",
       ].sort(),
     );
   });
