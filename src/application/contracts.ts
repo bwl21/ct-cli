@@ -46,5 +46,6 @@ export type OperationEvent =
   | { type: "resource-reading"; resourceType: string; key: string }
   | { type: "resource-created"; resourceType: string; key: string; id: number }
   | { type: "resource-updated"; resourceType: string; key: string; id: number }
+  | { type: "resource-destroyed"; resourceType: string; key: string; id: number }
   | { type: "backup-written"; path: string }
   | { type: "warning"; warning: CtWarning };
