@@ -1,19 +1,13 @@
 import { Command } from "commander";
+import { runAuthStatus } from "../application/operations/auth.js";
 import { CtClient } from "../api/ctClient.js";
-import { normalizeHost, resolveConfig } from "../config.js";
-import {
-  storeCredentials,
-  readToken,
-  clearCredentials,
-  isSecureStorageAvailable,
-} from "../auth/tokenStore.js";
+import { normalizeHost } from "../config.js";
+import { storeCredentials, clearCredentials, isSecureStorageAvailable } from "../auth/tokenStore.js";
 import { keychainSessionCache } from "../auth/sessionStore.js";
 import { bootstrapLoginToken } from "../auth/login.js";
 import { askVisible } from "../ui/prompt.js";
-import { checkAllEnvAuth, renderEnvAuth, allEnvsAuthenticated } from "../auth/status.js";
-import { authedSession } from "../api/session.js";
-import { prepareEnvHost } from "../env/context.js";
-import { loadEnvProfile, loadEnvProfiles, resolveEnvsPath } from "../env/envs.js";
+import { renderEnvAuth } from "../auth/status.js";
+import { loadEnvProfile, resolveEnvsPath } from "../env/envs.js";
 import { meetsMinVersion, MIN_CT_VERSION, type CtInfo } from "../api/version.js";
 import { success, error, info, warn, out, formatError } from "../ui.js";
 
@@ -22,23 +16,6 @@ import { success, error, info, warn, out, formatError } from "../ui.js";
  * token exactly as an `--env` command would. Exits non-zero when any environment
  * has no working token, so CI can gate on it.
  */
-async function reportAllEnvs(): Promise<void> {
-  const envsPath = resolveEnvsPath();
-  const profiles = await loadEnvProfiles(envsPath);
-  if (profiles.length === 0) {
-    error(`No environments defined in ${envsPath}.`);
-    process.exitCode = 1;
-    return;
-  }
-  const statuses = await checkAllEnvAuth(profiles);
-  for (const line of renderEnvAuth(statuses)) {
-    process.stdout.write(`${line}\n`);
-  }
-  if (!allEnvsAuthenticated(statuses)) {
-    process.exitCode = 1;
-  }
-}
-
 /** Verify a personal token, cache the resulting session, store it, and report the login. */
 export async function verifyAndStoreLoginToken(rawHost: string, rawToken: string): Promise<void> {
   const host = normalizeHost(rawHost.trim());
@@ -128,35 +105,24 @@ export function authCommand(): Command {
     .option("-e, --env <name>", "environment profile from ct.envs.json (targets that host)")
     .option("--all", "report every environment in ct.envs.json (read-only preflight)")
     .action(async (opts: { env?: string; all?: boolean }) => {
-      if (opts.all) {
-        if (opts.env) {
-          error("--all reports every environment; drop --env (or drop --all to check just one).");
-          process.exitCode = 1;
+      try {
+        const result = await runAuthStatus({ environment: opts.env, all: opts.all });
+        if (result.scope === "all") {
+          if (result.environments.length === 0) {
+            error(`No environments defined in ${result.environmentsPath}.`);
+            process.exitCode = 1;
+            return;
+          }
+          for (const line of renderEnvAuth(result.environments)) process.stdout.write(`${line}\n`);
+          if (!result.authenticated) process.exitCode = 1;
           return;
         }
-        await reportAllEnvs();
-        return;
-      }
-
-      // #22 wiring: point the unchanged host/token resolution at the env's instance.
-      await prepareEnvHost(opts);
-      let host: string;
-      try {
-        host = (await resolveConfig()).host;
-      } catch {
-        error("Not logged in. Run `ct auth login --host <url> --token <token>`.");
+        info(result.environment ? `${result.host} (env ${result.environment})` : result.host!);
+        out(result.identity);
+      } catch (caught) {
+        error(formatError(caught));
         process.exitCode = 1;
-        return;
       }
-      if (!(await readToken(host))) {
-        error(`No token for ${host}. Run \`ct auth login --host ${host} --token <token>\`.`);
-        process.exitCode = 1;
-        return;
-      }
-      const { me } = await authedSession();
-      // The host goes to stderr so `ct auth status | jq` keeps seeing only the identity.
-      info(opts.env ? `${host} (env ${opts.env})` : host);
-      out(me);
     });
 
   cmd
