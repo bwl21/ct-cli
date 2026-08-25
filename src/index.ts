@@ -6,6 +6,7 @@ import { adoptCommand } from "./commands/adopt.js";
 import { stateCommand } from "./commands/state.js";
 import { coverageCommand } from "./commands/coverage.js";
 import { permissionsCommand } from "./commands/permissions.js";
+import { reportCommand } from "./commands/report.js";
 import { refreshCommand } from "./commands/refresh.js";
 import { planCommand } from "./commands/plan.js";
 import { applyCommand } from "./commands/apply.js";
@@ -35,6 +36,7 @@ export function buildProgram(): Command {
   program.addCommand(stateCommand());
   program.addCommand(coverageCommand());
   program.addCommand(permissionsCommand());
+  program.addCommand(reportCommand());
   program.addCommand(refreshCommand());
   program.addCommand(planCommand());
   program.addCommand(applyCommand());

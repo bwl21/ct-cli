@@ -2,14 +2,73 @@
 title: Permissions
 sources:
   - src/permissions/**
+  - src/reports/permissions/**
+  - src/commands/report.ts
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: 3ce80118edd98c48
-reviewed: 2026-08-17
+sources_hash: eaea3f87de51a46f
+reviewed: 2026-08-25
 ---
 
 # Permissions (`ct.groupRole` / `ct.groupTypeRole` / `ct.status`)
+
+## Vollständiger Rechte-Report
+
+Der Permission-Report dokumentiert den vollständigen Live-Rechtebestand der
+ChurchTools-Instanz. Er ist ein reines Reporting-Werkzeug und steht deshalb
+unabhängig von deklarierbaren Grants und `ct adopt grants`.
+
+```bash
+ct report permissions --by-subject reports/permissions-by-subject.md
+ct report permissions --by-object reports/permissions-by-object.md
+
+# Beide Reports aus demselben Live-Datensatz:
+ct report permissions \
+  --by-subject reports/permissions-by-subject.md \
+  --by-object reports/permissions-by-object.md
+
+# Ohne Dateinamen entstehen permissions-by-subject.md und permissions-by-object.md:
+ct report permissions --by-subject --by-object
+
+# Ein Basispfad erzeugt zwei Dateien mit passenden Suffixen:
+ct report permissions --by-both reports/permission-report.md
+# → reports/permission-report_by-subject.md
+# → reports/permission-report_by-object.md
+```
+
+`subject` beantwortet „Was darf dieses Subjekt?“ und gruppiert Subjekte mit
+identischem vollständigem Rechte-Set unter einem stabilen Hash. Der Hash ist
+kein Subjekt-Identifier. Seine Identität besteht aus `authId`, Objektdimension,
+Objekt-ID, den zugehörigen Rechte-/Objektnamen und Grant/Revoke. Gleich benannte
+Objekte mit verschiedenen IDs bleiben dadurch verschieden; ebenso erzeugt eine
+Umbenennung bewusst einen neuen Report-Hash. Bekannte Status (`ST`) und
+Gruppentyp-Rollen (`GTRL`) erscheinen auch ohne eigene Zuweisung unter „Keine
+Berechtigungen“. So werden erwartete Status oder Rollen ohne direkte Rechte als
+Berechtigungslücke sichtbar, statt stillschweigend aus dem Report zu
+verschwinden. Eine leere Rechte-Menge erhält bewusst keinen Fingerprint.
+Personen (`PRS`) und konkrete Gruppenrollen (`GRRL`) werden dagegen nur
+aufgeführt, wenn mindestens eine direkte Permission existiert: Alle leeren
+Personen und Rollenpaarungen aufzulisten würde die relevanten Lücken zwischen
+tausenden bedeutungslosen Zeilen verstecken. Über Status oder Rollen geerbte
+effektive Personenrechte werden nicht zu einem synthetischen
+Personen-Rechte-Set verrechnet. Innerhalb einer Hash-Gruppe werden die Rechte
+nach `authId`, Rechtename, Grant/Revoke und Objekt sortiert und exakte
+Dubletten fallen weg. Der Report ist damit unabhängig von der Zeilenreihenfolge
+der API und zwischen zwei Läufen diff-stabil. `object` beantwortet „Wer darf
+auf dieses Objekt was?“ und sortiert vorhandene Subjekttypen fest nach Status,
+Gruppentyp, Gruppe und Person.
+
+Objektbezeichnungen werden verlustfrei übernommen und insbesondere nicht
+getrimmt. Das ist fachlich relevant, weil ChurchTools zwei Objekte mit
+unterschiedlichen IDs führen kann, deren Namen sich nur durch unsichtbaren
+Whitespace unterscheiden. Der Report soll diesen Live-Zustand zeigen und nicht
+stillschweigend bereinigen.
+
+Der Report liest auch direkte Personenrechte sowie Rechte auf Dimensionen, die
+`ct adopt grants --all-declarable` bewusst nicht verwalten kann, zum Beispiel
+Wiki-/Kalenderkategorien, Servicegruppen und OAuth-Objekte. Er verändert weder
+ChurchTools noch State oder Config.
 
 Declare ChurchTools permission grants — group-role, group-type-role and
 person-status rights — as code, and reconcile them idempotently with the same

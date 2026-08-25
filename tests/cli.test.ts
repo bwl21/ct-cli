@@ -5,7 +5,17 @@ describe("ct program", () => {
   it("registers the core command surface", () => {
     const names = buildProgram().commands.map((c) => c.name());
     expect(names).toEqual(
-      expect.arrayContaining(["init", "auth", "get", "adopt", "plan", "apply", "destroy", "completion"]),
+      expect.arrayContaining([
+        "init",
+        "auth",
+        "get",
+        "adopt",
+        "report",
+        "plan",
+        "apply",
+        "destroy",
+        "completion",
+      ]),
     );
   });
 
@@ -62,5 +72,14 @@ describe("ct program", () => {
       const cmd = buildProgram().commands.find((c) => c.name() === name)!;
       expect(cmd.options.some((o) => o.long === "--confirm-env")).toBe(true);
     }
+  });
+
+  it("offers one-pass subject and object permission report options", () => {
+    const report = buildProgram().commands.find((c) => c.name() === "report")!;
+    const permissions = report.commands.find((c) => c.name() === "permissions")!;
+    const options = permissions.options.map((o) => o.long);
+    expect(options).toEqual(expect.arrayContaining(["--by-subject", "--by-object", "--by-both"]));
+    expect(options).not.toContain("--by");
+    expect(options).not.toContain("--output");
   });
 });
