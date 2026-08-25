@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { CtApplicationError } from "../application/errors.js";
-import { runAuthStatus, type AuthStatusRequest } from "../application/operations/auth.js";
-import { runPlan, type PlanRequest } from "../application/operations/plan.js";
+import type { PlanRequest } from "../application/operations/plan.js";
+import { createServerOperationCatalog, type ServerOperationCatalog } from "./operations.js";
+import { registerOperationRoutes, ServerInputError } from "./routes.js";
 import { SESSION_COOKIE, type LocalServerSession } from "./session.js";
 import { bootstrapScript, placeholderHtml } from "./static.js";
 
@@ -16,11 +17,6 @@ const SECURITY_HEADERS: Record<string, string> = {
   "x-frame-options": "DENY",
 };
 
-export interface ServerOperationCatalog {
-  authStatus(request: AuthStatusRequest): ReturnType<typeof runAuthStatus>;
-  plan(request: PlanRequest): ReturnType<typeof runPlan>;
-}
-
 export interface CreateServerAppOptions {
   origin: string | (() => string);
   session: LocalServerSession;
@@ -28,21 +24,12 @@ export interface CreateServerAppOptions {
   operations?: ServerOperationCatalog;
 }
 
-function mergeProject(base: PlanRequest, body: unknown): PlanRequest {
-  const requested = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-  return {
-    ...base,
-    // The browser may select an environment, but it cannot escape the server's cwd/config/state scope.
-    ...(typeof requested.environment === "string" ? { environment: requested.environment } : {}),
-  };
-}
-
 /** Local-only HTTP projection. Handlers call operations; they never access CT/state primitives. */
 export function createServerApp(options: CreateServerAppOptions): Hono {
   const app = new Hono();
   const expectedOrigin = (): string =>
     typeof options.origin === "function" ? options.origin() : options.origin;
-  const operations = options.operations ?? { authStatus: runAuthStatus, plan: runPlan };
+  const operations = options.operations ?? createServerOperationCatalog();
   const project = options.project ?? {};
 
   app.use("*", async (context, next) => {
@@ -89,17 +76,23 @@ export function createServerApp(options: CreateServerAppOptions): Hono {
     });
     return context.json({ authenticated: true });
   });
-  app.post("/api/auth/status", async (context) => {
-    const body = await context.req.json().catch(() => ({}));
-    return context.json(await operations.authStatus(mergeProject(project, body)));
-  });
-  app.post("/api/plan", async (context) => {
-    const body = await context.req.json().catch(() => ({}));
-    return context.json(await operations.plan(mergeProject(project, body)));
-  });
+  registerOperationRoutes(app, operations, project);
 
   app.onError((caught, context) => {
-    if (caught instanceof CtApplicationError) return context.json({ error: caught.toJSON() }, 400);
+    if (caught instanceof ServerInputError) {
+      return context.json({ error: { code: "INVALID_REQUEST", message: caught.message } }, 400);
+    }
+    if (caught instanceof CtApplicationError) {
+      const status =
+        caught.code === "AUTH_REQUIRED"
+          ? 401
+          : caught.code === "OPERATION_EXPIRED"
+            ? 410
+            : caught.code === "MUTATION_BUSY" || caught.code === "OPERATION_ALREADY_USED"
+              ? 409
+              : 400;
+      return context.json({ error: caught.toJSON() }, status);
+    }
     const message = caught instanceof Error ? caught.message : String(caught);
     return context.json({ error: { code: "INTERNAL_ERROR", message } }, 500);
   });

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createServerApp, type ServerOperationCatalog } from "../../src/server/app.js";
+import { createServerApp } from "../../src/server/app.js";
+import type { ServerOperationCatalog } from "../../src/server/operations.js";
 import { LocalServerSession } from "../../src/server/session.js";
 
 const origin = "http://127.0.0.1:8765";
@@ -8,6 +9,10 @@ function harness() {
   const session = new LocalServerSession({ bootstrapSecret: "bootstrap", sessionSecret: "session" });
   const plan = vi.fn(async (request) => ({ operation: "plan", request }));
   const authStatus = vi.fn(async (request) => ({ operation: "auth", request }));
+  const prepareApply = vi.fn(async (request) => ({ id: "apply-1", request }));
+  const executeApply = vi.fn(async (id, proof) => ({ operation: "apply", id, proof }));
+  const prepareDestroy = vi.fn(async (request) => ({ id: "destroy-1", request }));
+  const executeDestroy = vi.fn(async (id, proof) => ({ operation: "destroy", id, proof }));
   const app = createServerApp({
     origin,
     session,
@@ -17,9 +22,16 @@ function harness() {
       statePath: "fixed.state.json",
       environment: "dev",
     },
-    operations: { plan, authStatus } as unknown as ServerOperationCatalog,
+    operations: {
+      plan,
+      authStatus,
+      prepareApply,
+      executeApply,
+      prepareDestroy,
+      executeDestroy,
+    } as unknown as ServerOperationCatalog,
   });
-  return { app, plan, authStatus };
+  return { app, plan, authStatus, prepareApply, executeApply, prepareDestroy, executeDestroy };
 }
 
 async function bootstrap(app: ReturnType<typeof createServerApp>): Promise<string> {
@@ -105,5 +117,67 @@ describe("local server security boundary", () => {
       statePath: "fixed.state.json",
       environment: "prod",
     });
+  });
+
+  it("projects prepared apply and destroy without exposing server-owned paths", async () => {
+    const { app, prepareApply, executeApply, prepareDestroy, executeDestroy } = harness();
+    const cookie = await bootstrap(app);
+    const headers = { origin, cookie, "content-type": "application/json" };
+
+    const apply = await app.request("/api/apply/prepare", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ environment: "prod", refresh: true, statePath: "/escape.json" }),
+    });
+    expect(apply.status).toBe(200);
+    expect(prepareApply).toHaveBeenCalledWith({
+      cwd: "/project",
+      configPath: "fixed.config.ts",
+      statePath: "fixed.state.json",
+      environment: "prod",
+      refresh: true,
+    });
+    const applied = await app.request("/api/apply/apply-1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ proof: { type: "environment", value: "prod" } }),
+    });
+    expect(applied.status).toBe(200);
+    expect(executeApply).toHaveBeenCalledWith("apply-1", { type: "environment", value: "prod" });
+
+    const destroy = await app.request("/api/destroy/prepare", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ targets: ["area"], memberFields: ["area::wahl"] }),
+    });
+    expect(destroy.status).toBe(200);
+    expect(prepareDestroy).toHaveBeenCalledWith({
+      cwd: "/project",
+      configPath: "fixed.config.ts",
+      statePath: "fixed.state.json",
+      environment: "dev",
+      targets: ["area"],
+      memberFields: ["area::wahl"],
+    });
+    const destroyed = await app.request("/api/destroy/destroy-1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ proof: { type: "yes" } }),
+    });
+    expect(destroyed.status).toBe(200);
+    expect(executeDestroy).toHaveBeenCalledWith("destroy-1", { type: "yes" });
+  });
+
+  it("rejects malformed destructive targets at the transport boundary", async () => {
+    const { app, prepareDestroy } = harness();
+    const cookie = await bootstrap(app);
+    const response = await app.request("/api/destroy/prepare", {
+      method: "POST",
+      headers: { origin, cookie, "content-type": "application/json" },
+      body: JSON.stringify({ targets: "area" }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+    expect(prepareDestroy).not.toHaveBeenCalled();
   });
 });
