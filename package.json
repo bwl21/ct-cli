@@ -36,7 +36,9 @@
     "regenerate:permission-catalog": "tsx scripts/regenerate-permission-catalog.ts"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.1",
     "commander": "^12.1.0",
+    "hono": "^4.13.4",
     "jiti": "^2.4.0",
     "omelette": "^0.4.17",
     "openapi-fetch": "^0.13.0",
