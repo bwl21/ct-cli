@@ -1,14 +1,10 @@
 import { Command } from "commander";
-import { runAuthStatus } from "../application/operations/auth.js";
-import { CtClient } from "../api/ctClient.js";
+import { runAuthLogin, runAuthLogout, runAuthStatus } from "../application/operations/auth.js";
 import { normalizeHost } from "../config.js";
-import { storeCredentials, clearCredentials, isSecureStorageAvailable } from "../auth/tokenStore.js";
-import { keychainSessionCache } from "../auth/sessionStore.js";
+import { isSecureStorageAvailable } from "../auth/tokenStore.js";
 import { bootstrapLoginToken } from "../auth/login.js";
 import { askVisible } from "../ui/prompt.js";
 import { renderEnvAuth } from "../auth/status.js";
-import { loadEnvProfile, resolveEnvsPath } from "../env/envs.js";
-import { meetsMinVersion, MIN_CT_VERSION, type CtInfo } from "../api/version.js";
 import { success, error, info, warn, out, formatError } from "../ui.js";
 
 /**
@@ -18,23 +14,17 @@ import { success, error, info, warn, out, formatError } from "../ui.js";
  */
 /** Verify a personal token, cache the resulting session, store it, and report the login. */
 export async function verifyAndStoreLoginToken(rawHost: string, rawToken: string): Promise<void> {
-  const host = normalizeHost(rawHost.trim());
-  const token = rawToken.trim();
-  if (!token) throw new Error("No token provided.");
-
-  const client = new CtClient({ host }, { sessionCache: keychainSessionCache() });
-  // A login must actually prove the token, never be answered from a cached session.
-  const me = await client.authenticate(token, { fresh: true });
-  const location = await storeCredentials({ host, token });
-  success(`Logged in to ${host} as ${me.firstName ?? ""} ${me.lastName ?? ""} (#${me.id})`.trim());
-  info(`Host + token stored in ${location}.`);
-
-  const ctInfo = await client.get<CtInfo>("/info");
-  if (ctInfo.version) {
-    if (meetsMinVersion(ctInfo.version)) {
-      info(`ChurchTools ${ctInfo.version} (≥ ${MIN_CT_VERSION} required).`);
+  const result = await runAuthLogin({ host: rawHost, token: rawToken });
+  const me = result.identity;
+  success(`Logged in to ${result.host} as ${me.firstName ?? ""} ${me.lastName ?? ""} (#${me.id})`.trim());
+  info(`Host + token stored in ${result.storage}.`);
+  if (result.churchToolsVersion) {
+    if (result.supportedVersion) {
+      info(`ChurchTools ${result.churchToolsVersion} (≥ ${result.minimumVersion} required).`);
     } else {
-      warn(`ChurchTools ${ctInfo.version} is below the required ${MIN_CT_VERSION} — plan/apply will refuse.`);
+      warn(
+        `ChurchTools ${result.churchToolsVersion} is below the required ${result.minimumVersion} — plan/apply will refuse.`,
+      );
     }
   }
 }
@@ -130,19 +120,17 @@ export function authCommand(): Command {
     .description("Remove the stored host + login token")
     .option("-e, --env <name>", "environment profile from ct.envs.json (log out of that host only)")
     .action(async (opts: { env?: string }) => {
-      if (!opts.env) {
-        await clearCredentials();
+      const result = await runAuthLogout({ environment: opts.env });
+      if (!result.environment) {
         success("Logged out — stored credentials removed.");
         return;
       }
-      const profile = await loadEnvProfile(opts.env, resolveEnvsPath());
-      const { clearedDefault } = await clearCredentials(profile.host);
-      success(`Logged out of ${profile.host} (env ${profile.name}) — other hosts stay logged in.`);
-      if (clearedDefault) {
+      success(`Logged out of ${result.host} (env ${result.environment}) — other hosts stay logged in.`);
+      if (result.clearedDefault) {
         // The default blob held a copy of the very token just removed, so it went
         // with it — and with it the host that commands without --env fall back to.
         warn(
-          `${profile.host} was also the default login, so commands without --env now have no host. ` +
+          `${result.host} was also the default login, so commands without --env now have no host. ` +
             `Run \`ct auth login --host <url> --token <token>\` (or pass --env) to set one again.`,
         );
       }

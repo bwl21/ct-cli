@@ -1,9 +1,17 @@
 import { resolve } from "node:path";
 import { authedSession, type AuthedSession } from "../../api/session.js";
-import type { WhoAmI } from "../../api/ctClient.js";
+import { CtClient, type WhoAmI } from "../../api/ctClient.js";
+import { meetsMinVersion, MIN_CT_VERSION, type CtInfo } from "../../api/version.js";
 import { checkAllEnvAuth, type EnvAuthStatus } from "../../auth/status.js";
-import { readToken } from "../../auth/tokenStore.js";
-import { loadEnvProfiles, resolveEnvsPath } from "../../env/envs.js";
+import { keychainSessionCache } from "../../auth/sessionStore.js";
+import {
+  clearCredentials,
+  readToken,
+  storeCredentials,
+  type ClearCredentialsResult,
+} from "../../auth/tokenStore.js";
+import { normalizeHost } from "../../config.js";
+import { loadEnvProfile, loadEnvProfiles, resolveEnvsPath } from "../../env/envs.js";
 import { CtApplicationError } from "../errors.js";
 import { resolveProject, type ProjectResolutionDependencies } from "../project.js";
 
@@ -33,6 +41,101 @@ export interface AuthStatusDependencies {
   checkAllEnvAuth?: typeof checkAllEnvAuth;
   env?: NodeJS.ProcessEnv;
   cwd?: () => string;
+}
+
+export interface AuthLoginRequest {
+  host: string;
+  token: string;
+}
+
+export interface AuthLoginResult {
+  operation: "auth";
+  action: "login";
+  host: string;
+  identity: WhoAmI;
+  storage: string;
+  churchToolsVersion: string | null;
+  minimumVersion: string;
+  supportedVersion: boolean | null;
+}
+
+export interface AuthLoginDependencies {
+  createClient?: (host: string) => Pick<CtClient, "authenticate" | "get">;
+  storeCredentials?: typeof storeCredentials;
+}
+
+/** Verify and persist a personal token without returning the secret to either adapter. */
+export async function runAuthLogin(
+  request: AuthLoginRequest,
+  dependencies: AuthLoginDependencies = {},
+): Promise<AuthLoginResult> {
+  const host = normalizeHost(request.host.trim());
+  const token = request.token.trim();
+  if (!token) throw new Error("No token provided.");
+  const client = (
+    dependencies.createClient ??
+    ((resolvedHost) => new CtClient({ host: resolvedHost }, { sessionCache: keychainSessionCache() }))
+  )(host);
+  const identity = await client.authenticate(token, { fresh: true });
+  const storage = await (dependencies.storeCredentials ?? storeCredentials)({ host, token });
+  const info = await client.get<CtInfo>("/info");
+  const churchToolsVersion = info.version ?? null;
+  return {
+    operation: "auth",
+    action: "login",
+    host,
+    identity,
+    storage,
+    churchToolsVersion,
+    minimumVersion: MIN_CT_VERSION,
+    supportedVersion: churchToolsVersion ? meetsMinVersion(churchToolsVersion) : null,
+  };
+}
+
+export interface AuthLogoutRequest {
+  cwd?: string;
+  environment?: string;
+}
+
+export interface AuthLogoutResult {
+  operation: "auth";
+  action: "logout";
+  environment: string | null;
+  host: string | null;
+  clearedDefault: boolean;
+}
+
+export interface AuthLogoutDependencies {
+  env?: NodeJS.ProcessEnv;
+  cwd?: () => string;
+  loadEnvProfile?: typeof loadEnvProfile;
+  clearCredentials?: (host?: string) => Promise<ClearCredentialsResult>;
+}
+
+/** Remove credentials for the default login or exactly one environment-bound host. */
+export async function runAuthLogout(
+  request: AuthLogoutRequest = {},
+  dependencies: AuthLogoutDependencies = {},
+): Promise<AuthLogoutResult> {
+  const clear = dependencies.clearCredentials ?? clearCredentials;
+  if (!request.environment) {
+    const { clearedDefault } = await clear();
+    return { operation: "auth", action: "logout", environment: null, host: null, clearedDefault };
+  }
+  const cwd = resolve(dependencies.cwd?.() ?? process.cwd(), request.cwd ?? ".");
+  const environmentsPath = resolve(cwd, resolveEnvsPath(undefined, dependencies.env ?? process.env));
+  const profile = await (dependencies.loadEnvProfile ?? loadEnvProfile)(
+    request.environment,
+    environmentsPath,
+  );
+  const { clearedDefault } = await clear(profile.host);
+  return {
+    operation: "auth",
+    action: "logout",
+    environment: profile.name,
+    host: profile.host,
+    clearedDefault,
+  };
 }
 
 /** Return authentication identity and source metadata without ever returning a token. */
