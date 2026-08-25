@@ -171,7 +171,7 @@ changed yet.
 - Modify: existing plan command tests
 
 - [ ] Move all orchestration currently inside the Commander `.action()` into `runPlan(request,
-    dependencies?)`: environment preparation, config/catalog/state loading, session creation,
+dependencies?)`: environment preparation, config/catalog/state loading, session creation,
       shared resolver creation, concurrent resource/permission plan construction, completeness and
       summary calculation.
 - [ ] Return `PlanResult` containing resource plan, permission items, summary, attribution,
