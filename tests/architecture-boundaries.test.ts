@@ -58,11 +58,7 @@ describe("application architecture boundaries", () => {
     // Tasks 2–4 remove this migration baseline as each command becomes a thin operation adapter.
     // Until then, an additional direct mutation import fails this test instead of expanding silently.
     expect(violations.sort()).toEqual(
-      [
-        "src/commands/adopt-group.ts:saveState",
-        "src/commands/destroy.ts:saveState",
-        "src/commands/destroy.ts:writeBackup",
-      ].sort(),
+      ["src/commands/destroy.ts:saveState", "src/commands/destroy.ts:writeBackup"].sort(),
     );
   });
 });
