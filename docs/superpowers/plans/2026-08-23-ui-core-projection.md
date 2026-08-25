@@ -248,6 +248,11 @@ the complete plan without importing an engine, resolver, state store or ChurchTo
 only be added by projecting an existing operation, or by first adding a core operation used by both
 CLI and UI.
 
+**First-release `get` decision (2026-08-25):** No generic `ct get` subcommand is projected into the
+first UI. Its resources, hierarchy and permission views consume the structured plan, state and
+coverage operations instead. A later raw/query view must first introduce a shared query operation;
+an HTTP route may never call `CtClient` directly to recreate one `get` variant.
+
 ---
 
 ## Task 5: Add the local HTTP adapter and `ct server`

@@ -13,6 +13,7 @@ import { applyCommand } from "./commands/apply.js";
 import { destroyCommand } from "./commands/destroy.js";
 import { initCommand } from "./commands/init.js";
 import { completionCommand } from "./commands/completion.js";
+import { serverCommand } from "./commands/server.js";
 import { plannedCommands } from "./commands/placeholders.js";
 import { isCompletionRequest, serveCompletionRequest } from "./completion/shell.js";
 import { isMainModule } from "./isMain.js";
@@ -42,6 +43,7 @@ export function buildProgram(): Command {
   program.addCommand(applyCommand());
   program.addCommand(destroyCommand());
   program.addCommand(completionCommand());
+  program.addCommand(serverCommand());
   for (const cmd of plannedCommands()) {
     program.addCommand(cmd);
   }
