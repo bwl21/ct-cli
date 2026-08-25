@@ -60,7 +60,6 @@ describe("application architecture boundaries", () => {
     expect(violations.sort()).toEqual(
       [
         "src/commands/adopt-group.ts:saveState",
-        "src/commands/adopt.ts:saveState",
         "src/commands/destroy.ts:saveState",
         "src/commands/destroy.ts:writeBackup",
       ].sort(),

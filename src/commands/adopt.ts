@@ -1,10 +1,5 @@
 import { Command } from "commander";
-import { authedSession } from "../api/session.js";
-import { resolveConfig } from "../config.js";
-import { prepareEnv } from "../env/context.js";
-import { resourceType, configSnippet } from "../resources/registry.js";
-import { ReverseResolver } from "../resolve/reverse.js";
-import { chooseAdoptKey, loadState, saveState, upsert } from "../state/state.js";
+import { runAdoptResource } from "../application/operations/adopt.js";
 import { success, info, warn, out } from "../ui.js";
 import { adoptGrantsCommand } from "./adopt-grants.js";
 import { adoptGroupCommand } from "./adopt-group.js";
@@ -32,66 +27,36 @@ export function adoptCommand(): Command {
     )
     .option("--dry-run", "preview the config entry and state change without writing")
     .action(async (type: string, rawId: string, opts: AdoptOptions) => {
-      const spec = resourceType(type);
-      if (!/^\d+$/.test(rawId.trim())) {
-        throw new Error(`Invalid id "${rawId}" — expected a non-negative integer.`);
-      }
-      const id = Number.parseInt(rawId, 10);
-
-      // Load + validate the state file (host guard included) BEFORE any network
-      // call, so a state file recorded against another instance never triggers a
-      // live authenticated request against the wrong ChurchTools host.
-      const cmdEnv = await prepareEnv(opts);
-      const config = await resolveConfig();
-      const statePath = cmdEnv.statePath;
-      const state = await loadState(statePath, config.host);
-
-      const { client } = await authedSession();
-      // A type whose reads have no item path (#108: Bereiche — CT offers `/departments` only) reads
-      // through the spec's own `fetchOne`. Going via `itemPath` would 404 on every invocation.
-      const resource = spec.fetchOne
-        ? await spec.fetchOne(client, id)
-        : await client.get<Record<string, unknown>>(spec.itemPath(id));
-      if (!resource) {
-        throw new Error(`No ${type} with id ${id} exists in ChurchTools.`);
-      }
-
-      const derived = spec.deriveKey(resource);
-      // An already-managed resource keeps its adopted key unless --rekey says otherwise (#123).
-      const choice = chooseAdoptKey(state, type, id, derived, {
-        explicitKey: opts.key,
+      const result = await runAdoptResource({
+        type,
+        id: rawId,
+        key: opts.key,
+        statePath: opts.state,
+        environment: opts.env,
         rekey: opts.rekey,
+        dryRun: opts.dryRun,
       });
-      const key = choice.key;
-      if (!key) {
-        throw new Error("Could not derive a logical key — pass --key explicitly.");
+      const adopted = result.value;
+      for (const warning of result.warnings.filter((item) => item.code === "ADOPT_KEY_PRESERVED")) {
+        warn(warning.message);
       }
-      if (choice.wouldBecome) {
-        warn(
-          `${key}: key would change to "${choice.wouldBecome}" (derived from the live name). ` +
-            `Keeping the adopted key. Pass --rekey to change it.`,
-        );
-      }
-      const fields = spec.managedFields(resource);
-      // Reverse-resolve numeric ids (campusId/groupTypeId/groupStatusId) to logical sugar so the
-      // emitted snippet is portable and human-readable; unresolved ids stay numeric + a TODO (#52).
-      const { fields: sugared, todos } = await new ReverseResolver(client).sugarFields(fields);
-      const snippet = configSnippet(type, key, sugared, { todos });
-
-      if (opts.dryRun) {
-        info(`Would adopt ${type} #${id} as "${key}". Generated config entry:`);
-        out({ key, type, id, fields, config: snippet });
+      if (adopted.dryRun) {
+        info(`Would adopt ${type} #${adopted.id} as "${adopted.key}". Generated config entry:`);
+        out({
+          key: adopted.key,
+          type,
+          id: adopted.id,
+          fields: adopted.fields,
+          config: adopted.config,
+        });
         return;
       }
-
-      const now = new Date().toISOString();
-      const action = upsert(state, { type, id, key, fields }, now);
-      await saveState(statePath, state);
-
-      success(`${action === "created" ? "Adopted" : "Updated"} ${type} #${id} as "${key}" → ${statePath}`);
-      info(`Config entry: ${snippet}`);
-      if (action === "updated") {
-        warn("This resource was already managed — its snapshot was refreshed.");
+      success(
+        `${adopted.action === "created" ? "Adopted" : "Updated"} ${type} #${adopted.id} as "${adopted.key}" → ${result.project.stateDisplayPath}`,
+      );
+      info(`Config entry: ${adopted.config}`);
+      for (const warning of result.warnings.filter((item) => item.code !== "ADOPT_KEY_PRESERVED")) {
+        warn(warning.message);
       }
     });
 
