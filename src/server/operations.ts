@@ -23,6 +23,7 @@ import {
 import { runPlan, type PlanRequest, type PlanResult } from "../application/operations/plan.js";
 import { InMemoryMutationLock, PreparedOperationStore } from "../application/prepared-operation-store.js";
 import type { OperationObserver } from "../application/ports.js";
+import type { OperationEventStore } from "./operation-store.js";
 
 export interface ServerOperationCatalog {
   authStatus(request: AuthStatusRequest): Promise<AuthStatusResult>;
@@ -35,6 +36,7 @@ export interface ServerOperationCatalog {
 
 export interface ServerOperationCatalogOptions {
   observerFor?: (operationId: string) => OperationObserver;
+  events?: OperationEventStore;
   core?: Partial<{
     prepareApply: typeof prepareApply;
     executePreparedApply: typeof executePreparedApply;
@@ -63,19 +65,55 @@ export function createServerOperationCatalog(
   return {
     authStatus: (request) => runAuthStatus(request),
     plan: (request) => runPlan(request),
-    prepareApply: (request) => core.prepareApply(request, { store: applyStore }),
-    executeApply: (id, proof) =>
-      core.executePreparedApply({ id }, proof, {
-        store: applyStore,
-        lock: mutationLock,
-        observer: options.observerFor?.(id),
-      }),
-    prepareDestroy: (request) => core.prepareDestroy(request, { store: destroyStore }),
-    executeDestroy: (id, proof) =>
-      core.executePreparedDestroy({ id }, proof, {
-        store: destroyStore,
-        lock: mutationLock,
-        observer: options.observerFor?.(id),
-      }),
+    prepareApply: async (request) => {
+      const prepared = await core.prepareApply(request, { store: applyStore });
+      options.events?.open(prepared.id);
+      return prepared;
+    },
+    executeApply: async (id, proof) => {
+      try {
+        const result = await core.executePreparedApply({ id }, proof, {
+          store: applyStore,
+          lock: mutationLock,
+          observer: options.observerFor?.(id) ?? options.events?.observer(id),
+        });
+        options.events?.complete(id, "apply");
+        return result;
+      } catch (caught) {
+        options.events?.fail(
+          id,
+          "apply",
+          typeof caught === "object" && caught !== null && "code" in caught
+            ? String(caught.code)
+            : "INTERNAL_ERROR",
+        );
+        throw caught;
+      }
+    },
+    prepareDestroy: async (request) => {
+      const prepared = await core.prepareDestroy(request, { store: destroyStore });
+      options.events?.open(prepared.id);
+      return prepared;
+    },
+    executeDestroy: async (id, proof) => {
+      try {
+        const result = await core.executePreparedDestroy({ id }, proof, {
+          store: destroyStore,
+          lock: mutationLock,
+          observer: options.observerFor?.(id) ?? options.events?.observer(id),
+        });
+        options.events?.complete(id, "destroy");
+        return result;
+      } catch (caught) {
+        options.events?.fail(
+          id,
+          "destroy",
+          typeof caught === "object" && caught !== null && "code" in caught
+            ? String(caught.code)
+            : "INTERNAL_ERROR",
+        );
+        throw caught;
+      }
+    },
   };
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createServerApp } from "../../src/server/app.js";
 import type { ServerOperationCatalog } from "../../src/server/operations.js";
+import { OperationEventStore } from "../../src/server/operation-store.js";
 import { LocalServerSession } from "../../src/server/session.js";
 
 const origin = "http://127.0.0.1:8765";
@@ -13,6 +14,7 @@ function harness() {
   const executeApply = vi.fn(async (id, proof) => ({ operation: "apply", id, proof }));
   const prepareDestroy = vi.fn(async (request) => ({ id: "destroy-1", request }));
   const executeDestroy = vi.fn(async (id, proof) => ({ operation: "destroy", id, proof }));
+  const events = new OperationEventStore();
   const app = createServerApp({
     origin,
     session,
@@ -30,8 +32,18 @@ function harness() {
       prepareDestroy,
       executeDestroy,
     } as unknown as ServerOperationCatalog,
+    events,
   });
-  return { app, plan, authStatus, prepareApply, executeApply, prepareDestroy, executeDestroy };
+  return {
+    app,
+    plan,
+    authStatus,
+    prepareApply,
+    executeApply,
+    prepareDestroy,
+    executeDestroy,
+    events,
+  };
 }
 
 async function bootstrap(app: ReturnType<typeof createServerApp>): Promise<string> {
@@ -179,5 +191,27 @@ describe("local server security boundary", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
     expect(prepareDestroy).not.toHaveBeenCalled();
+  });
+
+  it("streams the shared operation events and rejects a foreign event-stream origin", async () => {
+    const { app, events } = harness();
+    const cookie = await bootstrap(app);
+    events.open("run-1");
+    events.observer("run-1").emit({ type: "phase-started", phase: "backup" });
+    events.complete("run-1", "apply");
+
+    const rejected = await app.request("/api/operations/run-1/events", {
+      headers: { cookie, origin: "https://attacker.example" },
+    });
+    expect(rejected.status).toBe(403);
+
+    const response = await app.request("/api/operations/run-1/events", {
+      headers: { cookie, origin },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const text = await response.text();
+    expect(text).toContain('data: {"type":"phase-started","phase":"backup"}');
+    expect(text).toContain('data: {"type":"operation-completed","operation":"apply"}');
   });
 });

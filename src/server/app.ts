@@ -3,6 +3,7 @@ import { getCookie, setCookie } from "hono/cookie";
 import { CtApplicationError } from "../application/errors.js";
 import type { PlanRequest } from "../application/operations/plan.js";
 import { createServerOperationCatalog, type ServerOperationCatalog } from "./operations.js";
+import { OperationEventStore } from "./operation-store.js";
 import { registerOperationRoutes, ServerInputError } from "./routes.js";
 import { SESSION_COOKIE, type LocalServerSession } from "./session.js";
 import { bootstrapScript, placeholderHtml } from "./static.js";
@@ -22,6 +23,7 @@ export interface CreateServerAppOptions {
   session: LocalServerSession;
   project?: PlanRequest;
   operations?: ServerOperationCatalog;
+  events?: OperationEventStore;
 }
 
 /** Local-only HTTP projection. Handlers call operations; they never access CT/state primitives. */
@@ -29,7 +31,8 @@ export function createServerApp(options: CreateServerAppOptions): Hono {
   const app = new Hono();
   const expectedOrigin = (): string =>
     typeof options.origin === "function" ? options.origin() : options.origin;
-  const operations = options.operations ?? createServerOperationCatalog();
+  const events = options.events ?? new OperationEventStore();
+  const operations = options.operations ?? createServerOperationCatalog({ events });
   const project = options.project ?? {};
 
   app.use("*", async (context, next) => {
@@ -47,7 +50,8 @@ export function createServerApp(options: CreateServerAppOptions): Hono {
   });
 
   app.use("/api/*", async (context, next) => {
-    if (["GET", "HEAD", "OPTIONS"].includes(context.req.method)) return next();
+    const eventStream = /\/api\/operations\/[^/]+\/events$/.test(context.req.path);
+    if (["GET", "HEAD", "OPTIONS"].includes(context.req.method) && !eventStream) return next();
     if (context.req.header("origin") !== expectedOrigin()) {
       return context.json({ error: { code: "ORIGIN_REJECTED", message: "Request origin rejected." } }, 403);
     }
@@ -76,7 +80,7 @@ export function createServerApp(options: CreateServerAppOptions): Hono {
     });
     return context.json({ authenticated: true });
   });
-  registerOperationRoutes(app, operations, project);
+  registerOperationRoutes(app, operations, project, events);
 
   app.onError((caught, context) => {
     if (caught instanceof ServerInputError) {

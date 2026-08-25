@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createServerOperationCatalog } from "../../src/server/operations.js";
+import { OperationEventStore } from "../../src/server/operation-store.js";
 
 describe("server operation catalog", () => {
   it("shares one state-file lock between apply and destroy", async () => {
@@ -21,7 +22,11 @@ describe("server operation catalog", () => {
     const executePreparedDestroy = vi.fn(async (_prepared, _proof, dependencies) =>
       dependencies.lock.runExclusive("/project/state.json", async () => ({ operation: "destroy" })),
     );
+    const events = new OperationEventStore();
+    events.open("apply-1");
+    events.open("destroy-1");
     const catalog = createServerOperationCatalog({
+      events,
       core: { executePreparedApply, executePreparedDestroy } as never,
     });
 
@@ -32,5 +37,16 @@ describe("server operation catalog", () => {
     });
     release();
     await applying;
+
+    const applyEvents: unknown[] = [];
+    const destroyEvents: unknown[] = [];
+    events.listen("apply-1", (event) => applyEvents.push(event));
+    events.listen("destroy-1", (event) => destroyEvents.push(event));
+    expect(applyEvents).toContainEqual({ type: "operation-completed", operation: "apply" });
+    expect(destroyEvents).toContainEqual({
+      type: "operation-failed",
+      operation: "destroy",
+      code: "MUTATION_BUSY",
+    });
   });
 });
