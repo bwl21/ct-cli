@@ -57,4 +57,18 @@ describe("application architecture boundaries", () => {
 
     expect(violations).toEqual([]);
   });
+
+  it("keeps the HTTP adapter behind application operations", async () => {
+    const files = await typescriptFiles(join(root, "src/server"));
+    const violations: string[] = [];
+    for (const file of files) {
+      const source = await readFile(file, "utf8");
+      for (const specifier of imports(source)) {
+        if (/\.\.\/(?:api|engine|permissions|state|auth|config|env|resources)(?:\/|\.js$)/.test(specifier)) {
+          violations.push(`${relative(root, file)} -> ${specifier}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
 });
