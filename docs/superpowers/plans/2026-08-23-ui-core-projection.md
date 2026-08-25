@@ -140,19 +140,19 @@ changes. Only one mutation per state file may execute at a time.
 - Create: `tests/application/project.test.ts`
 - Create: `tests/architecture-boundaries.test.ts`
 
-- [ ] Define `ProjectRequest`, `ResolvedProjectInfo`, operation result, warning, error and observer
+- [x] Define `ProjectRequest`, `ResolvedProjectInfo`, operation result, warning, error and observer
       contracts. Keep values JSON-compatible where practical.
-- [ ] Extract shared project/environment resolution from the command wrappers into
+- [x] Extract shared project/environment resolution from the command wrappers into
       `resolveProject(request)`. It must retain current precedence for flags, environment profiles,
       `CT_CONFIG`, `CT_STATE`, host and token selection.
-- [ ] Define narrow ports for clock/ID generation, operation events and mutation locking. Do not
+- [x] Define narrow ports for clock/ID generation, operation events and mutation locking. Do not
       wrap pure existing domain functions merely to rename them.
-- [ ] Add characterization tests for default config/state lookup, explicit paths, environment
+- [x] Add characterization tests for default config/state lookup, explicit paths, environment
       selection, protected environments and host-bound state.
-- [ ] Add an architecture test that scans imports and fails when `src/application/**` imports
+- [x] Add an architecture test that scans imports and fails when `src/application/**` imports
       Commander, Hono or web code, or when adapter code imports mutation primitives such as
       `executePlan`, `saveState` or `applyPermissionPlan` directly.
-- [ ] Run `npm test`, `npm run typecheck` and `npm run lint`.
+- [x] Run `npm test`, `npm run typecheck` and `npm run lint`.
 
 **Exit criterion:** There is one shared way to resolve the project context, but no CLI behavior has
 changed yet.
@@ -170,18 +170,18 @@ changed yet.
 - Create: `tests/application/plan-operation.test.ts`
 - Modify: existing plan command tests
 
-- [ ] Move all orchestration currently inside the Commander `.action()` into `runPlan(request,
+- [x] Move all orchestration currently inside the Commander `.action()` into `runPlan(request,
 dependencies?)`: environment preparation, config/catalog/state loading, session creation,
       shared resolver creation, concurrent resource/permission plan construction, completeness and
       summary calculation.
-- [ ] Return `PlanResult` containing resource plan, permission items, summary, attribution,
+- [x] Return `PlanResult` containing resource plan, permission items, summary, attribution,
       warnings, fetch errors, environment/host/version metadata and `complete`.
-- [ ] Keep `renderPlan` and `renderPermissionPlan` as terminal renderers. They consume the operation
+- [x] Keep `renderPlan` and `renderPermissionPlan` as terminal renderers. They consume the operation
       result; they do not participate in planning.
-- [ ] Reduce `src/commands/plan.ts` to option parsing, operation invocation, rendering and exit-code
+- [x] Reduce `src/commands/plan.ts` to option parsing, operation invocation, rendering and exit-code
       mapping (`--detailed-exitcode` included).
-- [ ] Prove that the text and `--json` shapes remain compatible with existing tests.
-- [ ] Add a test that calls `runPlan` directly and the CLI adapter against the same fixtures and
+- [x] Prove that the text and `--json` shapes remain compatible with existing tests.
+- [x] Add a test that calls `runPlan` directly and the CLI adapter against the same fixtures and
       compares their canonical plan/summary.
 
 **Exit criterion:** `ct plan` is only a projection of `runPlan`; a future HTTP handler can expose

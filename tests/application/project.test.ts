@@ -30,6 +30,8 @@ describe("resolveProject", () => {
       configPath: join(cwd, "ct.config.ts"),
       statePath: join(cwd, "ct-state.json"),
       environmentsPath: join(cwd, "ct.envs.json"),
+      configDisplayPath: "ct.config.ts",
+      stateDisplayPath: "ct-state.json",
       environment: null,
       protected: false,
       host: "https://stored.church.tools",
@@ -51,6 +53,8 @@ describe("resolveProject", () => {
 
     expect(project.configPath).toBe(join(cwd, "explicit.config.ts"));
     expect(project.statePath).toBe(join(cwd, "explicit-state.json"));
+    expect(project.configDisplayPath).toBe("explicit.config.ts");
+    expect(project.stateDisplayPath).toBe("explicit-state.json");
     expect(project.host).toBe("https://env.church.tools");
   });
 

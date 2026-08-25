@@ -16,9 +16,13 @@ export interface ProjectRequest {
 /** Public, non-secret project context resolved before an operation starts. */
 export interface ResolvedProjectInfo {
   cwd: string;
+  /** Absolute paths used by operations. */
   configPath: string;
   statePath: string;
   environmentsPath: string;
+  /** Effective flag/env/default spelling retained for byte-compatible CLI messages. */
+  configDisplayPath: string;
+  stateDisplayPath: string;
   environment: string | null;
   protected: boolean;
   host: string;

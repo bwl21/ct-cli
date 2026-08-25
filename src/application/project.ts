@@ -47,8 +47,10 @@ export async function resolveProject(
   const profile = request.environment ? await loadEnvProfile(request.environment, environmentsPath) : null;
   if (profile) wireProfile(profile, env);
 
-  const configPath = absoluteFrom(cwd, resolveConfigPath(request.configPath, env));
-  const statePath = absoluteFrom(cwd, resolveStatePath(request.statePath, env, profile?.statePath));
+  const configDisplayPath = resolveConfigPath(request.configPath, env);
+  const stateDisplayPath = resolveStatePath(request.statePath, env, profile?.statePath);
+  const configPath = absoluteFrom(cwd, configDisplayPath);
+  const statePath = absoluteFrom(cwd, stateDisplayPath);
   const { host } = await resolveConfig(env, dependencies.readStoredHost);
 
   return {
@@ -56,6 +58,8 @@ export async function resolveProject(
     configPath,
     statePath,
     environmentsPath,
+    configDisplayPath,
+    stateDisplayPath,
     environment: profile?.name ?? null,
     protected: profile?.protected ?? false,
     host,
