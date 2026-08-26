@@ -38,6 +38,48 @@ export interface ScopeResolution {
 export const ALL_SCOPE_SENTINEL = -1;
 
 /**
+ * Per-dimension dataIds that are BUILT IN to every ChurchTools instance, and therefore already
+ * portable — a config may write the number and mean the same thing on every host.
+ *
+ * Unlike {@link ALL_SCOPE_SENTINEL} these are REAL rows: `cdb_comment_viewer` `0` is the "Alle"
+ * comment viewer, which CT ships on every instance (present on both hosts of the same deployment in
+ * the 2026-08-24 two-host read; re-read on eqrm-dev 2026-08-26). That difference matters — a built-in
+ * row can be renamed or deleted by an admin, so it is emitted as its NUMBER (exact, and immune to a
+ * rename) rather than resolved to a name, and it is never counted as an unmanaged host-specific id.
+ *
+ * Adopting one would be actively harmful, which is why this table exists: `ct adopt comment-viewer 0`
+ * yields `ct.commentViewer({ key: "alle", name: "Alle" })`, and replaying THAT config on a second
+ * host with a fresh state file finds no state entry, POSTs a SECOND "Alle" (CT mints a fresh id) and
+ * scopes the grant to the duplicate instead of the built-in — the exact host-specific misgrant #151
+ * exists to prevent. Note the duplicate does NOT announce itself on the host that created it:
+ * resolution is managed-state-first (`Resolver.resolve`), so `{ commentViewer: "alle" }` there
+ * silently resolves to the config's own duplicate and never reaches `resolveFromCatalog`'s ambiguity
+ * check. The two "Alle" rows only hard-error for a config reading that catalog WITHOUT a state entry
+ * — so the failure surfaces on a third host, or after a state reset, not where it was caused.
+ *
+ * Deliberately keyed BY DIMENSION, not a blanket "`0` is portable" rule: on any other scope field `0`
+ * is an ordinary host-specific id, and a global rule would silently stop flagging it.
+ *
+ * The NAME lives in this same table rather than in a parallel lookup: `isBuiltinScopeId` suppresses
+ * the adoption hint and `builtinScopeIdName` supplies the comment that explains the suppression, so
+ * two tables that disagreed would emit a bare `scope: [0]` with nothing saying why it was not flagged
+ * — precisely the confusion this exists to prevent.
+ */
+const BUILTIN_SCOPE_IDS: Readonly<Record<string, Readonly<Record<number, string>>>> = {
+  cdb_comment_viewer: { 0: "Alle" },
+};
+
+/** Whether `id` on `scopeField` is a built-in row present on every host — see {@link BUILTIN_SCOPE_IDS}. */
+export function isBuiltinScopeId(scopeField: string, id: number): boolean {
+  return builtinScopeIdName(scopeField, id) !== null;
+}
+
+/** The human name of a built-in scope id, for the note the adopter emits next to the number. */
+export function builtinScopeIdName(scopeField: string, id: number): string | null {
+  return BUILTIN_SCOPE_IDS[scopeField]?.[id] ?? null;
+}
+
+/**
  * The catalog `scopeField` naming the GROUP dimension. The only dimension a bare string scope entry
  * may address — every other one needs a typed ref (see {@link SCOPE_REF_KIND}) or a numeric dataId.
  */
@@ -59,16 +101,16 @@ export const GROUP_SCOPE_FIELD = "cdb_gruppe";
  *  - `cc_securitylevel` → security levels (`/securitylevels`, #110) — e.g. `churchdb:+see persons`
  *  - `cdb_comment_viewer` → comment viewers (`/person/commentviewers`, #102) — `churchdb:view comments`
  *
- * `managed` separates the MANAGED resource kinds — groups, campuses, group types and (since #110)
- * security levels — from the read-only catalogs. For a managed kind a scope target can be declared in
- * the same config (resolving pending, then re-resolved at apply time) and a state-backed id is worth
- * re-resolving. For a catalog kind the reference always resolves by NAME against the live catalog and
- * hard-errors when the name is absent — strictly better than a silent numeric misgrant, but never a
- * create. Neither remaining catalog kind is unmanaged because "ChurchTools cannot":
- *  - `cdb_bereich` has no REST write at all; the admin UI writes it through the legacy master-data
- *    endpoint (#108/#109).
- *  - `cdb_comment_viewer` has conventional REST CRUD that WOULD fit the registry unchanged (#102) —
- *    it is catalog-only purely because nothing has needed to declare one yet.
+ * `managed` separates the MANAGED resource kinds from the read-only catalogs. For a managed kind a
+ * scope target can be declared in the same config (resolving pending, then re-resolved at apply time)
+ * and a state-backed id is worth re-resolving. For a catalog kind the reference always resolves by
+ * NAME against the live catalog and hard-errors when the name is absent — strictly better than a
+ * silent numeric misgrant, but never a create.
+ *
+ * Every dimension listed here is managed today: departments joined in #108 (writes go through the
+ * legacy master-data endpoint), security levels in #110, and comment viewers in #151 — the last one
+ * a config could not express portably at all, because a `churchdb:view comments` grant had no choice
+ * but a raw host-specific `dataId`.
  *
  * The remaining scoped dimensions (`ccm_data_category`, `oauth_client`, `cc_calcategory`, …) stay
  * numeric-only because this tool has no way to address their values by a host-independent name today —
@@ -82,7 +124,7 @@ export const SCOPE_REF_KIND: Readonly<Record<string, { kind: RefKind; type: stri
   cdb_gruppentyp: { kind: "group-type", type: "group-type", managed: true },
   cdb_bereich: { kind: "department", type: "department", managed: true },
   cc_securitylevel: { kind: "security-level", type: "security-level", managed: true },
-  cdb_comment_viewer: { kind: "comment-viewer", type: "comment-viewer", managed: false },
+  cdb_comment_viewer: { kind: "comment-viewer", type: "comment-viewer", managed: true },
 };
 
 /** The DSL's object sugar for a typed scope ref: exactly one dimension field, e.g. `{ campus: "koblenz" }`. */
@@ -201,7 +243,8 @@ export async function resolveScopeRefs(
         // Mirror the resolver's own precedence: it consults managed state BEFORE the live catalog, so
         // a key that names a managed resource of this type is exactly the case where the id came from
         // state — and only then is there a state-backed identity worth re-resolving at apply time.
-        // A catalog-only dimension (departments) has no managed kind at all, so it never takes this path.
+        // A dimension whose `managed` flag is false would never take this path at all; none is left
+        // today (#151 was the last), but the flag stays so a future read-only dimension is one entry.
         const managed = dimension.managed ? state.resources[dimension.ref.key] : undefined;
         out.set(
           k,
@@ -267,7 +310,7 @@ function expectedDimension(
  *   makes a campus-scoped grant portable: campus ids differ per host (dev Mainz = 6, prod Mainz = 0).
  * - a **raw numeric dataId** (`number`, #49) — an escape hatch that passes straight through with no
  *   lookup at all. Still the only form for dimensions whose values this tool cannot yet address by a
- *   host-independent name (`ccm_data_category`, `cdb_comment_viewer`, `oauth_client`, …).
+ *   host-independent name (`ccm_data_category`, `oauth_client`, `cc_calcategory`, …).
  *
  * A logical key that names a managed resource in state resolves to its id. A logical key that names a
  * resource DECLARED in this config but not yet in state (`declaredGroupKeys` for the string form; the

@@ -35,7 +35,13 @@ import {
   type GrantTuple,
   type RawPermission,
 } from "./grants.js";
-import { ALL_SCOPE_SENTINEL, GROUP_SCOPE_FIELD, SCOPE_REF_KIND } from "./scope.js";
+import {
+  ALL_SCOPE_SENTINEL,
+  builtinScopeIdName,
+  GROUP_SCOPE_FIELD,
+  isBuiltinScopeId,
+  SCOPE_REF_KIND,
+} from "./scope.js";
 
 /** DSL function name for each domain type — the call the emitted block should be pasted as. */
 const DSL_FN: Record<DomainType, string> = {
@@ -288,7 +294,7 @@ function grantLines(g: CollapsedGrant, rev: Map<number, ReverseEntry>, state: St
     //     — the whole point of #98, since these ids are host-specific (dev Mainz = 6, prod Mainz = 0),
     //     so a numeric literal adopted from prod is a misgrant when replayed on dev. An unmanaged
     //     dataId keeps its number and earns a NOTE pointing at the one command that fixes it.
-    //  b) The dimension has none (`cc_securitylevel`, `cdb_bereich`, `oauth_client`, …) — its dataIds
+    //  b) The dimension has none (`ccm_data_category`, `oauth_client`, …) — its dataIds
     //     name something this tool has no managed representation for, so the numeric escape hatch
     //     (#49) is the only honest output and the grant is always emitted as an ACTIVE line.
     const out: string[] = [];
@@ -305,20 +311,39 @@ function grantLines(g: CollapsedGrant, rev: Map<number, ReverseEntry>, state: St
     }
     if (g.dataIds.length > 0) {
       const dimension = SCOPE_REF_KIND[entry.scopeField];
-      // A catalog-only dimension (departments) has no managed resource to look an id up in, and this
-      // emitter is deliberately pure — no client, no fetch — so it cannot turn the id into a name.
-      // Emit the number and point at the portable form the author can write by hand.
+      // A catalog-only dimension (`managed: false`) has no managed resource to look an id up in, and
+      // this emitter is deliberately pure — no client, no fetch — so it cannot turn the id into a
+      // name. Emit the number and point at the portable form the author can write by hand. No
+      // dimension is catalog-only today (comment viewers, the last one, became managed in #151);
+      // the branch stays because the flag is what a future read-only dimension would set.
       const sugar = dimension?.managed ? SCOPE_SUGAR_FIELD[dimension.type] : undefined;
       // #115: `-1` is not an id at all — it is ChurchTools' "alle" sentinel, meaning every value of
       // the dimension on whatever host reads it. So it is ALREADY portable, and none of the
       // host-specific-id advice below applies to it. Emitting `ct adopt department -1` sent people
       // looking for a resource that cannot exist, and in a real adoption run this fires on most of
       // the broadly-scoped grants — the interesting ones.
-      const realIds = g.dataIds.filter((id) => id !== ALL_SCOPE_SENTINEL);
-      const hasSentinel = g.dataIds.length > realIds.length;
+      //
+      // #151 generalised that: a dataId is ALREADY PORTABLE when it means the same thing on every
+      // host, which covers the `-1` sentinel AND a BUILT-IN row of the dimension (`cdb_comment_viewer`
+      // 0 = "Alle"). Both are emitted verbatim and neither counts as an unmanaged host-specific id.
+      // They differ in one respect worth keeping straight: `-1` is not an id at all, while a built-in
+      // IS a real row — just one every instance has. See `isBuiltinScopeId` for why adopting one is
+      // actively harmful rather than merely useless.
+      const portable = (id: number): boolean =>
+        id === ALL_SCOPE_SENTINEL || isBuiltinScopeId(entry.scopeField!, id);
+      const realIds = g.dataIds.filter((id) => !portable(id));
+      const hasSentinel = g.dataIds.includes(ALL_SCOPE_SENTINEL);
       if (hasSentinel) {
         const what = dimension ? `every ${dimension.type}` : `every value of "${entry.scopeField}"`;
         out.push(`    // scope -1 is ChurchTools' "alle" sentinel — ${what}; host-independent.`);
+      }
+      for (const id of g.dataIds) {
+        const builtin = builtinScopeIdName(entry.scopeField!, id);
+        if (builtin === null) continue;
+        out.push(
+          `    // scope ${id} is the built-in "${builtin}" ${dimension?.type ?? entry.scopeField} — ` +
+            `present on every instance, so the number is already portable (do not adopt it).`,
+        );
       }
       if (dimension && !dimension.managed && realIds.length > 0) {
         const field = SCOPE_SUGAR_FIELD[dimension.type] ?? dimension.type;
@@ -332,7 +357,7 @@ function grantLines(g: CollapsedGrant, rev: Map<number, ReverseEntry>, state: St
       const entries: string[] = [];
       const unmanaged: number[] = [];
       for (const id of [...g.dataIds].sort((a, b) => a - b)) {
-        if (id === ALL_SCOPE_SENTINEL) {
+        if (portable(id)) {
           // Portable as-is (see above) — emitted, but never counted as an unmanaged host-specific id.
           entries.push(String(id));
           continue;
@@ -361,9 +386,10 @@ function grantLines(g: CollapsedGrant, rev: Map<number, ReverseEntry>, state: St
             `and re-adopt to make ${one ? "it" : "them all"} portable.`,
         );
       } else if (!dimension) {
-        // Reached only for a dimension with NO logical form at all (`cc_securitylevel`, `oauth_client`,
-        // …). A catalog-only dimension (`cdb_bereich`) already got its own NOTE above — emitting this
-        // line there too would contradict it ("not a group, use numbers" vs "portable form exists").
+        // Reached only for a dimension with NO logical form at all (`ccm_data_category`,
+        // `oauth_client`, …). A catalog-only dimension would already have got its own NOTE above —
+        // emitting this line there too would contradict it ("not a group, use numbers" vs "portable
+        // form exists").
         out.push(
           `    // "${entry.name}" scopes by "${entry.scopeField}", not a group — using its numeric dataId(s) directly.`,
         );

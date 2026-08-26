@@ -514,6 +514,64 @@ export const RESOURCES: Record<string, AdoptableResource> = {
     deriveKey: (r) => slug(str(r, "name")),
     managedFields: (r) => ({ id: r.id, name: r.name }),
   }),
+  /**
+   * COMMENT VIEWERS (#151) — `cdb_comment_viewer`, the scope dimension of `churchdb:view comments`
+   * ("Kommentare-Viewer"). Managed so a `view comments` grant means the same thing on every host.
+   *
+   * It was catalog-only until now, and that is exactly what made the dimension unportable: a config
+   * granting `churchdb:view comments` had to write a raw, host-specific `dataId`, and the same
+   * number names a different viewer (or nothing) on another instance. Read on two hosts of the same
+   * deployment 2026-08-24: three of prod's six ids do not exist on dev at all, and the two that do
+   * exist on both name different categories on each. Nothing detected the
+   * mismatch — a plan compares the declared id against the live id, and they match; the id is simply
+   * meaningless on the target host. Switching to a name ref did not fix it either: dev lacks the
+   * NAMES too, so the ref failed to resolve rather than resolving wrongly. Only a declarable
+   * resource makes the names exist on both hosts, which is what makes a name ref portable.
+   *
+   * `/person/commentviewers` is conventional REST, so this needs none of the machinery the other two
+   * awkward master-data types did: CT mints the id (unlike `security-level`) and writes are REST
+   * (unlike `department`). FULLY live-probed on eqrm-dev, CT 3.135.2 (2026-08-26) — one throwaway
+   * row created, read, updated and deleted, instance left as found:
+   *
+   *   GET    /person/commentviewers          → flat `[{id, name, nameTranslated, sortKey}]`
+   *   POST   /person/commentviewers          → 200, CT MINTS the id (body `{name, sortKey}`)
+   *   GET    /person/commentviewers/{id}     → 200; an absent id → clean 404 `error.notfound`
+   *   PUT    /person/commentviewers/{id}     → 200
+   *   DELETE /person/commentviewers/{id}     → 200
+   *
+   * The minted id is a bare auto-increment that does NOT reuse deleted rows and moves faster than the
+   * visible row count (three consecutive probe creates on a 3-row instance minted 5, 8, 11), which is
+   * the concrete reason a comment viewer can never be `callerAssignedId`: nothing can predict it.
+   *
+   * `name` and `sortKey` are the whole editable surface. NB the row carries a fourth column the #109
+   * list does not mention, `nameTranslated` — but CT DERIVES it from `name` (the probe's PUT sent only
+   * `{name, sortKey}` and `nameTranslated` followed `name`), so it is not an unmanaged sibling a PUT
+   * could blank, and the managed set is complete.
+   */
+  "comment-viewer": define({
+    collectionPath: "/person/commentviewers",
+    updateMethod: "PUT",
+    // Tier 0: grants scope by comment viewer, and permissions apply after every resource tier.
+    tier: 0,
+    destroyWarning:
+      "deleting a comment viewer reaches every person comment restricted to it and every grant " +
+      "scoped to it (`churchdb:view comments`) — the viewer id is referenced instance-wide. Verify " +
+      "it is unused first (`ct get comment-viewers`, `ct report permissions`).",
+    deriveKey: (r) => slug(str(r, "name")),
+    managedFields: (r) => ({ name: r.name, sortKey: r.sortKey }),
+    // `sortKey` is managed but not mandatory in a hand-authored declaration; CT's create validator
+    // for the 3-column master-data tables rejects a missing integer column, so supply a neutral one
+    // (a declared value still wins — createDefaults merges UNDER the body).
+    createDefaults: () => ({ sortKey: 0 }),
+    // No `fetchOne`: `GET /person/commentviewers/{id}` exists and behaves (probed 2026-08-26, see
+    // above), so the DEFAULT item read is correct here. This type briefly carried a collection-
+    // filtering hook while that path was unverified — guessing it would have risked #108's failure
+    // mode, where a 404 reads as "vanished in ChurchTools" and every apply duplicates the viewer.
+    // The probe retired the guess: a present id returns the row, an absent one returns a clean 404,
+    // which is exactly the distinction the default read needs. It also drops one full collection
+    // read per managed viewer per plan/apply/destroy — `fetchActual` fans out concurrently, so the
+    // hook cost N round-trips against a rate-limited API where the default costs N cheap item reads.
+  }),
   "group-role": define({
     collectionPath: "/group/roles",
     updateMethod: "PUT",
