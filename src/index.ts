@@ -13,6 +13,7 @@ import { applyCommand } from "./commands/apply.js";
 import { destroyCommand } from "./commands/destroy.js";
 import { initCommand } from "./commands/init.js";
 import { completionCommand } from "./commands/completion.js";
+import { suggestCommand } from "./commands/suggest.js";
 import { commanderUiCommand } from "./commands/ui.js";
 import { plannedCommands } from "./commands/placeholders.js";
 import { isCompletionRequest, serveCompletionRequest } from "./completion/shell.js";
@@ -43,6 +44,7 @@ export function buildProgram(): Command {
   program.addCommand(applyCommand());
   program.addCommand(destroyCommand());
   program.addCommand(completionCommand());
+  program.addCommand(suggestCommand());
   // The UI receives a factory rather than importing this module back from its
   // server code. Its schema is therefore always generated from this exact tree.
   program.addCommand(commanderUiCommand(() => buildProgram()));

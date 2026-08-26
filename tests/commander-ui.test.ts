@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { describe, expect, it } from "vitest";
 import { completionCandidates } from "../src/completion/candidates.js";
 import { buildUiInvocation, completionWords, UiInputError } from "../src/commander-ui/invocation.js";
-import { resolveCliLaunchTarget } from "../src/commander-ui/launcher.js";
+import { resolveCliLaunchTarget } from "../src/runtime/cli-launcher.js";
 import { commanderUiSchema, findUiCommand } from "../src/commander-ui/schema.js";
 import { buildProgram } from "../src/index.js";
 

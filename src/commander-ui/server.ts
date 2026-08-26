@@ -2,23 +2,17 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Command } from "commander";
-import { completionCandidates } from "../completion/candidates.js";
+import { createSuggestionResolver } from "../suggestions/service.js";
 import { buildUiInvocation, completionWords, UiInputError } from "./invocation.js";
-import { runCli, type CliRunResult, type RunCliOptions } from "./launcher.js";
+import { runCli, type CliRunResult, type RunCliOptions } from "../runtime/cli-launcher.js";
 import { COMMANDER_UI_PAGE } from "./page.js";
 import { commanderUiSchema, findUiCommand } from "./schema.js";
 
 const BODY_LIMIT = 64 * 1024;
 const COOKIE = "ct_ui_session";
 const VALUE_DOMAIN_CACHE_MS = 30_000;
-const MAX_SUGGESTIONS = 100;
 
 type Runner = (argv: readonly string[], options: RunCliOptions) => Promise<CliRunResult>;
-
-interface ValueSuggestion {
-  value: string;
-  label: string;
-}
 
 export interface StartCommanderUiOptions {
   programFactory: () => Command;
@@ -82,16 +76,6 @@ function objectRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function suggestionLabel(row: Record<string, unknown>, fields: readonly string[]): string {
-  return fields
-    .flatMap((field) => {
-      const value = row[field];
-      if (value === undefined || value === null || value === "") return [];
-      return [field === "id" ? `#${String(value)}` : String(value)];
-    })
-    .join(" · ");
-}
-
 export async function startCommanderUiServer(
   options: StartCommanderUiOptions,
 ): Promise<StartedCommanderUiServer> {
@@ -100,7 +84,11 @@ export async function startCommanderUiServer(
   const runner = options.runner ?? runCli;
   const bootstrapSecret = randomBytes(32).toString("base64url");
   const sessionSecret = randomBytes(32).toString("base64url");
-  const valueDomainCache = new Map<string, { expires: number; suggestions: ValueSuggestion[] }>();
+  const resolveSuggestions = createSuggestionResolver({
+    cwd: options.cwd,
+    runner,
+    cacheMs: VALUE_DOMAIN_CACHE_MS,
+  });
   let bootstrapAvailable = true;
   let origin = "";
 
@@ -170,55 +158,16 @@ export async function startCommanderUiServer(
           kind: typedField.kind,
           name: typedField.name,
         });
-        const parameter =
-          typedField.kind === "argument"
-            ? command.arguments.find((argument) => argument.name === typedField.name)
-            : command.options.find((option) => option.key === typedField.name);
-        const domain = parameter?.valueDomain;
-        if (domain) {
-          const selectedEnvironment = objectRecord(body.options).env;
-          const sourceArgv = [...domain.source.command];
-          if (typeof selectedEnvironment === "string" && selectedEnvironment !== "") {
-            sourceArgv.push("--env", selectedEnvironment);
-          }
-          const cacheKey = JSON.stringify(sourceArgv);
-          let cached = valueDomainCache.get(cacheKey);
-          if (!cached || cached.expires < Date.now()) {
-            const result = await runner(sourceArgv, { cwd: options.cwd });
-            if (result.exitCode !== 0) {
-              throw new Error(result.stderr.trim() || `Value-domain command exited ${result.exitCode}.`);
-            }
-            const rows: unknown = JSON.parse(result.stdout);
-            if (!Array.isArray(rows)) throw new Error("Value-domain command did not return a JSON array.");
-            const suggestions = rows.flatMap((value): ValueSuggestion[] => {
-              const row = objectRecord(value);
-              const selected = row[domain.source.valueField];
-              if (typeof selected !== "string" && typeof selected !== "number") return [];
-              return [
-                {
-                  value: String(selected),
-                  label: suggestionLabel(row, domain.source.labelFields) || String(selected),
-                },
-              ];
-            });
-            cached = { expires: Date.now() + VALUE_DOMAIN_CACHE_MS, suggestions };
-            valueDomainCache.set(cacheKey, cached);
-          }
-          const partial = ((body.partial as string) ?? "").toLocaleLowerCase();
-          const suggestions = cached.suggestions
-            .filter(
-              (suggestion) =>
-                partial === "" ||
-                suggestion.value.toLocaleLowerCase().includes(partial) ||
-                suggestion.label.toLocaleLowerCase().includes(partial),
-            )
-            .slice(0, MAX_SUGGESTIONS);
-          return json(response, 200, { suggestions });
-        }
-        const candidates = await completionCandidates(program, words, (body.partial as string) ?? "");
-        return json(response, 200, {
-          suggestions: candidates.map((value) => ({ value, label: value })),
-        });
+        const selectedEnvironment = objectRecord(body.options).env;
+        const result = await resolveSuggestions(
+          program,
+          words,
+          (body.partial as string) ?? "",
+          typeof selectedEnvironment === "string" && selectedEnvironment !== ""
+            ? selectedEnvironment
+            : undefined,
+        );
+        return json(response, 200, result);
       }
 
       if (request.method === "POST" && url.pathname === "/api/runs") {

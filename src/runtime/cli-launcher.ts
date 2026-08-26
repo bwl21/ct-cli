@@ -17,10 +17,7 @@ export interface CliRunResult {
   truncated: boolean;
 }
 
-/**
- * Node/tsx need their script path before ct's argv. A compiled Bun executable
- * is already the ct entrypoint and invokes itself directly.
- */
+/** Node/tsx need their script path before ct's argv; a compiled Bun executable invokes itself. */
 export function resolveCliLaunchTarget(
   execPath: string = process.execPath,
   argv: readonly string[] = process.argv,
@@ -43,7 +40,7 @@ export interface RunCliOptions {
   maxOutputBytes?: number;
 }
 
-/** Execute ct without a shell and capture a bounded amount of output. */
+/** Execute the current ct entrypoint without a shell and capture bounded output. */
 export function runCli(argv: readonly string[], options: RunCliOptions): Promise<CliRunResult> {
   const target = options.target ?? resolveCliLaunchTarget();
   const limit = options.maxOutputBytes ?? MAX_OUTPUT_BYTES;

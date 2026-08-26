@@ -169,6 +169,20 @@ function pendingOption(program: Command, position: Position, previous: string): 
   return option && takesValue(option) ? option : undefined;
 }
 
+/** The Commander parameter whose value is currently being entered, if there is one. */
+export function completionParameter(
+  program: Command,
+  words: string[],
+  partial: string,
+): Argument | Option | undefined {
+  const position = walk(program, words.slice(1));
+  const pending = pendingOption(program, position, words.at(-1) ?? "");
+  if (pending) return pending;
+  if (partial.startsWith("-")) return undefined;
+  const args = position.command.registeredArguments;
+  return args[position.positionals.length] ?? (args.at(-1)?.variadic ? args.at(-1) : undefined);
+}
+
 /**
  * Candidates for the word being typed.
  *
@@ -182,18 +196,54 @@ export async function completionCandidates(
   words: string[],
   partial: string,
 ): Promise<string[]> {
+  return (await detailedCompletionCandidates(program, words, partial)).map((candidate) => candidate.value);
+}
+
+export interface DetailedCompletionCandidate {
+  value: string;
+  label: string;
+}
+
+function described(value: string, description: string): DetailedCompletionCandidate {
+  return { value, label: description ? `${value} — ${description}` : value };
+}
+
+function unique(candidates: DetailedCompletionCandidate[]): DetailedCompletionCandidate[] {
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate.value)) return false;
+    seen.add(candidate.value);
+    return true;
+  });
+}
+
+/** Structural candidates with presentation labels derived from Commander help. */
+export async function detailedCompletionCandidates(
+  program: Command,
+  words: string[],
+  partial: string,
+): Promise<DetailedCompletionCandidate[]> {
   const position = walk(program, words.slice(1));
 
   const pending = pendingOption(program, position, words.at(-1) ?? "");
-  if (pending) return optionValues(pending, position, partial);
+  if (pending) {
+    return (await optionValues(pending, position, partial)).map((value) => ({ value, label: value }));
+  }
 
-  if (partial.startsWith("-")) return visibleOptions(position.command).flatMap(flagsOf);
+  if (partial.startsWith("-")) {
+    return unique(
+      visibleOptions(position.command).flatMap((option) =>
+        flagsOf(option).map((flag) => described(flag, option.description)),
+      ),
+    );
+  }
 
   const subcommands = position.command
     .createHelp()
     .visibleCommands(position.command)
-    .map((child) => child.name());
-  return [...subcommands, ...(await argumentValues(position, partial))];
+    .map((child) => described(child.name(), child.description()));
+  const arguments_ = (await argumentValues(position, partial)).map((value) => ({ value, label: value }));
+  return unique([...subcommands, ...arguments_]);
 }
 
 /**
