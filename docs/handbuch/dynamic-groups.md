@@ -5,8 +5,8 @@ sources:
   - src/config/query-refs.ts
   - src/engine/dynamic.ts
   - src/engine/synthetic.ts
-  - src/commands/adopt-group.ts
-sources_hash: 437e71c4f4f8bf36
+  - src/application/operations/adopt-group.ts
+sources_hash: c49d089ed6662ea7
 reviewed: 2026-08-17
 ---
 

@@ -100,9 +100,7 @@ describe("runDeleteLoop", () => {
       return {};
     });
     const save = vi.fn(async () => {});
-    const prevExit = process.exitCode;
-
-    await runDeleteLoop({
+    const outcomes = await runDeleteLoop({
       client: asClient(request),
       state,
       statePath: "s.json",
@@ -114,8 +112,7 @@ describe("runDeleteLoop", () => {
     expect(state.resources.later).toBeDefined(); // never reached
     expect(request).toHaveBeenCalledTimes(1); // stopped at the first target
     expect(save).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
-    process.exitCode = prevExit;
+    expect(outcomes).toMatchObject([{ key: "boom", status: "failed" }]);
   });
 
   it("exits NON-ZERO when a type has no delete path — the target survives, so it is not a success", async () => {
@@ -128,25 +125,20 @@ describe("runDeleteLoop", () => {
     const state = stateWith({ key: "bereich", type: "department", id: 7 });
     const request = vi.fn(async () => ({}));
     const save = vi.fn(async () => {});
-    const prevExit = process.exitCode;
-    const errSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-
     try {
-      await runDeleteLoop({
+      const outcomes = await runDeleteLoop({
         client: asClient(request),
         state,
         statePath: "s.json",
         ordered: ["bereich"],
         save,
       });
-      expect(process.exitCode).toBe(1);
+      expect(outcomes).toMatchObject([{ key: "bereich", status: "skipped" }]);
       expect(state.resources.bereich).toBeDefined(); // still managed — nothing was deleted
       expect(request).not.toHaveBeenCalled(); // and no DELETE was issued against a path CT lacks
-      expect(errSpy.mock.calls.map((c) => String(c[0])).join("\n")).toContain("cannot be deleted");
+      expect(outcomes[0]!.message).toContain("cannot be deleted");
     } finally {
       spec.writer!.remove = originalRemove;
-      errSpy.mockRestore();
-      process.exitCode = prevExit;
     }
   });
 
@@ -158,16 +150,16 @@ describe("runDeleteLoop", () => {
       return {};
     });
     const save = vi.fn(async () => {});
-    const prevExit = process.exitCode;
-    const errSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const outcomes = await runDeleteLoop({
+      client: asClient(request),
+      state,
+      statePath: "s.json",
+      ordered: ["boom"],
+      save,
+    });
 
-    await runDeleteLoop({ client: asClient(request), state, statePath: "s.json", ordered: ["boom"], save });
-
-    const combined = errSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(combined).toContain("HTTP 403");
-    expect(combined).toContain("no permission");
-    errSpy.mockRestore();
-    process.exitCode = prevExit;
+    expect(outcomes[0]!.message).toContain("HTTP 403");
+    expect(outcomes[0]!.message).toContain("no permission");
   });
 });
 

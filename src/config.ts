@@ -25,15 +25,29 @@ export function normalizeHost(host: string): string {
  * There is no default: with neither, this throws, directing the user to log in.
  * `readHost` is injectable so the resolution is testable without the Keychain.
  */
+/**
+ * No host could be resolved at all — the one failure that genuinely means "not logged in".
+ *
+ * Typed so callers can tell it apart from an environment-profile problem (a typo'd `--env`, a
+ * missing or malformed ct.envs.json), which must report itself rather than be rewritten into
+ * "Not logged in" for a user who is (#156 review).
+ */
+export class MissingHostError extends Error {
+  constructor() {
+    super(
+      "No ChurchTools host configured. Run `ct auth login --host <url> --token <token>` (or set CT_HOST).",
+    );
+    this.name = "MissingHostError";
+  }
+}
+
 export async function resolveConfig(
   env: NodeJS.ProcessEnv = process.env,
   readHost: () => Promise<string | null> = readStoredHost,
 ): Promise<CtConfig> {
   const host = env.CT_HOST?.trim() || (await readHost());
   if (!host) {
-    throw new Error(
-      "No ChurchTools host configured. Run `ct auth login --host <url> --token <token>` (or set CT_HOST).",
-    );
+    throw new MissingHostError();
   }
   return { host: normalizeHost(host) };
 }
