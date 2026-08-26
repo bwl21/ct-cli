@@ -132,7 +132,8 @@ function eventLabel(event: OperationEvent): string {
           <p>
             {{ props.result.value.resources.created.length }} erstellt,
             {{ props.result.value.resources.updated.length }} geändert,
-            {{ props.result.value.permissions.granted }} Rechte gesetzt.
+            {{ props.result.value.permissions.granted }} Rechte gesetzt,
+            {{ props.result.value.permissions.deleted }} Rechte entfernt.
           </p>
         </div>
         <div class="dialog-buttons">

@@ -318,7 +318,8 @@ describe("local server security boundary", () => {
     expect(rejected.status).toBe(403);
 
     const response = await app.request("/api/operations/run-1/events", {
-      headers: { cookie, origin },
+      // Native same-origin EventSource requests commonly omit Origin.
+      headers: { cookie },
     });
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/event-stream");
