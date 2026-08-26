@@ -60,6 +60,7 @@ export function registerOperationRoutes(
   baseProject: PlanRequest,
   events: OperationEventStore,
 ): void {
+  app.post("/api/workspace", async (context) => context.json(await operations.workspace(baseProject)));
   app.post("/api/auth/status", async (context) => {
     const body = await bodyOf(context);
     return context.json(await operations.authStatus(projectRequest(baseProject, body)));

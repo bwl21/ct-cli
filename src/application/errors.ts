@@ -1,6 +1,7 @@
 import type { JsonValue } from "./contracts.js";
 
 export const APPLICATION_ERROR_CODES = [
+  "ENVIRONMENT_REQUIRED",
   "PLAN_INCOMPLETE",
   "AUTH_REQUIRED",
   "HOST_MISMATCH",

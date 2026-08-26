@@ -90,6 +90,34 @@ describe("resolveProject", () => {
     expect(env.CT_LOGINTOKEN).toBe("secret-token");
   });
 
+  it("requires an explicit environment when the project declares choices", async () => {
+    const cwd = await projectDir();
+    await writeFile(
+      join(cwd, "ct.envs.json"),
+      JSON.stringify({
+        environments: {
+          test: { host: "https://test.church.tools" },
+          prod: { host: "https://prod.church.tools", protected: true },
+        },
+      }),
+    );
+
+    await expect(resolveProject({ cwd }, { env: {} })).rejects.toMatchObject({
+      name: "CtApplicationError",
+      code: "ENVIRONMENT_REQUIRED",
+      details: { environments: ["test", "prod"] },
+    });
+  });
+
+  it("keeps an empty environment catalog compatible with single-host setup", async () => {
+    const cwd = await projectDir();
+    await writeFile(join(cwd, "ct.envs.json"), JSON.stringify({ environments: {} }));
+
+    await expect(
+      resolveProject({ cwd }, { env: { CT_HOST: "https://single.church.tools" } }),
+    ).resolves.toMatchObject({ environment: null, host: "https://single.church.tools" });
+  });
+
   it("keeps CT_STATE above an environment's state fallback", async () => {
     const cwd = await projectDir();
     await writeFile(
