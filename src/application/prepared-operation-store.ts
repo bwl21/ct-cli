@@ -5,7 +5,8 @@ import { systemClock } from "./ports.js";
 
 interface StoredOperation<T> {
   value: T;
-  expiresAt: Date;
+  /** `null` means the entry never expires on wall-clock time; see {@link PreparedOperationStore.put}. */
+  expiresAt: Date | null;
   used: boolean;
 }
 
@@ -17,9 +18,18 @@ export class PreparedOperationStore<T> {
     private readonly ids: IdGenerator = { nextId: () => randomUUID() },
   ) {}
 
-  put(value: T, ttlMs: number): { id: string; expiresAt: Date } {
+  /**
+   * Store one prepared operation.
+   *
+   * `ttlMs === null` stores it without a wall-clock expiry. That is the right choice whenever the
+   * confirming user is the very process that prepared it and the prompt blocks on stdin
+   * indefinitely — an operator reading a long diff for six minutes must not be told the plan
+   * expired (#156 review). What actually guards against a stale proposal is the state fingerprint
+   * checked at execute time, not the clock.
+   */
+  put(value: T, ttlMs: number | null): { id: string; expiresAt: Date | null } {
     const id = this.ids.nextId();
-    const expiresAt = new Date(this.clock.now().getTime() + ttlMs);
+    const expiresAt = ttlMs === null ? null : new Date(this.clock.now().getTime() + ttlMs);
     this.operations.set(id, { value, expiresAt, used: false });
     return { id, expiresAt };
   }
@@ -43,7 +53,7 @@ export class PreparedOperationStore<T> {
         "Prepared operation is unknown or already used.",
       );
     }
-    if (entry.expiresAt.getTime() <= this.clock.now().getTime()) {
+    if (entry.expiresAt !== null && entry.expiresAt.getTime() <= this.clock.now().getTime()) {
       throw new CtApplicationError("OPERATION_EXPIRED", "Prepared operation has expired. Prepare it again.");
     }
     return entry;

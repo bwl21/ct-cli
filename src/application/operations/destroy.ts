@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { authedSession, type AuthedSession } from "../../api/session.js";
 import { CtApiError, type CtClient } from "../../api/ctClient.js";
+import { formatError } from "../../api/format.js";
 import { loadState, saveState, type State } from "../../state/state.js";
 import { RESOURCES, type CtWriteClient } from "../../resources/registry.js";
 import { assertNotPeople } from "../../engine/guard.js";
@@ -34,17 +35,26 @@ import { resolveBackupDir, type ConfirmationProof, type ConfirmationRequirement 
 
 const PREPARED_DESTROY_TTL_MS = 5 * 60 * 1000;
 
-function formatFailure(err: unknown): string {
-  if (err instanceof CtApiError) {
-    const body =
-      err.body === null || err.body === undefined
-        ? ""
-        : typeof err.body === "string"
-          ? err.body
-          : JSON.stringify(err.body);
-    return `${err.message} (HTTP ${err.status})${body ? `\n${body}` : ""}`;
-  }
-  return err instanceof Error ? err.message : String(err);
+/**
+ * Record an outcome AND report it the moment it happens.
+ *
+ * Destroy is irreversible, so the list of what has already been deleted must never depend on the
+ * run reaching its `return`: a throw from `save()`, or from the `assertNotPeople` guard on a later
+ * target, used to discard the whole array and leave the operator with no record (#156 review).
+ */
+function record(
+  outcomes: DestroyOutcome[],
+  observer: OperationObserver | undefined,
+  outcome: DestroyOutcome,
+): void {
+  outcomes.push(outcome);
+  observer?.emit({
+    type: "outcome",
+    outcome: {
+      status: outcome.status === "destroyed" || outcome.status === "already-absent" ? "ok" : "failed",
+      message: outcome.message,
+    },
+  });
 }
 
 export interface DestroyRequest extends ProjectRequest {
@@ -70,7 +80,8 @@ export interface PreparedDestroy {
   backupPath: string;
   warnings: CtWarning[];
   confirmation: ConfirmationRequirement & { expected?: string };
-  expiresAt: string;
+  /** `null` when the prepared operation has no wall-clock expiry (the CLI's own runs). */
+  expiresAt: string | null;
 }
 
 export type DestroyResult = OperationResult<{
@@ -104,7 +115,8 @@ export interface DestroyOperationDependencies {
   observer?: OperationObserver;
   clock?: Clock;
   env?: NodeJS.ProcessEnv;
-  preparedTtlMs?: number;
+  /** `null` disables the wall-clock expiry entirely; omit for the default TTL. */
+  preparedTtlMs?: number | null;
   readStateFile?: (path: string) => Promise<string>;
 }
 
@@ -190,7 +202,7 @@ async function fetchParentEdges(
   } catch (err) {
     warnings.push({
       code: "DESTROY_HIERARCHY_UNREADABLE",
-      message: `Failed to fetch group hierarchies for destroy ordering: ${formatFailure(err)}. Falling back to tier-only order.`,
+      message: `Failed to fetch group hierarchies for destroy ordering: ${formatError(err)}. Falling back to tier-only order.`,
     });
     return new Map();
   }
@@ -298,7 +310,7 @@ export async function runMemberFieldDeleteLoop(ctx: {
       const rows = groupScopedRows(await client.get(memberFieldsReadPath(target.groupId)));
       const matches = rows.filter((row) => matchesLocalKey(row, target.fieldKey));
       if (matches.length > 1) {
-        outcomes.push({
+        record(outcomes, ctx.observer, {
           kind: "member-field",
           key: target.identity,
           id: null,
@@ -311,18 +323,18 @@ export async function runMemberFieldDeleteLoop(ctx: {
       }
       fieldId = matches.length === 1 ? memberFieldRowId(matches[0]!) : undefined;
     } catch (err) {
-      outcomes.push({
+      record(outcomes, ctx.observer, {
         kind: "member-field",
         key: target.identity,
         id: null,
         status: "failed",
-        message: `Stopped at ${target.identity}: ${formatFailure(err)}. Nothing further was deleted.`,
+        message: `Stopped at ${target.identity}: ${formatError(err)}. Nothing further was deleted.`,
       });
       return { outcomes, complete: false };
     }
     if (fieldId === undefined) {
       await forget();
-      outcomes.push({
+      record(outcomes, ctx.observer, {
         kind: "member-field",
         key: target.identity,
         id: null,
@@ -338,7 +350,7 @@ export async function runMemberFieldDeleteLoop(ctx: {
     } catch (err) {
       if (err instanceof CtApiError && err.status === 404) {
         await forget();
-        outcomes.push({
+        record(outcomes, ctx.observer, {
           kind: "member-field",
           key: target.identity,
           id: fieldId,
@@ -347,12 +359,12 @@ export async function runMemberFieldDeleteLoop(ctx: {
         });
         continue;
       }
-      outcomes.push({
+      record(outcomes, ctx.observer, {
         kind: "member-field",
         key: target.identity,
         id: fieldId,
         status: "failed",
-        message: `Stopped at ${target.identity}: ${formatFailure(err)}. State saved up to this point — re-run to resume.`,
+        message: `Stopped at ${target.identity}: ${formatError(err)}. State saved up to this point — re-run to resume.`,
       });
       return { outcomes, complete: false };
     }
@@ -363,7 +375,7 @@ export async function runMemberFieldDeleteLoop(ctx: {
       key: target.identity,
       id: fieldId,
     });
-    outcomes.push({
+    record(outcomes, ctx.observer, {
       kind: "member-field",
       key: target.identity,
       id: fieldId,
@@ -439,7 +451,7 @@ export async function prepareDestroy(
     } catch (err) {
       throw new CtApplicationError(
         "DESTROY_BACKUP_FAILED",
-        `Backup fetch failed for ${target.identity}: ${formatFailure(err)}. Nothing was deleted — resolve the error and re-run.`,
+        `Backup fetch failed for ${target.identity}: ${formatError(err)}. Nothing was deleted — resolve the error and re-run.`,
         { cause: err, details: { target: target.identity } },
       );
     }
@@ -477,7 +489,7 @@ export async function prepareDestroy(
       confirmation,
       stateFingerprint: fingerprint,
     },
-    dependencies.preparedTtlMs ?? PREPARED_DESTROY_TTL_MS,
+    dependencies.preparedTtlMs === undefined ? PREPARED_DESTROY_TTL_MS : dependencies.preparedTtlMs,
   );
   return {
     id: stored.id,
@@ -487,7 +499,7 @@ export async function prepareDestroy(
     backupPath,
     warnings,
     confirmation,
-    expiresAt: stored.expiresAt.toISOString(),
+    expiresAt: stored.expiresAt === null ? null : stored.expiresAt.toISOString(),
   };
 }
 
@@ -547,7 +559,7 @@ export async function executePreparedDestroy(
       outcomes.push(...fields.outcomes);
       if (!fields.complete) {
         if (stored.ordered.length > 0) {
-          outcomes.push({
+          record(outcomes, observer, {
             kind: "resource",
             key: stored.ordered.join(", "),
             id: null,
@@ -617,7 +629,7 @@ export async function runDeleteLoop(ctx: DeleteLoopCtx): Promise<DestroyOutcome[
     if (!spec) {
       // Skipped, not destroyed: the resource is still in ChurchTools AND still in state, so the
       // structured result must remain incomplete.
-      outcomes.push({
+      record(outcomes, ctx.observer, {
         kind: "resource",
         key,
         id: managed.id,
@@ -634,7 +646,7 @@ export async function runDeleteLoop(ctx: DeleteLoopCtx): Promise<DestroyOutcome[
         // at all — say so instead of issuing a DELETE the endpoint does not implement, which would
         // 404/405 and read as "already deleted".
         if (!spec.writer.remove) {
-          outcomes.push({
+          record(outcomes, ctx.observer, {
             kind: "resource",
             key,
             id: managed.id,
@@ -653,7 +665,7 @@ export async function runDeleteLoop(ctx: DeleteLoopCtx): Promise<DestroyOutcome[
       if (err instanceof CtApiError && err.status === 404) {
         delete state.resources[key];
         await save(statePath, state);
-        outcomes.push({
+        record(outcomes, ctx.observer, {
           kind: "resource",
           key,
           id: managed.id,
@@ -664,12 +676,12 @@ export async function runDeleteLoop(ctx: DeleteLoopCtx): Promise<DestroyOutcome[
       }
       // Same formatter the top-level handler uses (#50) so a non-404 CtApiError's HTTP status +
       // response body survive into the stop message (#71), not just the bare "... failed" text.
-      outcomes.push({
+      record(outcomes, ctx.observer, {
         kind: "resource",
         key,
         id: managed.id,
         status: "failed",
-        message: `Stopped at ${key}: ${formatFailure(err)}. State saved up to this point — re-run with the remaining targets to resume.`,
+        message: `Stopped at ${key}: ${formatError(err)}. State saved up to this point — re-run with the remaining targets to resume.`,
       });
       return outcomes;
     }
@@ -681,7 +693,7 @@ export async function runDeleteLoop(ctx: DeleteLoopCtx): Promise<DestroyOutcome[
       key,
       id: managed.id,
     });
-    outcomes.push({
+    record(outcomes, ctx.observer, {
       kind: "resource",
       key,
       id: managed.id,

@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { authedSession, type AuthedSession } from "../../api/session.js";
 import { CtClient, type WhoAmI } from "../../api/ctClient.js";
+import { formatError } from "../../api/format.js";
 import { meetsMinVersion, MIN_CT_VERSION, type CtInfo } from "../../api/version.js";
 import { checkAllEnvAuth, type EnvAuthStatus } from "../../auth/status.js";
 import { keychainSessionCache } from "../../auth/sessionStore.js";
@@ -10,7 +11,7 @@ import {
   storeCredentials,
   type ClearCredentialsResult,
 } from "../../auth/tokenStore.js";
-import { normalizeHost } from "../../config.js";
+import { MissingHostError, normalizeHost } from "../../config.js";
 import { loadEnvProfile, loadEnvProfiles, resolveEnvsPath } from "../../env/envs.js";
 import { CtApplicationError } from "../errors.js";
 import { resolveProject, type ProjectResolutionDependencies } from "../project.js";
@@ -55,6 +56,8 @@ export interface AuthLoginResult {
   identity: WhoAmI;
   storage: string;
   churchToolsVersion: string | null;
+  /** Set when the version could not be read; the credentials are stored either way. */
+  versionCheckError: string | null;
   minimumVersion: string;
   supportedVersion: boolean | null;
 }
@@ -78,8 +81,17 @@ export async function runAuthLogin(
   )(host);
   const identity = await client.authenticate(token, { fresh: true });
   const storage = await (dependencies.storeCredentials ?? storeCredentials)({ host, token });
-  const info = await client.get<CtInfo>("/info");
-  const churchToolsVersion = info.version ?? null;
+  // The token is verified and stored by this point, so the login HAS succeeded. A failing /info
+  // is a version check that could not run, not a failed login — throwing here reported pure
+  // failure to a user whose credentials were already in the keychain (#156 review).
+  let churchToolsVersion: string | null = null;
+  let versionCheckError: string | null = null;
+  try {
+    const info = await client.get<CtInfo>("/info");
+    churchToolsVersion = info.version ?? null;
+  } catch (caught) {
+    versionCheckError = formatError(caught);
+  }
   return {
     operation: "auth",
     action: "login",
@@ -87,6 +99,7 @@ export async function runAuthLogin(
     identity,
     storage,
     churchToolsVersion,
+    versionCheckError,
     minimumVersion: MIN_CT_VERSION,
     supportedVersion: churchToolsVersion ? meetsMinVersion(churchToolsVersion) : null,
   };
@@ -171,6 +184,10 @@ export async function runAuthStatus(
       { ...dependencies.project, env },
     );
   } catch (cause) {
+    // ONLY an unresolvable host means "not logged in". A typo'd `--env`, a missing ct.envs.json
+    // or a malformed one must report itself — rewriting those sent a user who IS logged in to
+    // `ct auth login` (#156 review).
+    if (!(cause instanceof MissingHostError)) throw cause;
     throw new CtApplicationError(
       "AUTH_REQUIRED",
       "Not logged in. Run `ct auth login --host <url> --token <token>`.",

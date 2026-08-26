@@ -1,7 +1,8 @@
 import { relative } from "node:path";
 import { Command } from "commander";
 import { runAdoptGrants } from "../application/operations/adopt-grants.js";
-import { info, warn } from "../ui.js";
+import { cliObserver } from "./observer.js";
+import { info } from "../ui.js";
 
 interface AdoptGrantsOptions {
   state?: string;
@@ -32,15 +33,18 @@ export function adoptGrantsCommand(): Command {
         command: Command,
       ) => {
         const opts = command.optsWithGlobals() as AdoptGrantsOptions;
-        const result = await runAdoptGrants({
-          domainType,
-          domainId,
-          statePath: opts.state,
-          environment: opts.env,
-          group: opts.group,
-          allDeclarable: opts.allDeclarable,
-          write: opts.write,
-        });
+        const result = await runAdoptGrants(
+          {
+            domainType,
+            domainId,
+            statePath: opts.state,
+            environment: opts.env,
+            group: opts.group,
+            allDeclarable: opts.allDeclarable,
+            write: opts.write,
+          },
+          { observer: cliObserver() },
+        );
         if (result.value.permissionCatalogPath) {
           info(`permission catalog: ${relative(result.project.cwd, result.value.permissionCatalogPath)}`);
         }
@@ -56,7 +60,6 @@ export function adoptGrantsCommand(): Command {
           info("Paste the block(s) below into your config, then run `ct plan`:");
           process.stdout.write(result.value.text);
         }
-        for (const warning of result.warnings) warn(warning.message);
       },
     );
 }

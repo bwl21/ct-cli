@@ -42,7 +42,8 @@ export interface PreparedApply {
   plan: PlanResult;
   changeCount: number;
   confirmation: ConfirmationRequirement;
-  expiresAt: string;
+  /** `null` when the prepared operation has no wall-clock expiry (the CLI's own runs). */
+  expiresAt: string | null;
 }
 
 export interface ApplyValue {
@@ -76,7 +77,8 @@ export interface ApplyOperationDependencies extends PlanOperationDependencies {
   runPostApplyHooks?: typeof runPostApplyHooks;
   saveState?: typeof saveState;
   env?: NodeJS.ProcessEnv;
-  preparedTtlMs?: number;
+  /** `null` disables the wall-clock expiry entirely; omit for the default TTL. */
+  preparedTtlMs?: number | null;
 }
 
 const defaultStore = new PreparedOperationStore<PreparedApplyExecution>();
@@ -160,7 +162,18 @@ export async function prepareApply(
     throw new CtApplicationError(
       "PLAN_INCOMPLETE",
       `Aborting: ${context.result.value.fetchErrors.length} resource(s) could not be fetched — the plan is incomplete. Re-run when resolved.`,
-      { details: { fetchErrors: context.result.value.fetchErrors } },
+      {
+        details: {
+          fetchErrors: context.result.value.fetchErrors,
+          // An incomplete plan aborts before the plan (and therefore its diagnostics) is ever
+          // returned, so the catalog path and the plan warnings travel on the error itself.
+          // Without them a stale per-instance catalog (#25) goes unmentioned in exactly the run
+          // that ends in "could not be fetched" (#156 review).
+          cwd: context.result.project.cwd,
+          permissionCatalogPath: context.result.value.permissionCatalogPath ?? null,
+          warnings: context.result.warnings.map((warning) => warning.message),
+        },
+      },
     );
   }
 
@@ -181,7 +194,7 @@ export async function prepareApply(
       refresh: request.refresh ?? false,
       confirmation,
     },
-    dependencies.preparedTtlMs ?? PREPARED_APPLY_TTL_MS,
+    dependencies.preparedTtlMs === undefined ? PREPARED_APPLY_TTL_MS : dependencies.preparedTtlMs,
   );
 
   return {
@@ -189,7 +202,7 @@ export async function prepareApply(
     plan: context.result,
     changeCount,
     confirmation,
-    expiresAt: stored.expiresAt.toISOString(),
+    expiresAt: stored.expiresAt === null ? null : stored.expiresAt.toISOString(),
   };
 }
 

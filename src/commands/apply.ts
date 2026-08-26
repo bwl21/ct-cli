@@ -10,6 +10,7 @@ import { CtApplicationError } from "../application/errors.js";
 import { renderPlan } from "../engine/render.js";
 import { renderPermissionPlan } from "../permissions/render.js";
 import { confirm, confirmEnv } from "../ui/prompt.js";
+import { cliObserver } from "./observer.js";
 import { info, warn, success, error } from "../ui.js";
 
 interface ApplyOptions {
@@ -41,15 +42,28 @@ export function applyCommand(): Command {
     .action(async (opts: ApplyOptions) => {
       let prepared;
       try {
-        prepared = await prepareApply({
-          configPath: opts.config,
-          statePath: opts.state,
-          environment: opts.env,
-          backupDir: opts.backupDir,
-          refresh: opts.refresh,
-        });
+        prepared = await prepareApply(
+          {
+            configPath: opts.config,
+            statePath: opts.state,
+            environment: opts.env,
+            backupDir: opts.backupDir,
+            refresh: opts.refresh,
+            // No wall-clock expiry: the confirmation below blocks on stdin for as long as the
+            // operator needs to read the rendered diff (#156 review). Staleness is caught by the
+            // state fingerprint at execute time, not by a timer.
+          },
+          { preparedTtlMs: null },
+        );
       } catch (caught) {
         if (caught instanceof CtApplicationError && caught.code === "PLAN_INCOMPLETE") {
+          const details = caught.details ?? {};
+          const catalog = details.permissionCatalogPath;
+          const cwd = typeof details.cwd === "string" ? details.cwd : process.cwd();
+          if (typeof catalog === "string") info(`permission catalog: ${relative(cwd, catalog)}`);
+          if (Array.isArray(details.warnings)) {
+            for (const warning of details.warnings) if (typeof warning === "string") warn(warning);
+          }
           error(caught.message);
           process.exitCode = 1;
           return;
@@ -105,9 +119,10 @@ export function applyCommand(): Command {
         return;
       }
 
-      const result = await executePreparedApply(prepared, proof);
+      // The observer prints `Backup written: …` the moment the backup lands, so the path is on
+      // screen even when a later step throws — the exact case the backup exists for (#156 review).
+      const result = await executePreparedApply(prepared, proof, { observer: cliObserver() });
       const applied = result.value;
-      if (applied.backupPath) info(`Backup written: ${applied.backupPath}`);
       success(
         `Applied: ${applied.resources.created.length} created, ${applied.resources.updated.length} updated.`,
       );

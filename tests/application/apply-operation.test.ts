@@ -136,6 +136,49 @@ describe("prepared apply operation", () => {
     expect(test.execute).not.toHaveBeenCalled();
   });
 
+  it("carries the catalog path and plan warnings on an incomplete plan", async () => {
+    const test = harness();
+    const dependencies: ApplyOperationDependencies = {
+      ...test.dependencies,
+      loadHostCatalog: vi.fn(async () => "/project/.ct/catalog/example.json"),
+      buildPlan: vi.fn(async () => ({
+        plan: resourcePlan,
+        actual: new Map(),
+        fetchErrors: ["group.broken: HTTP 500"],
+      })),
+      buildPermissionPlan: vi.fn(async () => ({
+        items: [],
+        fetchErrors: [],
+        warnings: ["permission catalog is stale"],
+      })),
+    };
+    // Aborting is right; aborting SILENTLY about a stale catalog is not — the adapter never sees
+    // the plan that carries these, so they travel on the error (#156 review).
+    await expect(prepareApply({}, dependencies)).rejects.toMatchObject({
+      code: "PLAN_INCOMPLETE",
+      details: {
+        cwd: "/project",
+        permissionCatalogPath: "/project/.ct/catalog/example.json",
+        warnings: ["permission catalog is stale"],
+      },
+    });
+  });
+
+  it("does not expire a prepared apply the caller keeps across a blocking confirmation", async () => {
+    const test = harness();
+    const prepared = await prepareApply({}, { ...test.dependencies, preparedTtlMs: null });
+    expect(prepared.expiresAt).toBeNull();
+    // Far longer than the default 5-minute TTL: an operator may read a long diff before typing y.
+    test.advance(60 * 60 * 1000);
+
+    const result = await executePreparedApply(
+      prepared,
+      { type: "environment", value: "prod" },
+      test.dependencies,
+    );
+    expect(result.value.resources.created).toEqual(["mainz"]);
+  });
+
   it("is single-use", async () => {
     const test = harness({ protected: false, environment: "dev" });
     const prepared = await prepareApply({}, test.dependencies);

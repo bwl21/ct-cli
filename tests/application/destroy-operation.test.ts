@@ -3,11 +3,12 @@ import type { CtApplicationError } from "../../src/application/errors.js";
 import {
   executePreparedDestroy,
   prepareDestroy,
+  runDeleteLoop,
   type DestroyOperationDependencies,
   type PreparedDestroyExecution,
 } from "../../src/application/operations/destroy.js";
 import { PreparedOperationStore } from "../../src/application/prepared-operation-store.js";
-import type { CtClient } from "../../src/api/ctClient.js";
+import { CtApiError, type CtClient } from "../../src/api/ctClient.js";
 import { emptyState } from "../../src/state/state.js";
 
 const host = "https://example.church.tools";
@@ -108,6 +109,72 @@ describe("prepared destroy operation", () => {
       },
     });
     expect(test.events).toContain("resource-destroyed");
+  });
+
+  it("reports every completed delete before a mid-loop throw can discard them", async () => {
+    const state = emptyState(host);
+    for (const key of ["a", "b", "c"]) {
+      state.resources[key] = { type: "group", id: 1, key, fields: {}, adoptedAt: "t", updatedAt: "t" };
+    }
+    const messages: string[] = [];
+    let saves = 0;
+    await expect(
+      runDeleteLoop({
+        client: { request: vi.fn(async () => ({})) } as unknown as CtClient,
+        state,
+        statePath,
+        ordered: ["a", "b", "c"],
+        save: async () => {
+          saves += 1;
+          if (saves === 3) throw new Error("EACCES: state file is read-only");
+        },
+        observer: {
+          emit: (event) => {
+            if (event.type === "outcome") messages.push(event.outcome.message);
+          },
+        },
+      }),
+    ).rejects.toThrow("EACCES");
+    // The array the old code returned is gone with the stack — these two deletes really happened
+    // in ChurchTools, and the operator has been told so.
+    expect(messages).toEqual(["Destroyed group.a (#1)", "Destroyed group.b (#1)"]);
+  });
+
+  it("keeps the HTTP status but truncates a huge body in the stop message", async () => {
+    const state = emptyState(host);
+    state.resources.a = { type: "group", id: 9, key: "a", fields: {}, adoptedAt: "t", updatedAt: "t" };
+    const outcomes = await runDeleteLoop({
+      client: {
+        request: vi.fn(async () => {
+          throw new CtApiError("DELETE /groups/9 failed", 502, "<html>".repeat(2000));
+        }),
+      } as unknown as CtClient,
+      state,
+      statePath,
+      ordered: ["a"],
+      save: async () => {},
+    });
+    const message = outcomes[0]!.message;
+    expect(message).toContain("(HTTP 502)");
+    // The resume guidance must not be buried under a full HTML error page (#50).
+    expect(message).toContain("truncated");
+    expect(message.length).toBeLessThan(2600);
+  });
+
+  it("does not expire a prepared destroy the caller keeps across a blocking confirmation", async () => {
+    const test = harness();
+    const prepared = await prepareDestroy(
+      { targets: ["area"] },
+      { ...test.dependencies, preparedTtlMs: null },
+    );
+    expect(prepared.expiresAt).toBeNull();
+
+    const result = await executePreparedDestroy(
+      prepared,
+      { type: "environment", value: "prod" },
+      test.dependencies,
+    );
+    expect(result.value.complete).toBe(true);
   });
 
   it("refuses a proposal after its state file changed", async () => {

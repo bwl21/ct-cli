@@ -12,6 +12,7 @@ import { slug } from "../../resources/registry.js";
 import { loadState, type State } from "../../state/state.js";
 import type { CtWarning, OperationResult, ProjectRequest } from "../contracts.js";
 import { resolveProject } from "../project.js";
+import { noopObserver, type OperationObserver } from "../ports.js";
 
 export interface AdoptGrantsRequest extends ProjectRequest {
   domainType?: string;
@@ -62,7 +63,14 @@ function normalizeDomainType(raw: string): DomainType {
  *    summarised, because the WARNING footer that protects the single form cannot protect a 44-block
  *    paste that nobody reads to the end.
  */
-export async function runAdoptGrants(opts: AdoptGrantsRequest): Promise<AdoptGrantsResult> {
+export interface AdoptGrantsDependencies {
+  observer?: OperationObserver;
+}
+
+export async function runAdoptGrants(
+  opts: AdoptGrantsRequest,
+  dependencies: AdoptGrantsDependencies = {},
+): Promise<AdoptGrantsResult> {
   const bulk = opts.group !== undefined || opts.allDeclarable === true;
   if (bulk && (opts.domainType !== undefined || opts.domainId !== undefined)) {
     throw new Error(
@@ -89,11 +97,8 @@ export async function runAdoptGrants(opts: AdoptGrantsRequest): Promise<AdoptGra
   const emitted = bulkEmission?.blocks ?? [await emitSingle(client, state, opts.domainType, opts.domainId)];
 
   const text = `${emitted.map((e) => e.block).join("\n\n")}\n`;
-  let writtenPath: string | null = null;
-  if (opts.write) {
-    writtenPath = resolve(project.cwd, opts.write);
-    await appendFile(writtenPath, text, "utf8");
-  }
+  // Assembled and reported BEFORE the append: a failing `--write` must not swallow the record of
+  // what the emission silently skipped (#156 review).
   const warnings = [...(bulkEmission?.warnings ?? [])];
   if (emitted.some((e) => e.omitted > 0)) {
     warnings.push({
@@ -103,6 +108,14 @@ export async function runAdoptGrants(opts: AdoptGrantsRequest): Promise<AdoptGra
         "from the declaration — applying the block will REVOKE it. Resolve every comment first; `ct plan` " +
         "is only a no-op once none remain.",
     });
+  }
+  const observer = dependencies.observer ?? noopObserver;
+  for (const warning of warnings) observer.emit({ type: "warning", warning });
+
+  let writtenPath: string | null = null;
+  if (opts.write) {
+    writtenPath = resolve(project.cwd, opts.write);
+    await appendFile(writtenPath, text, "utf8");
   }
   return {
     operation: "adopt",

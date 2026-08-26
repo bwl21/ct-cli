@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { runRefresh, selectRefreshTargets } from "../application/operations/refresh.js";
-import { error, info, success, warn } from "../ui.js";
+import { cliObserver } from "./observer.js";
+import { info } from "../ui.js";
 
 interface RefreshOptions {
   state?: string;
@@ -22,27 +23,20 @@ export function refreshCommand(): Command {
     .option("--group <key>", "refresh this managed group only")
     .option("--all", "refresh every managed dynamic group (required to fan out — this changes membership)")
     .action(async (opts: RefreshOptions) => {
-      const result = await runRefresh({
-        statePath: opts.state,
-        environment: opts.env,
-        group: opts.group,
-        all: opts.all,
-      });
-      for (const warning of result.warnings) warn(warning.message);
+      // The fan-out caution and every per-group line are printed by the observer while the run
+      // is still going, not after every membership has already been recomputed (#156 review).
+      const result = await runRefresh(
+        {
+          statePath: opts.state,
+          environment: opts.env,
+          group: opts.group,
+          all: opts.all,
+        },
+        { observer: cliObserver() },
+      );
       if (result.value.outcomes.length === 0) {
         info("No managed dynamic groups to refresh.");
         return;
-      }
-      for (const outcome of result.value.outcomes) {
-        if (outcome.error) {
-          error(`Failed to refresh ${outcome.key} (#${outcome.id}): ${outcome.error}`);
-          continue;
-        }
-        success(
-          outcome.counts
-            ? `refreshed ${outcome.key} (#${outcome.id}): +${outcome.counts.created} ~${outcome.counts.updated} -${outcome.counts.deleted}`
-            : `refreshed ${outcome.key} (#${outcome.id})`,
-        );
       }
       if (result.value.failed > 0) process.exitCode = 1;
     });

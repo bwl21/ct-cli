@@ -7,7 +7,8 @@ import {
 } from "../application/operations/destroy.js";
 import type { ConfirmationProof } from "../application/operations/apply.js";
 import { confirmEnv, confirmTyped } from "../ui/prompt.js";
-import { error, info, success, warn } from "../ui.js";
+import { cliObserver } from "./observer.js";
+import { error, info, warn } from "../ui.js";
 
 export {
   destroyWarnings,
@@ -55,7 +56,9 @@ export function destroyCommand(): Command {
       };
       let prepared;
       try {
-        prepared = await prepareDestroy(request);
+        // No wall-clock expiry: the typed confirmation below blocks on stdin for as long as the
+        // operator needs, and the backup is already on disk by then (#156 review).
+        prepared = await prepareDestroy(request, { preparedTtlMs: null });
       } catch (caught) {
         if (caught instanceof CtApplicationError && caught.code === "DESTROY_BACKUP_FAILED") {
           error(caught.message);
@@ -94,14 +97,9 @@ export function destroyCommand(): Command {
         return;
       }
 
-      const result = await executePreparedDestroy(prepared, proof);
-      for (const outcome of result.value.outcomes) {
-        if (outcome.status === "destroyed" || outcome.status === "already-absent") {
-          success(outcome.message);
-        } else {
-          error(outcome.message);
-        }
-      }
+      // Every outcome is printed by the observer as it happens: a destroy that throws partway
+      // through must still have said which resources it already deleted (#156 review).
+      const result = await executePreparedDestroy(prepared, proof, { observer: cliObserver() });
       if (!result.value.complete) process.exitCode = 1;
     });
 }

@@ -41,6 +41,19 @@ export interface OperationResult<T> {
   warnings: CtWarning[];
 }
 
+/**
+ * One completed unit of work, reported the moment it happens.
+ *
+ * Every long-running operation emits these as it goes instead of only returning them at the end:
+ * a `ct destroy` that dies halfway through must still have said which resources it already
+ * deleted, and a fan-out caution has to reach the operator BEFORE the fan-out runs (#156 review).
+ */
+export interface OperationOutcomeEvent {
+  /** `ok` reads as a success line, `note` as neutral information, `failed` as an error. */
+  status: "ok" | "note" | "failed";
+  message: string;
+}
+
 export type OperationEvent =
   | { type: "phase-started"; phase: string }
   | { type: "resource-reading"; resourceType: string; key: string }
@@ -48,4 +61,5 @@ export type OperationEvent =
   | { type: "resource-updated"; resourceType: string; key: string; id: number }
   | { type: "resource-destroyed"; resourceType: string; key: string; id: number }
   | { type: "backup-written"; path: string }
-  | { type: "warning"; warning: CtWarning };
+  | { type: "warning"; warning: CtWarning }
+  | { type: "outcome"; outcome: OperationOutcomeEvent };

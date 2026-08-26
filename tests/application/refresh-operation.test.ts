@@ -53,6 +53,39 @@ describe("runRefresh", () => {
     });
   });
 
+  it("cautions about the fan-out BEFORE any membership is recomputed", async () => {
+    const seen: string[] = [];
+    const deps = dependencies();
+    const authed = deps.authedSession!;
+    await runRefresh(
+      { all: true },
+      {
+        ...deps,
+        authedSession: (async () => {
+          const session = await authed();
+          const inner = session.client.request;
+          return {
+            ...session,
+            client: {
+              ...session.client,
+              request: (...args: Parameters<typeof inner>) => {
+                seen.push("post");
+                return inner(...args);
+              },
+            },
+          };
+        }) as typeof authed,
+        observer: {
+          emit: (event) => {
+            if (event.type === "warning") seen.push(`warning:${event.warning.code}`);
+            if (event.type === "outcome") seen.push(`outcome:${event.outcome.status}`);
+          },
+        },
+      },
+    );
+    expect(seen).toEqual(["warning:REFRESH_FAN_OUT", "post", "outcome:ok", "post", "outcome:failed"]);
+  });
+
   it("requires an explicit single target or fan-out intent", async () => {
     await expect(runRefresh({}, dependencies())).rejects.toThrow(/Specify --group <key>.*--all/);
   });

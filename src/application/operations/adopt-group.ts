@@ -12,6 +12,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { authedSession } from "../../api/session.js";
 import { CtApiError, type CtClient } from "../../api/ctClient.js";
+import { formatError } from "../../api/format.js";
 import { normalizeRuleset } from "../../engine/dynamic.js";
 import {
   groupScopedRows,
@@ -30,6 +31,8 @@ import { chooseAdoptKey, loadState, saveState, upsert, type State } from "../../
 import type { CtWarning, OperationResult, ProjectRequest } from "../contracts.js";
 import { InMemoryMutationLock } from "../prepared-operation-store.js";
 import { resolveProject } from "../project.js";
+import { noopObserver, type OperationObserver } from "../ports.js";
+import { warningSink, type WarningSink } from "../warnings.js";
 
 export interface AdoptGroupRequest extends ProjectRequest {
   ids: string[];
@@ -232,7 +235,7 @@ interface MemberFieldsCapture {
 async function captureMemberFields(
   id: number,
   client: Pick<CtClient, "get">,
-  warnings: CtWarning[],
+  addWarning: WarningSink,
 ): Promise<MemberFieldsCapture | undefined> {
   let raw: unknown;
   try {
@@ -245,10 +248,10 @@ async function captureMemberFields(
     // Silence is the one thing that is not allowed here, because "no member fields" and "could not
     // read them" produce the same config.
     if (!(err instanceof CtApiError && err.status === 404)) {
-      warnings.push({
+      addWarning({
         code: "MEMBER_FIELDS_UNREADABLE",
         message:
-          `group #${id}: member fields could not be read (${err instanceof Error ? err.message : String(err)}) — ` +
+          `group #${id}: member fields could not be read (${formatError(err)}) — ` +
           `adopted WITHOUT them. Re-run \`ct adopt group ${id} --with-member-fields\` once the read succeeds.`,
       });
     }
@@ -262,7 +265,7 @@ async function captureMemberFields(
     const canonical = memberFieldStateKey(localKey);
     const fieldId = memberFieldId(row);
     if (!canonical) {
-      warnings.push({
+      addWarning({
         code: "MEMBER_FIELD_IDENTITY_MISSING",
         message:
           `group #${id}: a group-scoped member field has neither referenceName nor name — adopted ` +
@@ -272,7 +275,7 @@ async function captureMemberFields(
       return undefined;
     }
     if (fieldId === undefined) {
-      warnings.push({
+      addWarning({
         code: "MEMBER_FIELD_ID_MISSING",
         message:
           `group #${id} member field "${localKey}": the live response contains no numeric field id — ` +
@@ -282,7 +285,7 @@ async function captureMemberFields(
       return undefined;
     }
     if (ids[canonical] !== undefined) {
-      warnings.push({
+      addWarning({
         code: "MEMBER_FIELD_IDENTITY_AMBIGUOUS",
         message:
           `group #${id}: multiple group-scoped member fields resolve to the local key "${canonical}" — ` +
@@ -319,9 +322,17 @@ async function captureDynamic(
   return { status, normalizedRuleset };
 }
 
-export async function runAdoptGroups(opts: AdoptGroupRequest): Promise<AdoptGroupsResult> {
+export interface AdoptGroupDependencies {
+  observer?: OperationObserver;
+}
+
+export async function runAdoptGroups(
+  opts: AdoptGroupRequest,
+  dependencies: AdoptGroupDependencies = {},
+): Promise<AdoptGroupsResult> {
   const ids = opts.ids;
   const warnings: CtWarning[] = [];
+  const addWarning = warningSink(warnings, dependencies.observer ?? noopObserver);
   const selectors = [ids.length > 0, Boolean(opts.groupType), Boolean(opts.childrenOf)].filter(
     Boolean,
   ).length;
@@ -411,7 +422,7 @@ export async function runAdoptGroups(opts: AdoptGroupRequest): Promise<AdoptGrou
         throw new Error(`Could not derive a logical key for group #${id} — pass --key explicitly.`);
       }
       if (choice.wouldBecome) {
-        warnings.push({
+        addWarning({
           code: "ADOPT_KEY_PRESERVED",
           message:
             `${key}: key would change to "${choice.wouldBecome}" (derived from the live name). ` +
@@ -427,7 +438,7 @@ export async function runAdoptGroups(opts: AdoptGroupRequest): Promise<AdoptGrou
       // Emitted BEFORE `dynamic` so the snippet reads in apply order — the fields a ruleset may
       // reference are declared above the ruleset that references them (#135).
       const memberFields = opts.withMemberFields
-        ? await captureMemberFields(id, client, warnings)
+        ? await captureMemberFields(id, client, addWarning)
         : undefined;
       if (memberFields && memberFields.declarations.length > 0) {
         snippetFields.memberFields = memberFields.declarations;
@@ -469,7 +480,7 @@ export async function runAdoptGroups(opts: AdoptGroupRequest): Promise<AdoptGrou
                     lines.map((l) => `    ${l}`).join("\n"),
                 );
               }
-              warnings.push({
+              addWarning({
                 code: "RULESET_NOT_PORTABLE",
                 message:
                   `${relPath} keeps ${portableWarnings.length} host-specific id(s) — NOT portable to another host:\n` +
@@ -487,7 +498,7 @@ export async function runAdoptGroups(opts: AdoptGroupRequest): Promise<AdoptGrou
                     `${left.length} host-specific id(s) and nothing would rewrite them.`,
                 );
               }
-              warnings.push({
+              addWarning({
                 code: "RULESET_NOT_PORTABLE",
                 message:
                   `${relPath} captured verbatim (--no-portable-rulesets): ${left.length} host-specific ` +
@@ -538,7 +549,7 @@ export async function runAdoptGroups(opts: AdoptGroupRequest): Promise<AdoptGrou
 
     await saveState(project.statePath, state);
     if (reports.some((report) => report.action === "updated")) {
-      warnings.push({
+      addWarning({
         code: "ADOPT_ALREADY_MANAGED",
         message: "This resource was already managed — its snapshot was refreshed.",
       });

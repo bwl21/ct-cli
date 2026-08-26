@@ -18,7 +18,11 @@ export async function verifyAndStoreLoginToken(rawHost: string, rawToken: string
   const me = result.identity;
   success(`Logged in to ${result.host} as ${me.firstName ?? ""} ${me.lastName ?? ""} (#${me.id})`.trim());
   info(`Host + token stored in ${result.storage}.`);
-  if (result.churchToolsVersion) {
+  if (result.versionCheckError) {
+    warn(
+      `Could not read the ChurchTools version (${result.versionCheckError}) — the login itself is stored and verified.`,
+    );
+  } else if (result.churchToolsVersion) {
     if (result.supportedVersion) {
       info(`ChurchTools ${result.churchToolsVersion} (≥ ${result.minimumVersion} required).`);
     } else {

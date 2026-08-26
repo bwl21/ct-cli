@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { runAuthLogin, runAuthLogout, runAuthStatus } from "../../src/application/operations/auth.js";
+import { MissingHostError } from "../../src/config.js";
 
 const host = "https://example.church.tools";
 
@@ -57,6 +58,34 @@ describe("runAuthStatus", () => {
     );
     expect(result).toMatchObject({ scope: "all", authenticated: true, environments: statuses });
   });
+
+  it("reports an environment-profile problem as itself, not as a missing login", async () => {
+    // A user who IS logged in, with a typo'd --env: "Not logged in. Run `ct auth login`" sent
+    // them to fix the wrong thing (#156 review).
+    await expect(
+      runAuthStatus(
+        { environment: "prd" },
+        {
+          resolveProject: vi.fn(async () => {
+            throw new Error('Environment profile "prd" not found in ct.envs.json.');
+          }),
+        },
+      ),
+    ).rejects.toThrow('Environment profile "prd" not found');
+  });
+
+  it("still reports a genuinely absent host as a missing login", async () => {
+    await expect(
+      runAuthStatus(
+        {},
+        {
+          resolveProject: vi.fn(async () => {
+            throw new MissingHostError();
+          }),
+        },
+      ),
+    ).rejects.toMatchObject({ name: "CtApplicationError", code: "AUTH_REQUIRED" });
+  });
 });
 
 describe("auth mutations", () => {
@@ -86,6 +115,32 @@ describe("auth mutations", () => {
       supportedVersion: true,
     });
     expect(JSON.stringify(result)).not.toContain("super-secret");
+  });
+
+  it("keeps a stored login a success when only the version check fails", async () => {
+    const storeCredentials = vi.fn(async () => "test keychain");
+    const result = await runAuthLogin(
+      { host, token: "super-secret" },
+      {
+        createClient: (() => ({
+          authenticate: vi.fn(async () => ({ id: 7, firstName: "Ada", lastName: "Lovelace" })),
+          get: vi.fn(async () => {
+            throw new Error("502 Bad Gateway");
+          }),
+        })) as never,
+        storeCredentials,
+      },
+    );
+
+    // The token was verified and written before /info was ever called: reporting pure failure
+    // hid credentials that are now in the keychain (#156 review).
+    expect(storeCredentials).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      storage: "test keychain",
+      churchToolsVersion: null,
+      versionCheckError: "502 Bad Gateway",
+      supportedVersion: null,
+    });
   });
 
   it("logs out exactly the host selected by an environment", async () => {

@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { runAdoptGroups } from "../application/operations/adopt-group.js";
-import { info, out, success, warn } from "../ui.js";
+import { cliObserver } from "./observer.js";
+import { info, out, success } from "../ui.js";
 
 interface AdoptGroupOptions {
   key?: string;
@@ -37,25 +38,29 @@ export function adoptGroupCommand(): Command {
     .option("--strict-rulesets", "refuse rulesets that retain a host-specific id")
     .action(async (ids: string[], _localOpts: AdoptGroupOptions, command: Command) => {
       const opts = command.optsWithGlobals() as AdoptGroupOptions;
-      const result = await runAdoptGroups({
-        ids,
-        key: opts.key,
-        statePath: opts.state,
-        environment: opts.env,
-        dryRun: opts.dryRun,
-        groupType: opts.type,
-        childrenOf: opts.childrenOf,
-        withDynamic: opts.withDynamic,
-        withMemberFields: opts.withMemberFields,
-        rekey: opts.rekey,
-        portableRulesets: opts.portableRulesets,
-        strictRulesets: opts.strictRulesets,
-      });
+      // Warnings print as they are produced: a `--strict-rulesets` throw halfway through a
+      // subtree used to take the record of every already-adopted group with it (#156 review).
+      const result = await runAdoptGroups(
+        {
+          ids,
+          key: opts.key,
+          statePath: opts.state,
+          environment: opts.env,
+          dryRun: opts.dryRun,
+          groupType: opts.type,
+          childrenOf: opts.childrenOf,
+          withDynamic: opts.withDynamic,
+          withMemberFields: opts.withMemberFields,
+          rekey: opts.rekey,
+          portableRulesets: opts.portableRulesets,
+          strictRulesets: opts.strictRulesets,
+        },
+        { observer: cliObserver() },
+      );
       if (result.value.noMatches) {
         info("No groups matched — nothing to adopt.");
         return;
       }
-      for (const warning of result.warnings) warn(warning.message);
       if (result.value.dryRun) {
         const payload = result.value.groups.map((group) => ({
           key: group.key,

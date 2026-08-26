@@ -4,7 +4,7 @@ import { fetchDynamicGroupIds } from "../../api/dynamicGroups.js";
 import { authedSession, type AuthedSession } from "../../api/session.js";
 import { assertNotPeople } from "../../engine/guard.js";
 import { loadState, type ManagedResource, type State } from "../../state/state.js";
-import type { OperationResult, ProjectRequest } from "../contracts.js";
+import type { CtWarning, OperationResult, ProjectRequest } from "../contracts.js";
 import { noopObserver, type OperationObserver } from "../ports.js";
 import { resolveProject, type ProjectResolutionDependencies } from "../project.js";
 
@@ -91,19 +91,41 @@ export async function runRefresh(
   const targets = await (dependencies.selectTargets ?? selectRefreshTargets)(client, state, request.group);
 
   const outcomes: RefreshOutcome[] = [];
+  // The caution has to reach the operator BEFORE membership is recomputed. Returning it in
+  // `warnings[]` put it on screen after all N groups had already been refreshed (#156 review).
+  const warnings: CtWarning[] =
+    request.all && targets.length > 0
+      ? [
+          {
+            code: "REFRESH_FAN_OUT",
+            message: `Refreshing ${targets.length} managed dynamic group(s) — this recomputes membership.`,
+          },
+        ]
+      : [];
+  for (const warning of warnings) observer.emit({ type: "warning", warning });
   observer.emit({ type: "phase-started", phase: "refresh-groups" });
   for (const target of targets) {
     const path = `/dynamicgroups/${target.id}/refresh`;
     assertNotPeople(path);
     try {
       const response = await client.request<RefreshCounts[]>("POST", path);
-      outcomes.push({ key: target.key, id: target.id, counts: response?.[0] ?? null, error: null });
+      const counts = response?.[0] ?? null;
+      outcomes.push({ key: target.key, id: target.id, counts, error: null });
+      observer.emit({
+        type: "outcome",
+        outcome: {
+          status: "ok",
+          message: counts
+            ? `refreshed ${target.key} (#${target.id}): +${counts.created} ~${counts.updated} -${counts.deleted}`
+            : `refreshed ${target.key} (#${target.id})`,
+        },
+      });
     } catch (caught) {
-      outcomes.push({
-        key: target.key,
-        id: target.id,
-        counts: null,
-        error: caught instanceof CtApiError ? `HTTP ${caught.status}` : (caught as Error).message,
+      const message = caught instanceof CtApiError ? `HTTP ${caught.status}` : (caught as Error).message;
+      outcomes.push({ key: target.key, id: target.id, counts: null, error: message });
+      observer.emit({
+        type: "outcome",
+        outcome: { status: "failed", message: `Failed to refresh ${target.key} (#${target.id}): ${message}` },
       });
     }
   }
@@ -111,15 +133,7 @@ export async function runRefresh(
   return {
     operation: "refresh",
     project,
-    warnings:
-      request.all && targets.length > 0
-        ? [
-            {
-              code: "REFRESH_FAN_OUT",
-              message: `Refreshing ${targets.length} managed dynamic group(s) — this recomputes membership.`,
-            },
-          ]
-        : [],
+    warnings,
     value: {
       outcomes,
       failed: outcomes.filter((outcome) => outcome.error !== null).length,
