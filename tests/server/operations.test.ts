@@ -16,7 +16,13 @@ describe("server operation catalog", () => {
       dependencies.lock.runExclusive("/project/state.json", async () => {
         entered();
         await held;
-        return { operation: "apply" };
+        return {
+          operation: "apply",
+          value: {
+            resources: { created: [], updated: [], skippedDeletes: [] },
+            permissions: { granted: 0, deleted: 0, failed: [] },
+          },
+        };
       }),
     );
     const executePreparedDestroy = vi.fn(async (_prepared, _proof, dependencies) =>
@@ -47,6 +53,38 @@ describe("server operation catalog", () => {
       type: "operation-failed",
       operation: "destroy",
       code: "MUTATION_BUSY",
+    });
+  });
+
+  it("marks a resolved but incomplete apply as failed progress", async () => {
+    const events = new OperationEventStore();
+    const catalog = createServerOperationCatalog({
+      events,
+      core: {
+        executePreparedApply: vi.fn(async () => ({
+          operation: "apply",
+          value: {
+            resources: {
+              created: [],
+              updated: [],
+              skippedDeletes: [],
+              failed: { key: "group.example", message: "HTTP 400" },
+            },
+            permissions: { granted: 0, deleted: 0, failed: [] },
+          },
+        })),
+      } as never,
+    });
+    events.open("apply-failed");
+
+    await catalog.executeApply("apply-failed", { type: "yes" });
+
+    const seen: unknown[] = [];
+    events.listen("apply-failed", (event) => seen.push(event));
+    expect(seen).toContainEqual({
+      type: "operation-failed",
+      operation: "apply",
+      code: "APPLY_INCOMPLETE",
     });
   });
 });

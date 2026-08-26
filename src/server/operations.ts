@@ -91,7 +91,11 @@ export function createServerOperationCatalog(
           lock: mutationLock,
           observer: options.observerFor?.(id) ?? options.events?.observer(id),
         });
-        options.events?.complete(id, "apply");
+        if (result.value.resources.failed || result.value.permissions.failed.length > 0) {
+          options.events?.fail(id, "apply", "APPLY_INCOMPLETE");
+        } else {
+          options.events?.complete(id, "apply");
+        }
         return result;
       } catch (caught) {
         options.events?.fail(

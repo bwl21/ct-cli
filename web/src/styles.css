@@ -850,6 +850,23 @@ h1 {
     700 9px ui-monospace,
     monospace;
 }
+.apply-failure-result {
+  display: block;
+}
+.apply-failure-result strong {
+  display: block;
+  margin-top: 6px;
+}
+.apply-failure-result p {
+  margin: 8px 0 0;
+}
+.apply-failure-result ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+.apply-failure-result li + li {
+  margin-top: 8px;
+}
 .apply-result {
   margin-top: 22px;
   padding: 18px;

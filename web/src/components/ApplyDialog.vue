@@ -27,6 +27,9 @@ const proofValid = computed(
     props.prepared.confirmation.type !== "environment" ||
     environmentProof.value === props.prepared.confirmation.environment,
 );
+const resourceFailure = computed(() => props.result?.value.resources.failed ?? null);
+const permissionFailures = computed(() => props.result?.value.permissions.failed ?? []);
+const applyIncomplete = computed(() => resourceFailure.value !== null || permissionFailures.value.length > 0);
 
 function confirm(): void {
   const requirement = props.prepared.confirmation;
@@ -127,7 +130,27 @@ function eventLabel(event: OperationEvent): string {
             <span class="spinner"></span><span>Apply läuft …</span>
           </div>
         </div>
-        <div v-if="props.result" class="apply-result">
+        <div v-if="props.result && applyIncomplete" class="dialog-error apply-failure-result">
+          <span>APPLY_INCOMPLETE</span>
+          <strong>Der Apply konnte nicht alle Änderungen umsetzen.</strong>
+          <p v-if="resourceFailure">
+            Gestoppt bei <code>{{ resourceFailure.key }}</code
+            >: {{ resourceFailure.message }}
+          </p>
+          <ul v-if="permissionFailures.length">
+            <li
+              v-for="failure in permissionFailures"
+              :key="`${failure.method}:${failure.path}:${failure.authId}`"
+            >
+              <code>{{ failure.method }} {{ failure.path }}</code>
+              (authId {{ failure.authId
+              }}<template v-if="failure.dataId.length"> · dataId {{ failure.dataId.join(", ") }}</template
+              >): {{ failure.message }}
+            </li>
+          </ul>
+          <p>Der erreichte Zwischenstand wurde gespeichert. Der nächste Plan bleibt wiederholbar.</p>
+        </div>
+        <div v-else-if="props.result" class="apply-result">
           <strong>Apply abgeschlossen</strong>
           <p>
             {{ props.result.value.resources.created.length }} erstellt,
