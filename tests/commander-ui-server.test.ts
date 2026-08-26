@@ -114,4 +114,46 @@ describe("Commander-generated UI server", () => {
     expect(unconfirmed.status).toBe(400);
     expect(runner).not.toHaveBeenCalled();
   });
+
+  it("resolves a parameter value-domain through a read-only ct command", async () => {
+    const runner = vi.fn(async () => ({
+      exitCode: 0,
+      signal: null,
+      stdout: JSON.stringify([
+        { id: 17, name: "Jugend" },
+        { id: 23, name: "Kinder" },
+      ]),
+      stderr: "2 total\n",
+      truncated: false,
+    }));
+    started = await startCommanderUiServer({
+      programFactory: buildProgram,
+      cwd: "/process",
+      port: 0,
+      runner,
+    });
+    const auth = await session();
+    const complete = (partial: string): Promise<Response> =>
+      fetch(`${auth.origin}/api/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: auth.origin, cookie: auth.cookie },
+        body: JSON.stringify({
+          command: ["adopt", "group"],
+          arguments: {},
+          options: { env: "test" },
+          field: { kind: "argument", name: "ids" },
+          partial,
+        }),
+      });
+
+    const response = await complete("jug");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      suggestions: [{ value: "17", label: "Jugend · #17" }],
+    });
+    expect(runner).toHaveBeenCalledWith(["get", "groups", "--env", "test"], { cwd: "/process" });
+
+    await complete("kind");
+    expect(runner).toHaveBeenCalledTimes(1);
+  });
 });

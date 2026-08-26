@@ -1,6 +1,7 @@
 import { relative } from "node:path";
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { runAdoptGrants } from "../application/operations/adopt-grants.js";
+import { GROUP_VALUE_DOMAIN, withValueDomain } from "../command-metadata/value-domain.js";
 import { cliObserver } from "./observer.js";
 import { info } from "../ui.js";
 
@@ -22,7 +23,12 @@ export function adoptGrantsCommand(): Command {
     .argument("[domainId]", "the domainId of the permission domain object")
     .option("-s, --state <path>", "state file path (or set CT_STATE)")
     .option("-e, --env <name>", "environment profile from ct.envs.json")
-    .option("--group <keyOrId>", "bulk: every role instance of this group")
+    .addOption(
+      withValueDomain(
+        new Option("--group <keyOrId>", "bulk: every role instance of this group"),
+        GROUP_VALUE_DOMAIN,
+      ),
+    )
     .option("--all-declarable", "bulk: every declarable role instance on the host")
     .option("--write <path>", "append emitted blocks to this file instead of stdout")
     .action(

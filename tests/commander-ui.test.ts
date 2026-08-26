@@ -29,6 +29,12 @@ describe("Commander-generated UI schema", () => {
         expect.objectContaining({ key: "dryRun", long: "--dry-run", valueKind: "boolean" }),
       ]),
     );
+    const adoptGroup = findUiCommand(schema, ["adopt", "group"])!;
+    expect(adoptGroup.arguments[0]?.valueDomain).toMatchObject({
+      purpose: "parameter-value-domain",
+      constraint: "suggestions",
+      source: { command: ["get", "groups"], valueField: "id" },
+    });
   });
 
   it("automatically reflects a new Commander option without a form definition", () => {

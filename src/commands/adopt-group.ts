@@ -1,5 +1,10 @@
-import { Command } from "commander";
+import { Argument, Command, Option } from "commander";
 import { runAdoptGroups } from "../application/operations/adopt-group.js";
+import {
+  GROUP_TYPE_VALUE_DOMAIN,
+  GROUP_VALUE_DOMAIN,
+  withValueDomain,
+} from "../command-metadata/value-domain.js";
 import { cliObserver } from "./observer.js";
 import { info, out, success } from "../ui.js";
 
@@ -23,14 +28,26 @@ export function adoptGroupCommand(): Command {
       "Adopt one or more groups: `ct adopt group <id...>`, or a filtered bulk form via " +
         "--type / --children-of. See --with-dynamic to also capture a dynamic group's ruleset.",
     )
-    .argument("[ids...]", "one or more ChurchTools group ids")
+    .addArgument(
+      withValueDomain(new Argument("[ids...]", "one or more ChurchTools group ids"), GROUP_VALUE_DOMAIN),
+    )
     .option("-k, --key <key>", "logical key (only valid when exactly one group is resolved)")
     .option("-s, --state <path>", "state file path (or set CT_STATE)")
     .option("-e, --env <name>", "environment profile from ct.envs.json (host + state + token)")
     .option("--rekey", "let a re-adoption change an already-managed group's logical key")
     .option("--dry-run", "preview the config entries and state changes without writing")
-    .option("--type <groupTypeIdOrKey>", "adopt every group of this group type")
-    .option("--children-of <idOrKey>", "adopt a group's full hierarchy subtree")
+    .addOption(
+      withValueDomain(
+        new Option("--type <groupTypeIdOrKey>", "adopt every group of this group type"),
+        GROUP_TYPE_VALUE_DOMAIN,
+      ),
+    )
+    .addOption(
+      withValueDomain(
+        new Option("--children-of <idOrKey>", "adopt a group's full hierarchy subtree"),
+        GROUP_VALUE_DOMAIN,
+      ),
+    )
     .option("--with-dynamic", "capture dynamic rulesets to rulesets/<key>.json")
     .option("--with-member-fields", "capture portable group-scoped member-field definitions")
     .option("--portable-rulesets", "rewrite managed entity ids into portable logical refs")

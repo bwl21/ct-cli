@@ -106,6 +106,15 @@ function inputFor(kind, item) {
     item.choices.forEach((choice) => input.append(new Option(choice, choice)));
   } else if (item.variadic) {
     input = document.createElement('textarea'); input.placeholder = 'Ein Wert pro Zeile';
+    if (item.valueDomain) {
+      const picker = document.createElement('input'); picker.type = 'text'; picker.placeholder = 'Wert suchen und hinzufügen';
+      const list = document.createElement('datalist'); list.id = fieldId(kind, item.name) + '-choices'; picker.setAttribute('list', list.id);
+      const add = document.createElement('button'); add.type = 'button'; add.textContent = 'Hinzufügen'; add.className = 'run';
+      add.addEventListener('click', () => { if (!picker.value) return; input.value = [input.value.trim(), picker.value].filter(Boolean).join('\n'); picker.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); });
+      picker.addEventListener('input', () => scheduleCompletion(wrap, picker, list));
+      picker.addEventListener('focus', () => scheduleCompletion(wrap, picker, list));
+      holder.append(picker, list, add);
+    }
   } else {
     input = document.createElement('input'); input.type = 'text';
     const list = document.createElement('datalist'); list.id = fieldId(kind, item.name || item.key) + '-choices';
@@ -150,7 +159,7 @@ async function scheduleCompletion(wrap, input, list) {
     try {
       const data = values();
       const result = await api('/api/completions', { method: 'POST', body: JSON.stringify({ command: state.command.path, arguments: data.arguments, options: data.options, field: { kind: wrap.dataset.kind, name: wrap.dataset.name }, partial: input.value }) });
-      list.replaceChildren(...result.candidates.map((value) => new Option(value)));
+      list.replaceChildren(...result.suggestions.map((item) => new Option(item.label, item.value)));
     } catch { list.replaceChildren(); }
   }, 120);
 }

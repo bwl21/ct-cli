@@ -1,4 +1,5 @@
 import type { Argument, Command, Option } from "commander";
+import { valueDomainOf, type ParameterValueDomain } from "../command-metadata/value-domain.js";
 
 export type UiRisk = "read-only" | "state-write";
 export type UiValueKind = "boolean" | "required" | "optional";
@@ -10,6 +11,7 @@ export interface UiArgumentSchema {
   variadic: boolean;
   choices?: string[];
   defaultValue?: unknown;
+  valueDomain?: ParameterValueDomain;
 }
 
 export interface UiOptionSchema {
@@ -23,6 +25,7 @@ export interface UiOptionSchema {
   negated: boolean;
   choices?: string[];
   defaultValue?: unknown;
+  valueDomain?: ParameterValueDomain;
 }
 
 export interface UiCommandSchema {
@@ -61,6 +64,7 @@ function argumentSchema(argument: Argument): UiArgumentSchema {
     variadic: argument.variadic,
     ...(argument.argChoices ? { choices: [...argument.argChoices] } : {}),
     ...(argument.defaultValue === undefined ? {} : { defaultValue: argument.defaultValue }),
+    ...(valueDomainOf(argument) ? { valueDomain: valueDomainOf(argument) } : {}),
   };
 }
 
@@ -76,6 +80,7 @@ function optionSchema(option: Option): UiOptionSchema {
     negated: option.negate,
     ...(option.argChoices ? { choices: [...option.argChoices] } : {}),
     ...(option.defaultValue === undefined ? {} : { defaultValue: option.defaultValue }),
+    ...(valueDomainOf(option) ? { valueDomain: valueDomainOf(option) } : {}),
   };
 }
 
