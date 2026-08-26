@@ -34,6 +34,12 @@ export interface PlanValue {
   fetchErrors: string[];
   churchToolsVersion: string | null;
   stateHost: string;
+  /**
+   * Informational registry/portability warnings from plan building. The builder already wrote
+   * these to stderr, so an adapter must NOT print them again — they are carried so non-terminal
+   * projections (the Markdown report, a future HTTP response) can include them.
+   */
+  buildWarnings: string[];
   permissionCatalogPath: string | null;
 }
 
@@ -150,6 +156,7 @@ export async function buildPlanContext(
         fetchErrors,
         churchToolsVersion: client.version,
         stateHost: state.host,
+        buildWarnings: resourceResult.warnings ?? [],
         permissionCatalogPath: catalogPath,
       },
     },
