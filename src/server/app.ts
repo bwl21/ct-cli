@@ -62,7 +62,12 @@ export function createServerApp(options: CreateServerAppOptions): Hono {
   app.use("/api/*", async (context, next) => {
     const eventStream = /\/api\/operations\/[^/]+\/events$/.test(context.req.path);
     if (["GET", "HEAD", "OPTIONS"].includes(context.req.method) && !eventStream) return next();
-    if (context.req.header("origin") !== expectedOrigin()) {
+    const requestOrigin = context.req.header("origin");
+    // Browsers commonly omit Origin on a same-origin EventSource GET. Its strict SameSite session
+    // cookie and the same-origin response boundary still authenticate the stream; an Origin header,
+    // when present, must remain an exact match so a foreign page cannot subscribe with credentials.
+    if (eventStream && requestOrigin === undefined) return next();
+    if (requestOrigin !== expectedOrigin()) {
       return context.json({ error: { code: "ORIGIN_REJECTED", message: "Request origin rejected." } }, 403);
     }
     return next();
