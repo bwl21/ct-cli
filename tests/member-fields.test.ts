@@ -6,7 +6,12 @@ import { renderPlan } from "../src/engine/render.js";
 import { createContext, evaluateConfig, ref } from "../src/config/context.js";
 import { emptyState, type State } from "../src/state/state.js";
 import type { DesiredResource } from "../src/engine/types.js";
-import { memberFieldPseudo, isGroupScopedMemberField } from "../src/engine/member-fields.js";
+import {
+  memberFieldPseudo,
+  isGroupScopedMemberField,
+  actualMemberFieldProps,
+  groupScopedRows,
+} from "../src/engine/member-fields.js";
 
 const HOST = "https://mychurch.church.tools";
 
@@ -269,6 +274,51 @@ describe("group member fields — plan (#135)", () => {
     expect(plain(renderPlan(again.plan))).toBe("No changes. Desired state matches ChurchTools.");
   });
 
+  it("treats server-assigned option ids and an id-backed default as the portable name declaration", async () => {
+    const ct = makeCt();
+    ct.memberFields[100] = [
+      {
+        id: 501,
+        type: "group",
+        referenceName: "wahl",
+        name: "Wahl",
+        fieldTypeCode: "select",
+        defaultValue: "702",
+        options: [
+          { id: "701", name: "A" },
+          { id: "702", name: "B" },
+        ],
+      },
+    ];
+    const state = stateWith({
+      praktikum_1: {
+        type: "group",
+        id: 100,
+        fields: { name: "Praktikum 1", groupTypeId: 5, groupStatusId: 1 },
+      },
+    });
+    state.resources.praktikum_1!.memberFields = { wahl: 501 };
+    const { ct: dsl, resources } = createContext();
+    dsl.group({
+      key: "praktikum_1",
+      name: "Praktikum 1",
+      groupTypeId: 5,
+      groupStatusId: 1,
+      memberFields: [
+        {
+          key: "wahl",
+          name: "Wahl",
+          fieldTypeCode: "select",
+          defaultValue: "B",
+          options: [{ name: "A" }, { name: "B" }],
+        },
+      ],
+    });
+
+    const { plan } = await buildPlan(ct.client, state, resources);
+    expect(plain(renderPlan(plan))).toBe("No changes. Desired state matches ChurchTools.");
+  });
+
   it("surfaces an undeclared live field as a DELETE CANDIDATE and never plans a delete", async () => {
     const ct = makeCt();
     ct.memberFields[100] = [
@@ -318,6 +368,38 @@ describe("group member fields — plan (#135)", () => {
     expect(item.note).toBe("fetch-failed");
     expect(renderPlan(plan)).toContain("INCOMPLETE");
   });
+
+  it("leaves a stale-bound field unreconciled without blocking the rest of its group", async () => {
+    const ct = makeCt();
+    ct.memberFields[100] = [];
+    const state = stateWith({
+      praktikum_1: {
+        type: "group",
+        id: 100,
+        fields: { name: "Praktikum 1", groupTypeId: 5, groupStatusId: 1 },
+      },
+    });
+    state.resources.praktikum_1!.memberFields = { wahl: 501 };
+
+    // The group itself has real drift (a rename): a stale binding on ONE member field must not stop
+    // the group's own properties — or its other sub-resources — from being planned.
+    const { plan, fetchErrors } = await buildPlan(ct.client, state, [
+      praktikum("praktikum_1", "Praktikum 2"),
+    ]);
+    const item = plan.items.find((i) => i.key === "praktikum_1")!;
+    expect(item.action).toBe("update");
+    expect(item.note).toBeUndefined();
+    expect(item.changes.map((c) => c.field)).toEqual(["name"]);
+    // …and no replacement POST is planned for the stale field.
+    expect(item.changes.some((c) => c.field.startsWith("memberField:"))).toBe(false);
+    expect(fetchErrors.join("\n")).toMatch(
+      /praktikum_1::wahl: state binds it to #501.*ct destroy --member-field praktikum_1::wahl/s,
+    );
+    // A non-empty `fetchErrors` still makes `ct plan` INCOMPLETE and exit 1 (see commands/plan.ts);
+    // what changed is that the group is no longer rendered as an unreadable resource.
+    expect(fetchErrors).toHaveLength(1);
+    expect(renderPlan(plan)).not.toContain("could not be read");
+  });
 });
 
 describe("group member fields — apply (#135)", () => {
@@ -349,6 +431,62 @@ describe("group member fields — apply (#135)", () => {
     expect(ct.calls.filter((c) => c.startsWith("PATCH /groups/") && c.includes("memberfields"))).toHaveLength(
       1,
     );
+  });
+
+  it("normalises live response variants and PATCHes the current state-bound id", async () => {
+    const ct = makeCt();
+    ct.memberFields[100] = [{ id: 501, type: "group", name: "Birkman", fieldTypeCode: "textarea" }];
+    const realGet = ct.get.getMockImplementation()!;
+    ct.get.mockImplementation(async (path: string) => {
+      if (path === "/groups/100/memberfields") {
+        // The live endpoint used by the process wraps group-owned rows in `group` and serialises
+        // their ids as strings. Losing either compatibility makes the list look empty and causes a
+        // duplicate POST even though the current owner-local state already knows id 501.
+        return {
+          group: ct.memberFields[100]!.map((row) => ({
+            ...row,
+            id: String(row.id),
+            // On the live endpoint this describes where VALUES live, while the `group` bucket
+            // already identifies the definition's writable scope.
+            type: "person",
+          })),
+        };
+      }
+      return realGet(path);
+    });
+    const state = stateWith({
+      praktikum_1: {
+        type: "group",
+        id: 100,
+        fields: { name: "Praktikum 1", groupTypeId: 5, groupStatusId: 1 },
+      },
+    });
+    state.resources.praktikum_1!.memberFields = { birkmann: 501 };
+    const { ct: dsl, resources } = createContext();
+    dsl.group({
+      key: "praktikum_1",
+      name: "Praktikum 1",
+      groupTypeId: 5,
+      groupStatusId: 1,
+      memberFields: [
+        {
+          key: "birkmann",
+          name: "Birkman (neu)",
+          fieldTypeCode: "textarea",
+        },
+      ],
+    });
+
+    const { plan } = await buildPlan(ct.client, state, resources);
+    expect(plan.items[0]!.changes.map((change) => change.field)).toContain("memberField:birkmann");
+    ct.calls.length = 0;
+    await executePlan(plan, { client: ct.client, state, statePath: "s.json", save: async () => {} });
+
+    expect(ct.calls.filter((call) => call === "POST /groups/100/memberfields/group")).toHaveLength(0);
+    expect(ct.calls.filter((call) => call === "PATCH /groups/100/memberfields/group/501")).toHaveLength(1);
+    expect(ct.memberFields[100]).toHaveLength(1);
+    expect(ct.memberFields[100]![0]!.name).toBe("Birkman (neu)");
+    expect(state.resources.praktikum_1!.memberFields).toEqual({ birkmann: 501 });
   });
 
   it("orders field creation before the dependent dynamic ruleset is installed", async () => {
@@ -563,5 +701,51 @@ describe("isGroupScopedMemberField (#135 review)", () => {
     expect(isGroupScopedMemberField({ id: 1, type: "person" })).toBe(false);
     expect(isGroupScopedMemberField({ id: 1, source: "masterdata" })).toBe(false);
     expect(isGroupScopedMemberField({ id: 1, fieldSource: "group-type" })).toBe(false);
+  });
+});
+
+describe("actualMemberFieldProps — defaultValue ↔ option id (#154 review)", () => {
+  it("treats the option id CT echoes for a by-name default as no drift", () => {
+    const row = {
+      defaultValue: 7,
+      options: [
+        { id: 7, name: "Ja" },
+        { id: 8, name: "Nein" },
+      ],
+    };
+    expect(actualMemberFieldProps(row, { defaultValue: "Ja" })).toEqual({ defaultValue: "Ja" });
+  });
+
+  it("does not match an ABSENT default against an id-less option", () => {
+    // Both sides stringify to "undefined": coercing them would report the field converged forever
+    // and the declared default would never be written.
+    const row = { options: [{ name: "Ja" }, { name: "Nein" }] };
+    expect(actualMemberFieldProps(row, { defaultValue: "Ja" })).toEqual({ defaultValue: undefined });
+    expect(
+      actualMemberFieldProps(
+        { defaultValue: null, options: [{ id: null, name: "Ja" }] },
+        {
+          defaultValue: "Ja",
+        },
+      ),
+    ).toEqual({ defaultValue: null });
+  });
+});
+
+describe("groupScopedRows — { type, field } wrapper (#154 review)", () => {
+  it("keeps a wrapper-held id when the inner definition carries none", () => {
+    // Losing it would make adopt skip the group and apply refuse the update for want of a row id.
+    const rows = groupScopedRows([{ type: "group", id: 42, field: { name: "Wahl", referenceName: "wahl" } }]);
+    expect(rows).toEqual([{ type: "group", id: 42, name: "Wahl", referenceName: "wahl" }]);
+  });
+
+  it("lets the inner definition win on every key it names", () => {
+    const rows = groupScopedRows([{ type: "group", id: 42, name: "Outer", field: { id: 7, name: "Wahl" } }]);
+    expect(rows).toEqual([{ type: "group", id: 7, name: "Wahl" }]);
+  });
+
+  it("leaves a plain row that merely carries an unrelated `field` object alone", () => {
+    const row = { id: 3, name: "Wahl", referenceName: "wahl", field: { label: "irrelevant" } };
+    expect(groupScopedRows([row])).toEqual([row]);
   });
 });

@@ -20,6 +20,8 @@ import {
   groupScopedRows,
   localKeyOf,
   MEMBER_FIELD_PROPS,
+  memberFieldId,
+  memberFieldStateKey,
   memberFieldsReadPath,
 } from "../engine/member-fields.js";
 import type { DynamicStatus } from "../engine/types.js";
@@ -54,6 +56,13 @@ interface ResolvedAdoption {
   key: string;
   fields: Record<string, unknown>;
   snippet: string;
+}
+
+interface MemberFieldsCapture {
+  /** Portable declarations for config output; deliberately contain no ChurchTools ids. */
+  declarations: Array<Record<string, unknown>>;
+  /** Instance-bound identity map stored only on the owning group's state entry. */
+  ids: Record<string, number>;
 }
 
 function isNonNegativeInt(raw: string): boolean {
@@ -211,7 +220,7 @@ interface DynamicCapture {
 async function captureMemberFields(
   id: number,
   client: Pick<CtClient, "get">,
-): Promise<Array<Record<string, unknown>> | undefined> {
+): Promise<MemberFieldsCapture | undefined> {
   let raw: unknown;
   try {
     raw = await client.get(memberFieldsReadPath(id));
@@ -231,14 +240,47 @@ async function captureMemberFields(
     return undefined;
   }
   const rows = groupScopedRows(raw);
-  if (rows.length === 0) return undefined;
-  return rows.map((row) => {
-    const declaration: Record<string, unknown> = { key: localKeyOf(row) };
+  const declarations: Array<Record<string, unknown>> = [];
+  const ids: Record<string, number> = {};
+  for (const row of rows) {
+    const localKey = localKeyOf(row);
+    const canonical = memberFieldStateKey(localKey);
+    const fieldId = memberFieldId(row);
+    // Same rule as the read failure above: a group whose member fields cannot be captured CLEANLY
+    // is not a reason to abort a bulk adoption. `saveState` runs only after the whole `--children-of`
+    // loop, so throwing here would discard every group already processed in this run.
+    if (!canonical) {
+      warn(
+        `group #${id}: a group-scoped member field has neither referenceName nor name — adopted ` +
+          `WITHOUT member fields. Give it a name in ChurchTools, then re-run ` +
+          `\`ct adopt group ${id} --with-member-fields\`.`,
+      );
+      return undefined;
+    }
+    if (fieldId === undefined) {
+      warn(
+        `group #${id} member field "${localKey}": the live response contains no numeric field id — ` +
+          `adopted WITHOUT member fields. Re-run \`ct adopt group ${id} --with-member-fields\` once ` +
+          `the response carries ids.`,
+      );
+      return undefined;
+    }
+    if (ids[canonical] !== undefined) {
+      warn(
+        `group #${id}: multiple group-scoped member fields resolve to the local key "${canonical}" — ` +
+          `adopted WITHOUT member fields. Rename one in ChurchTools, then re-run ` +
+          `\`ct adopt group ${id} --with-member-fields\`.`,
+      );
+      return undefined;
+    }
+    ids[canonical] = fieldId;
+    const declaration: Record<string, unknown> = { key: localKey };
     for (const prop of MEMBER_FIELD_PROPS) {
       if (row[prop] !== undefined) declaration[prop] = row[prop];
     }
-    return declaration;
-  });
+    declarations.push(declaration);
+  }
+  return { declarations, ids };
 }
 
 /** Fetch + normalize a group's ruleset and status. `undefined` (never throws) if the group isn't dynamic. */
@@ -415,9 +457,9 @@ export function adoptGroupCommand(): Command {
         const snippetFields: Record<string, unknown> = sugared;
         // Emitted BEFORE `dynamic` so the snippet reads in apply order — the fields a ruleset may
         // reference are declared above the ruleset that references them (#135).
-        if (opts.withMemberFields) {
-          const memberFields = await captureMemberFields(id, client);
-          if (memberFields) snippetFields.memberFields = memberFields;
+        const memberFields = opts.withMemberFields ? await captureMemberFields(id, client) : undefined;
+        if (memberFields && memberFields.declarations.length > 0) {
+          snippetFields.memberFields = memberFields.declarations;
         }
         if (opts.withDynamic) {
           const captured = await captureDynamic(id, client);
@@ -496,6 +538,14 @@ export function adoptGroupCommand(): Command {
           continue;
         }
         const action = upsert(state, { type: "group", id, key, fields }, now);
+        // An empty map is not the same as no map: `ct destroy --member-field` DELETES the key when
+        // the last id is forgotten (see destroy.ts), so writing `memberFields: {}` here would make
+        // a no-op re-adoption churn the state file against the two paths' shared contract.
+        if (memberFields) {
+          const managed = state.resources[key]!;
+          if (Object.keys(memberFields.ids).length > 0) managed.memberFields = memberFields.ids;
+          else delete managed.memberFields;
+        }
         results.push({ id, key, fields, snippet });
         reports.push({ action, id, key });
       }

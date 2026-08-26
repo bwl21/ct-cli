@@ -1,5 +1,5 @@
 ---
-sources_hash: 777badbcc7fbbd7f
+sources_hash: 00dca3c03dacc9ff
 title: Group member fields
 sources:
   - src/engine/member-fields.ts
@@ -90,10 +90,11 @@ Two readable/writable properties are deliberately **not** managed:
 
 - **`id`** — host-specific; see above.
 - **`referenceName`** — this _is_ the local identity, not a diffable property.
-  It is what a create sends and what every later run matches on, so managing it
-  would let a rename silently re-key the resource and re-create the field
-  instead of updating it. (A field created in the ChurchTools UI, where CT may
-  mint its own `referenceName`, is matched by its slugged `name` as a fallback.)
+  It is what a create sends and, when no state-bound id exists, what a later run
+  matches on. Managing it would let a rename silently re-key the resource and
+  re-create the field instead of updating it. (A field created in the
+  ChurchTools UI, where CT may mint its own `referenceName`, is matched by its
+  slugged `name` as a fallback.)
 
 A property outside the managed list still passes through to ChurchTools
 unchanged — it only earns a warning, and it is never diffed.
@@ -108,6 +109,13 @@ ct adopt group --children-of ojbp_2025_26 --with-member-fields
 The emitted snippet carries a `memberFields:` block with every group-scoped
 field and **no ChurchTools ids** — paste it, re-key it for the next year, and
 `ct plan` proposes fresh groups and fresh fields.
+
+The same adoption stores each live field id in the owning group's
+instance-specific `memberFields` state map. This is deliberately separate from
+the portable snippet: re-adopting a group refreshes identity from ChurchTools
+without leaking host-specific ids into config. A successful read replaces that
+map (including with an empty map when the group has no fields); a failed read
+leaves an existing map untouched.
 
 Rows the group's member form shows but that are not group-scoped (person master
 data, group-type defaults) are not emitted: only `/memberfields/group` rows can
@@ -126,7 +134,12 @@ absent `memberFields:` block still means "unmanaged".
 
 Rows that could not be read (a 403, a rate-limited 429) are reported and the
 group is adopted **without** them, so one unreadable group never aborts a
-bulk adoption — re-run with `--with-member-fields` once the read succeeds.
+bulk adoption — re-run with `--with-member-fields` once the read succeeds. The
+same holds for rows that can be read but not captured cleanly: a row with no
+numeric id, or two rows whose names slug to one local key (`Wahl 1` and
+`wahl-1`). Adoption writes its state only after the whole `--children-of`
+subtree has been walked, so aborting on one group would discard every group
+already adopted in that run.
 
 ## Plan and apply
 
@@ -145,13 +158,21 @@ The actual side is narrowed to exactly the properties the declaration names, so
 a server default ChurchTools returns can never make the two sides differ
 forever: **a clean apply re-plans as a no-op.**
 
+The same projection applies inside `options`: ChurchTools assigns host-specific
+ids to select options, while a portable config can declare `{ name }`. Those
+server ids are ignored unless the config explicitly declares them. If CT stores
+`defaultValue` as one of those option ids, the comparison resolves it back to
+the declared option name. Option order, count, names, and every explicitly
+declared property remain managed.
+
 `apply` creates a field only after its owning group exists (the group's own
 create runs first, then its owned sub-resources), and updates an existing field
 in place — matched by identity, never re-created.
 
-If the member-field read fails with anything other than a 404, the group is
-reported as `fetch-failed` and the plan says it is INCOMPLETE. It never
-manufactures "create every field" out of a transient error.
+If the member-field read itself fails with anything other than a 404, the group
+is reported as `fetch-failed` and the plan says it is INCOMPLETE. It never
+manufactures "create every field" out of a transient error. A stale state
+binding is a narrower fault and degrades more narrowly — see below.
 
 ## Nothing is ever deleted implicitly
 
@@ -222,6 +243,29 @@ Three things follow:
 | create    | `POST /groups/{groupId}/memberfields/group`             |
 | update    | `PATCH /groups/{groupId}/memberfields/group/{fieldId}`  |
 | delete    | `DELETE /groups/{groupId}/memberfields/group/{fieldId}` |
+
+Depending on the ChurchTools version, the read response is a bare array or is
+wrapped under `group`, `data`, `memberFields` or `groupMemberFields`; field ids
+may be numbers or decimal strings. Individual rows may also wrap the definition
+as `{ type: "group", field: { ... } }`, with the id sitting on either half.
+`ct` normalises those transport variants before identity matching: the inner
+definition wins on every key it names, and anything the wrapper alone carries
+(a scope discriminator, an id) is kept rather than dropped. The outer wrapper or `group` bucket is the
+authoritative scope marker; a row inside the bucket may still say
+`type: "person"` because values live on memberships, and is not discarded for
+that reason.
+
+When state already binds a portable field identity to a ChurchTools id but a
+live response does not contain that id, **that one field** is left
+unreconciled and the plan is marked **INCOMPLETE**. `ct` will not turn an
+uncertain read into a replacement `POST`, because doing so can duplicate a
+field that is still present on the host — but the read itself succeeded, so
+the rest of the group keeps reconciling normally: its `name`, its `parents`,
+its ruleset, and its other member fields all still diff. The error names the
+field and the way out: if it was deleted or re-created in the ChurchTools UI,
+drop the stale binding with
+`ct destroy --member-field <group>::<field>` (which forgets an
+already-absent field) and re-run.
 
 `PATCH` is used because it is a partial update, so unmanaged sibling properties
 are left alone. An instance whose endpoint implements only `PUT` answers

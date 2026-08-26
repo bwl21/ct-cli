@@ -31,8 +31,9 @@ import type { DesiredResource } from "../engine/types.js";
 import { slug } from "../resources/registry.js";
 import {
   groupScopedRows,
-  memberFieldStateKey,
-  matchesLocalKey,
+  knownMemberFieldId,
+  matchingMemberFieldRows,
+  memberFieldIdentity,
   memberFieldRowId,
   memberFieldsReadPath,
 } from "../engine/member-fields.js";
@@ -513,7 +514,8 @@ export class Resolver {
       );
     }
     const rows = await this.memberFieldList(managed.id);
-    const matches = rows.filter((row) => matchesLocalKey(row, r.field));
+    const knownId = knownMemberFieldId(this.state, r.group, r.field);
+    const matches = matchingMemberFieldRows(rows, r.field, knownId);
     if (matches.length > 1) {
       const list = matches
         .map((row) => `${JSON.stringify(row.name ?? row.referenceName)} (#${String(memberFieldRowId(row))})`)
@@ -538,6 +540,19 @@ export class Resolver {
     const available = rows
       .map((row) => (typeof row.name === "string" ? JSON.stringify(row.name) : "?"))
       .join(", ");
+    // A STATE-BOUND lookup that found nothing filtered by id alone, so the field may well be sitting
+    // right there in `available` under a fresh id (deleted and re-created in the ChurchTools UI).
+    // Saying "no member field" there would contradict the very list this message prints, so the
+    // stale binding is named instead — together with the command that clears it.
+    if (knownId !== undefined) {
+      throw new Error(
+        `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: state binds ` +
+          `"${memberFieldIdentity(r.group, r.field)}" to #${knownId}, but group #${managed.id} no ` +
+          `longer has that field${available ? ` (available: ${available})` : ""}. If it was deleted ` +
+          `and re-created in ChurchTools, drop the stale binding with ` +
+          `\`ct destroy --member-field ${memberFieldIdentity(r.group, r.field)}\` and re-run.`,
+      );
+    }
     throw new Error(
       `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: group #${managed.id} has ` +
         `no member field "${r.field}"${available ? ` (available: ${available})` : ""}, and this config ` +
@@ -758,8 +773,7 @@ function pendingIdFromState(r: Ref, state: State): number {
     // dynamic ruleset (engine/synthetic.ts orders the pseudo-fields ahead of `dynamic`, and
     // `applySyntheticFields` re-resolves each change immediately before applying it). So by the time
     // a ruleset carrying this marker is written, the id is already in state.
-    const group = state.resources[r.group];
-    const id = group?.memberFields?.[memberFieldStateKey(r.field)];
+    const id = knownMemberFieldId(state, r.group, r.field);
     if (typeof id !== "number") {
       throw new Error(
         `Pending ${refLabel(r)} did not resolve after its group applied — no member field "${r.field}" ` +

@@ -20,14 +20,16 @@ import { slug } from "../resources/registry.js";
 import {
   actualMemberFieldProps,
   groupScopedRows,
+  knownMemberFieldId,
   memberFieldStateKey,
   localKeyOf,
-  matchesLocalKey,
+  memberFieldId,
   memberFieldIdentity,
   memberFieldItemPath,
   memberFieldLocalKey,
   memberFieldPseudo,
   memberFieldRowId,
+  matchingMemberFieldRows,
   memberFieldsCreatePath,
   memberFieldsReadPath,
   MEMBER_FIELD_PREFIX,
@@ -236,7 +238,31 @@ const memberFieldsField: SyntheticField = {
     const outcomes = await mapConcurrent(readable, MEMBER_FIELD_FETCH_CONCURRENCY, async (d) => {
       const managed = state.resources[d.key]!;
       try {
-        return { key: d.key, rows: await readMemberFields(client, managed.id), errors: [] as string[] };
+        const rows = await readMemberFields(client, managed.id);
+        // A state-bound id the live response no longer carries is a STALE BINDING on ONE field, not
+        // an unreadable group: the read succeeded and every other field on this group still has a
+        // trustworthy actual side. So the affected fields are dropped from the desired side (no key,
+        // no change, no replacement POST — the same mechanism that makes a dropped declaration a
+        // no-op) while `name`, `parents`, `dynamic` and the group's other member fields keep
+        // reconciling. The error still names the field, and names the command that clears it.
+        const stale = new Set(
+          d.memberFields!.flatMap((spec) => {
+            const knownId = knownMemberFieldId(state, d.key, spec.key);
+            if (knownId === undefined || rows.some((row) => memberFieldRowId(row) === knownId)) return [];
+            return [spec.key];
+          }),
+        );
+        const errors = [...stale].map((localKey) => {
+          const identity = memberFieldIdentity(d.key, localKey);
+          return (
+            `member field ${identity}: state binds it to #${knownMemberFieldId(state, d.key, localKey)}, ` +
+            `but the live response for group #${managed.id} no longer contains that id; leaving this ` +
+            `field unreconciled rather than planning a replacement POST. If it was deleted or ` +
+            `re-created in ChurchTools, drop the stale binding with ` +
+            `\`ct destroy --member-field ${identity}\` and re-run.`
+          );
+        });
+        return { key: d.key, rows, stale, errors };
       } catch (err) {
         // Same honesty rule as the dynamic fold (#126): an unread actual is NOT a known-absent one,
         // so the desired side stays unfolded and the group is reported unreadable rather than having
@@ -244,6 +270,7 @@ const memberFieldsField: SyntheticField = {
         return {
           key: d.key,
           rows: undefined,
+          stale: new Set<string>(),
           errors: [`member fields ${d.key} (#${managed.id}): ${formatError(err)}`],
         };
       }
@@ -252,6 +279,7 @@ const memberFieldsField: SyntheticField = {
     const unreadable = outcomes.filter((o) => o.rows === undefined).map((o) => o.key);
     const unreadableKeys = new Set(unreadable);
     const rowsByKey = new Map(outcomes.filter((o) => o.rows !== undefined).map((o) => [o.key, o.rows!]));
+    const staleByKey = new Map(outcomes.map((o) => [o.key, o.stale]));
 
     const augmented = desired.map((d) => {
       if (d.type !== "group" || d.memberFields === undefined) return d;
@@ -259,16 +287,18 @@ const memberFieldsField: SyntheticField = {
       const rows = rowsByKey.get(d.key);
       const a = actual.get(d.key);
       const fields = { ...d.fields };
+      const stale = staleByKey.get(d.key);
       for (const spec of d.memberFields) {
+        if (stale?.has(spec.key)) continue; // stale state binding — reported above, left unreconciled
         const pseudo = memberFieldPseudo(spec.key);
         fields[pseudo] = spec.props;
         if (!a || !rows) continue;
-        const matches = rows.filter((row) => matchesLocalKey(row, spec.key));
+        const matches = matchingMemberFieldRows(rows, spec.key, knownMemberFieldId(state, d.key, spec.key));
         // >1 live match means the local key is ambiguous on this host — a blind update would pick
         // one arbitrarily, so leave the actual side absent and let the ambiguity surface where it
         // can be acted on (the apply path refuses it by name).
         if (matches.length === 1) {
-          a[pseudo] = actualMemberFieldProps(matches[0]!, Object.keys(spec.props));
+          a[pseudo] = actualMemberFieldProps(matches[0]!, spec.props);
         }
       }
       if (rows) {
@@ -297,7 +327,8 @@ const memberFieldsField: SyntheticField = {
     if (props === undefined || props === null) return;
 
     const rows = await readMemberFieldsForWrite(client, id, reads);
-    const matches = rows.filter((row) => matchesLocalKey(row, local));
+    const knownId = knownMemberFieldId(state, key, local);
+    const matches = matchingMemberFieldRows(rows, local, knownId);
     if (matches.length > 1) {
       throw new Error(
         `group member field "${memberFieldIdentity(key, local)}": ${matches.length} fields on group ` +
@@ -337,17 +368,26 @@ const memberFieldsField: SyntheticField = {
       return;
     }
 
+    if (knownId !== undefined) {
+      throw new Error(
+        `group member field "${memberFieldIdentity(key, local)}": state binds it to #${knownId}, ` +
+          `but the live response for group #${id} did not contain that id; refusing to create a ` +
+          `possible duplicate. If the field was deleted or re-created in ChurchTools, drop the stale ` +
+          `binding with \`ct destroy --member-field ${memberFieldIdentity(key, local)}\` and re-run.`,
+      );
+    }
+
     const createPath = memberFieldsCreatePath(id);
     assertNotPeople(createPath);
     // `referenceName` is the local key, not a managed property: it is CT's own stable, non-numeric
     // handle within the group, and sending it at create is what lets every later run find this
     // field by its portable identity instead of by a host-specific id.
-    const created = await client.request<{ id?: number } | undefined>("POST", createPath, {
+    const created = await client.request<unknown>("POST", createPath, {
       ...props,
       referenceName: local,
     });
-    const newId = created?.id;
-    if (typeof newId !== "number") {
+    const newId = memberFieldId(created);
+    if (newId === undefined) {
       throw new Error(
         `group member field "${memberFieldIdentity(key, local)}": create returned no numeric id ` +
           `(got ${JSON.stringify(created)}).`,

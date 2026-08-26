@@ -77,16 +77,34 @@ function makeClient(childrenResponse: ChildrenResponse = "array") {
   const memberFields: Record<number, Array<Record<string, unknown>>> = {
     31: [
       {
-        id: 701,
         type: "group",
-        referenceName: "wahl",
-        name: "Wahl",
-        fieldTypeCode: "text",
-        requiredInRegistrationForm: true,
-        sortKey: 1,
+        field: {
+          id: 701,
+          referenceName: "wahl",
+          name: "Wahl",
+          fieldTypeCode: "text",
+          requiredInRegistrationForm: true,
+          sortKey: 1,
+        },
       },
-      { id: 702, type: "group", referenceName: "notiz", name: "Notiz", fieldTypeCode: "textarea" },
-      { id: 703, type: "person", referenceName: "vorname", name: "Vorname", fieldTypeCode: "text" },
+      {
+        type: "group",
+        field: {
+          id: 702,
+          referenceName: "notiz",
+          name: "Notiz",
+          fieldTypeCode: "textarea",
+        },
+      },
+      {
+        type: "person",
+        field: {
+          id: 703,
+          referenceName: "vorname",
+          name: "Vorname",
+          fieldTypeCode: "text",
+        },
+      },
     ],
   };
 
@@ -154,7 +172,7 @@ vi.mock("../src/api/session.js", () => ({
 }));
 
 const { adoptCommand } = await import("../src/commands/adopt.js");
-const { loadState } = await import("../src/state/state.js");
+const { loadState, saveState } = await import("../src/state/state.js");
 const { loadConfig } = await import("../src/config/load.js");
 
 const HOST = "https://mychurch.church.tools";
@@ -601,6 +619,28 @@ describe("ct adopt group --with-member-fields (#135)", () => {
     expect(snippet).not.toContain("vorname");
   });
 
+  it("stores field ids only in the owning group's instance state", async () => {
+    await run(["group", "31", "--with-member-fields", "--state", statePath]);
+
+    const state = await loadState(statePath, HOST);
+    expect(state.resources.static_group!.memberFields).toEqual({ wahl: 701, notiz: 702 });
+    expect(Object.values(state.resources).some((resource) => resource.type === "group-member-field")).toBe(
+      false,
+    );
+  });
+
+  it("replaces a stale owner-local map after a successful live read", async () => {
+    await run(["group", "31", "--with-member-fields", "--state", statePath]);
+    const state = await loadState(statePath, HOST);
+    state.resources.static_group!.memberFields = { alt: 999 };
+    await saveState(statePath, state);
+
+    await run(["group", "31", "--with-member-fields", "--state", statePath]);
+
+    const refreshed = await loadState(statePath, HOST);
+    expect(refreshed.resources.static_group!.memberFields).toEqual({ wahl: 701, notiz: 702 });
+  });
+
   it("a 403 on one group's fields does not abort a bulk adoption — it warns and adopts without them", async () => {
     const warnings: string[] = [];
     const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
@@ -630,6 +670,59 @@ describe("ct adopt group --with-member-fields (#135)", () => {
     }
   });
 
+  it("two fields sharing one local key do not abort the run — it warns and adopts without them", async () => {
+    // `saveState` runs only after the whole `--children-of` loop, so throwing here would discard
+    // every group already adopted in this run. Same rule as the unreadable-fields path above.
+    const warnings: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      warnings.push(String(chunk));
+      return true;
+    });
+    const original = client.get.getMockImplementation()!;
+    client.get.mockImplementation((async (path: string) => {
+      if (path === "/groups/31/memberfields") {
+        return [
+          { type: "group", field: { id: 701, name: "Wahl 1" } },
+          { type: "group", field: { id: 702, name: "wahl-1" } },
+        ];
+      }
+      return original(path);
+    }) as never);
+    try {
+      await run(["group", "31", "--with-member-fields", "--state", statePath]);
+      const state = await loadState(statePath, HOST);
+      expect(state.resources.static_group).toBeDefined(); // the run completed and wrote state
+      expect(state.resources.static_group!.memberFields).toBeUndefined();
+      expect(warnings.join("")).toMatch(/resolve to the local key "wahl_1"/);
+    } finally {
+      client.get.mockImplementation(original as never);
+      spy.mockRestore();
+    }
+  });
+
+  it("a member field with no numeric id does not abort the run either", async () => {
+    const warnings: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      warnings.push(String(chunk));
+      return true;
+    });
+    const original = client.get.getMockImplementation()!;
+    client.get.mockImplementation((async (path: string) => {
+      if (path === "/groups/31/memberfields") return [{ type: "group", field: { name: "Wahl" } }];
+      return original(path);
+    }) as never);
+    try {
+      await run(["group", "31", "--with-member-fields", "--state", statePath]);
+      const state = await loadState(statePath, HOST);
+      expect(state.resources.static_group).toBeDefined();
+      expect(state.resources.static_group!.memberFields).toBeUndefined();
+      expect(warnings.join("")).toMatch(/contains no numeric field id/);
+    } finally {
+      client.get.mockImplementation(original as never);
+      spy.mockRestore();
+    }
+  });
+
   it("emits no memberFields block for a group that has none", async () => {
     const snippet = await snippetFor([
       "group",
@@ -640,5 +733,13 @@ describe("ct adopt group --with-member-fields (#135)", () => {
       statePath,
     ]);
     expect(snippet).not.toContain("memberFields");
+  });
+
+  it("records no owner-local map when the live read succeeds with no fields", async () => {
+    // `ct destroy --member-field` DELETES the key once the last id is forgotten, so an empty map
+    // here would make a no-op re-adoption churn the state file against that same contract.
+    await run(["group", "10", "--with-member-fields", "--state", statePath]);
+    const state = await loadState(statePath, HOST);
+    expect(state.resources.area_a!.memberFields).toBeUndefined();
   });
 });
