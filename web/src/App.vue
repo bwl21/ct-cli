@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import type { AuthStatusResult } from "../../src/application/operations/auth.js";
+import type {
+  ApplyResult,
+  ConfirmationProof,
+  PreparedApply,
+} from "../../src/application/operations/apply.js";
 import type { CoverageResult } from "../../src/application/operations/coverage.js";
 import type { PlanResult } from "../../src/application/operations/plan.js";
 import type { StateListResult } from "../../src/application/operations/state.js";
-import { ApiError, api, establishSession } from "./api.js";
+import type { OperationEvent } from "../../src/application/contracts.js";
+import ApplyDialog from "./components/ApplyDialog.vue";
+import PlanView from "./components/PlanView.vue";
+import { ApiError, api, establishSession, watchOperation } from "./api.js";
 
 type View = "overview" | "plan" | "coverage" | "state";
 
@@ -16,6 +24,12 @@ const coverage = ref<CoverageResult | null>(null);
 const state = ref<StateListResult | null>(null);
 const loading = ref<string | null>("Projekt wird verbunden");
 const error = ref<{ code: string; message: string } | null>(null);
+const preparingApply = ref(false);
+const preparedApply = ref<PreparedApply | null>(null);
+const applyExecuting = ref(false);
+const applyEvents = ref<OperationEvent[]>([]);
+const applyResult = ref<ApplyResult | null>(null);
+const applyError = ref<{ code: string; message: string } | null>(null);
 
 const request = computed(() => (environment.value ? { environment: environment.value } : {}));
 const identity = computed(() => {
@@ -24,9 +38,6 @@ const identity = computed(() => {
   return [person.firstName, person.lastName].filter(Boolean).join(" ") || person.email || `#${person.id}`;
 });
 const project = computed(() => plan.value?.project ?? state.value?.project ?? null);
-const visiblePlanItems = computed(
-  () => plan.value?.value.plan.items.filter((item) => item.action !== "no-op" || item.note) ?? [],
-);
 
 function showError(caught: unknown): void {
   error.value = {
@@ -67,7 +78,63 @@ async function switchEnvironment(): Promise<void> {
   plan.value = null;
   state.value = null;
   coverage.value = null;
+  preparedApply.value = null;
   await loadOverview();
+}
+
+async function prepareCurrentApply(): Promise<void> {
+  preparingApply.value = true;
+  error.value = null;
+  try {
+    preparedApply.value = await api.prepareApply(request.value);
+    plan.value = preparedApply.value.plan;
+    applyEvents.value = [];
+    applyResult.value = null;
+    applyError.value = null;
+  } catch (caught) {
+    showError(caught);
+  } finally {
+    preparingApply.value = false;
+  }
+}
+
+async function executeCurrentApply(proof?: ConfirmationProof): Promise<void> {
+  const prepared = preparedApply.value;
+  if (!prepared) return;
+  applyExecuting.value = true;
+  applyError.value = null;
+  applyEvents.value = [];
+  const stream = watchOperation(prepared.id, (event) => applyEvents.value.push(event));
+  const progress = stream.finished.catch((caught: unknown) => {
+    applyError.value = {
+      code: "PROGRESS_INTERRUPTED",
+      message: caught instanceof Error ? caught.message : String(caught),
+    };
+    return null;
+  });
+  try {
+    applyResult.value = await api.executeApply(prepared.id, proof);
+    await progress;
+  } catch (caught) {
+    await progress;
+    applyError.value = {
+      code: caught instanceof ApiError ? caught.code : "UNEXPECTED_ERROR",
+      message: caught instanceof Error ? caught.message : String(caught),
+    };
+  } finally {
+    stream.close();
+    applyExecuting.value = false;
+  }
+}
+
+async function closeApply(): Promise<void> {
+  if (applyExecuting.value) return;
+  const refresh = applyResult.value !== null;
+  preparedApply.value = null;
+  applyEvents.value = [];
+  applyResult.value = null;
+  applyError.value = null;
+  if (refresh) await loadOverview();
 }
 
 onMounted(async () => {
@@ -201,33 +268,12 @@ onMounted(async () => {
         </section>
       </template>
 
-      <section v-else-if="view === 'plan' && !loading" class="panel table-panel">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow">Kanonisches Ergebnis</p>
-            <h2>Geplante Änderungen</h2>
-          </div>
-          <span :class="['health-pill', plan?.value.complete ? 'healthy' : 'warning']">{{
-            plan?.value.complete ? "vollständig" : "unvollständig"
-          }}</span>
-        </div>
-        <div v-if="visiblePlanItems.length" class="resource-list">
-          <article v-for="item in visiblePlanItems" :key="`${item.type}:${item.key}`">
-            <span :class="['action-badge', item.action]">{{ item.action }}</span>
-            <div>
-              <strong>{{ item.key }}</strong
-              ><small
-                >{{ item.type }}<template v-if="item.id !== null"> · #{{ item.id }}</template></small
-              >
-            </div>
-            <span>{{ item.changes.length }} Felder</span>
-          </article>
-        </div>
-        <div v-else class="empty-state">
-          <strong>Keine Änderungen</strong>
-          <p>Der gewünschte Zustand stimmt mit ChurchTools überein.</p>
-        </div>
-      </section>
+      <PlanView
+        v-else-if="view === 'plan' && !loading"
+        :plan="plan"
+        :preparing="preparingApply"
+        @apply="prepareCurrentApply"
+      />
 
       <section v-else-if="view === 'coverage' && !loading" class="panel table-panel">
         <div class="panel-heading">
@@ -289,5 +335,16 @@ onMounted(async () => {
         </div>
       </section>
     </main>
+
+    <ApplyDialog
+      v-if="preparedApply"
+      :prepared="preparedApply"
+      :events="applyEvents"
+      :executing="applyExecuting"
+      :result="applyResult"
+      :error="applyError"
+      @confirm="executeCurrentApply"
+      @close="closeApply"
+    />
   </div>
 </template>

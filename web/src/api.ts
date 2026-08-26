@@ -1,8 +1,15 @@
 import type { AuthStatusResult } from "../../src/application/operations/auth.js";
+import type {
+  ApplyRequest,
+  ApplyResult,
+  ConfirmationProof,
+  PreparedApply,
+} from "../../src/application/operations/apply.js";
 import type { CoverageRequest, CoverageResult } from "../../src/application/operations/coverage.js";
 import type { PlanRequest, PlanResult } from "../../src/application/operations/plan.js";
 import type { StateListResult } from "../../src/application/operations/state.js";
 import type { ProjectRequest } from "../../src/application/contracts.js";
+import type { OperationEvent } from "../../src/application/contracts.js";
 
 interface ProblemResponse {
   error?: { code?: string; message?: string };
@@ -48,4 +55,47 @@ export const api = {
   plan: (request: PlanRequest = {}) => post<PlanResult>("/api/plan", request),
   coverage: (request: CoverageRequest = {}) => post<CoverageResult>("/api/coverage", request),
   state: (request: ProjectRequest = {}) => post<StateListResult>("/api/state", request),
+  prepareApply: (request: ApplyRequest = {}) => post<PreparedApply>("/api/apply/prepare", request),
+  executeApply: (id: string, proof?: ConfirmationProof) =>
+    post<ApplyResult>(`/api/apply/${encodeURIComponent(id)}/execute`, { proof }),
 };
+
+export interface OperationEventStream {
+  finished: Promise<OperationEvent>;
+  close(): void;
+}
+
+/** Subscribe before execution; the server also replays bounded history if execution wins the race. */
+export function watchOperation(id: string, onEvent: (event: OperationEvent) => void): OperationEventStream {
+  const source = new EventSource(`/api/operations/${encodeURIComponent(id)}/events`);
+  let settled = false;
+  let resolveFinished!: (event: OperationEvent) => void;
+  let rejectFinished!: (error: Error) => void;
+  const finished = new Promise<OperationEvent>((resolve, reject) => {
+    resolveFinished = resolve;
+    rejectFinished = reject;
+  });
+  source.addEventListener("operation", (message) => {
+    try {
+      const event = JSON.parse((message as MessageEvent<string>).data) as OperationEvent;
+      onEvent(event);
+      if (event.type === "operation-completed" || event.type === "operation-failed") {
+        settled = true;
+        source.close();
+        resolveFinished(event);
+      }
+    } catch (caught) {
+      settled = true;
+      source.close();
+      rejectFinished(caught instanceof Error ? caught : new Error(String(caught)));
+    }
+  });
+  source.onerror = () => {
+    if (!settled) {
+      settled = true;
+      rejectFinished(new Error("Der Fortschrittskanal wurde unterbrochen."));
+    }
+    source.close();
+  };
+  return { finished, close: () => source.close() };
+}
