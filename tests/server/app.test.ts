@@ -20,6 +20,12 @@ function harness(webRoot?: string) {
   const prepareDestroy = vi.fn(async (request) => ({ id: "destroy-1", request }));
   const executeDestroy = vi.fn(async (id, proof) => ({ operation: "destroy", id, proof }));
   const events = new OperationEventStore();
+  const workspace = vi.fn(async (request) => ({
+    process: { name: "project", configPath: "fixed.config.ts", environmentsPath: "ct.envs.json" },
+    environments: [],
+    selectedEnvironment: request.environment ?? null,
+    requiresEnvironment: false,
+  }));
   const app = createServerApp({
     origin,
     session,
@@ -30,6 +36,7 @@ function harness(webRoot?: string) {
       environment: "dev",
     },
     operations: {
+      workspace,
       plan,
       coverage,
       state,
@@ -44,6 +51,7 @@ function harness(webRoot?: string) {
   });
   return {
     app,
+    workspace,
     plan,
     coverage,
     state,
@@ -160,6 +168,24 @@ describe("local server security boundary", () => {
       configPath: "fixed.config.ts",
       statePath: "fixed.state.json",
       environment: "prod",
+    });
+  });
+
+  it("exposes only the server-owned workspace catalog", async () => {
+    const { app, workspace } = harness();
+    const cookie = await bootstrap(app);
+    const response = await app.request("/api/workspace", {
+      method: "POST",
+      headers: { origin, cookie, "content-type": "application/json" },
+      body: JSON.stringify({ cwd: "/escape", configPath: "/escape.ts", environment: "prod" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(workspace).toHaveBeenCalledWith({
+      cwd: "/project",
+      configPath: "fixed.config.ts",
+      statePath: "fixed.state.json",
+      environment: "dev",
     });
   });
 

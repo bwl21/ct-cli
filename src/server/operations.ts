@@ -27,12 +27,14 @@ import {
 } from "../application/operations/destroy.js";
 import { runPlan, type PlanRequest, type PlanResult } from "../application/operations/plan.js";
 import { listState, type StateListResult } from "../application/operations/state.js";
+import { inspectWorkspace, type WorkspaceResult } from "../application/operations/workspace.js";
 import { InMemoryMutationLock, PreparedOperationStore } from "../application/prepared-operation-store.js";
 import type { ProjectRequest } from "../application/contracts.js";
 import type { OperationObserver } from "../application/ports.js";
 import type { OperationEventStore } from "./operation-store.js";
 
 export interface ServerOperationCatalog {
+  workspace(request: ProjectRequest): Promise<WorkspaceResult>;
   authStatus(request: AuthStatusRequest): Promise<AuthStatusResult>;
   plan(request: PlanRequest): Promise<PlanResult>;
   coverage(request: CoverageRequest): Promise<CoverageResult>;
@@ -72,6 +74,7 @@ export function createServerOperationCatalog(
     ...options.core,
   };
   return {
+    workspace: (request) => inspectWorkspace(request),
     authStatus: (request) => runAuthStatus(request),
     plan: (request) => runPlan(request),
     coverage: (request) => runCoverage(request),

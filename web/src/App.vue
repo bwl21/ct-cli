@@ -9,6 +9,7 @@ import type {
 import type { CoverageResult } from "../../src/application/operations/coverage.js";
 import type { PlanResult } from "../../src/application/operations/plan.js";
 import type { StateListResult } from "../../src/application/operations/state.js";
+import type { WorkspaceResult } from "../../src/application/operations/workspace.js";
 import type { OperationEvent } from "../../src/application/contracts.js";
 import ApplyDialog from "./components/ApplyDialog.vue";
 import PlanView from "./components/PlanView.vue";
@@ -18,6 +19,8 @@ type View = "overview" | "plan" | "coverage" | "state";
 
 const view = ref<View>("overview");
 const environment = ref("");
+const environmentSelection = ref("");
+const workspace = ref<WorkspaceResult | null>(null);
 const auth = ref<AuthStatusResult | null>(null);
 const plan = ref<PlanResult | null>(null);
 const coverage = ref<CoverageResult | null>(null);
@@ -32,6 +35,9 @@ const applyResult = ref<ApplyResult | null>(null);
 const applyError = ref<{ code: string; message: string } | null>(null);
 
 const request = computed(() => (environment.value ? { environment: environment.value } : {}));
+const selectionRequired = computed(
+  () => workspace.value?.requiresEnvironment === true && environment.value === "",
+);
 const identity = computed(() => {
   const person = auth.value?.identity;
   if (!person) return "Nicht angemeldet";
@@ -47,6 +53,11 @@ function showError(caught: unknown): void {
 }
 
 async function loadOverview(): Promise<void> {
+  if (selectionRequired.value) {
+    loading.value = null;
+    error.value = null;
+    return;
+  }
   loading.value = "Projektstatus wird geladen";
   error.value = null;
   try {
@@ -62,6 +73,7 @@ async function loadOverview(): Promise<void> {
 
 async function openCoverage(): Promise<void> {
   view.value = "coverage";
+  if (selectionRequired.value) return;
   if (coverage.value) return;
   loading.value = "Coverage wird ermittelt";
   error.value = null;
@@ -75,6 +87,8 @@ async function openCoverage(): Promise<void> {
 }
 
 async function switchEnvironment(): Promise<void> {
+  if (!environmentSelection.value) return;
+  environment.value = environmentSelection.value;
   plan.value = null;
   state.value = null;
   coverage.value = null;
@@ -140,6 +154,11 @@ async function closeApply(): Promise<void> {
 onMounted(async () => {
   try {
     await establishSession();
+    workspace.value = await api.workspace();
+    if (workspace.value.selectedEnvironment) {
+      environment.value = workspace.value.selectedEnvironment;
+      environmentSelection.value = workspace.value.selectedEnvironment;
+    }
     await loadOverview();
   } catch (caught) {
     showError(caught);
@@ -160,13 +179,13 @@ onMounted(async () => {
         <button :class="{ active: view === 'overview' }" @click="view = 'overview'">
           <span>Übersicht</span><kbd>1</kbd>
         </button>
-        <button :class="{ active: view === 'plan' }" @click="view = 'plan'">
+        <button :class="{ active: view === 'plan' }" :disabled="selectionRequired" @click="view = 'plan'">
           <span>Plan</span><b v-if="plan?.value.summary.hasChanges" class="nav-dot"></b>
         </button>
-        <button :class="{ active: view === 'coverage' }" @click="openCoverage">
+        <button :class="{ active: view === 'coverage' }" :disabled="selectionRequired" @click="openCoverage">
           <span>Coverage</span>
         </button>
-        <button :class="{ active: view === 'state' }" @click="view = 'state'">
+        <button :class="{ active: view === 'state' }" :disabled="selectionRequired" @click="view = 'state'">
           <span>State</span><small>{{ state?.value.resources.length ?? "–" }}</small>
         </button>
       </nav>
@@ -186,10 +205,15 @@ onMounted(async () => {
           <p class="eyebrow">Lokaler Arbeitsbereich</p>
           <h1>{{ view === "overview" ? "Übersicht" : view === "state" ? "Managed State" : view }}</h1>
         </div>
-        <form class="environment" @submit.prevent="switchEnvironment">
+        <form v-if="workspace?.environments.length" class="environment" @submit.prevent="switchEnvironment">
           <label for="environment">Environment</label>
-          <input id="environment" v-model.trim="environment" placeholder="z. B. dev" />
-          <button type="submit">Laden</button>
+          <select id="environment" v-model="environmentSelection">
+            <option value="" disabled>Environment wählen …</option>
+            <option v-for="target in workspace.environments" :key="target.name" :value="target.name">
+              {{ target.name }} — {{ target.host }}{{ target.protected ? " (geschützt)" : "" }}
+            </option>
+          </select>
+          <button type="submit" :disabled="!environmentSelection">Laden</button>
         </form>
       </header>
 
@@ -206,7 +230,33 @@ onMounted(async () => {
         <span class="spinner"></span>{{ loading }} …
       </section>
 
-      <template v-if="view === 'overview' && !loading">
+      <section v-if="selectionRequired && !loading" class="selection-panel">
+        <p class="eyebrow">{{ workspace?.process.name }}</p>
+        <h2>Environment auswählen</h2>
+        <p>
+          Dieser Prozess verwaltet mehrere ChurchTools-Instanzen. Wähle oben das Ziel aus; erst dann werden
+          Plan und hostnamegebundener State geladen.
+        </p>
+        <div class="environment-cards">
+          <button
+            v-for="target in workspace?.environments"
+            :key="target.name"
+            type="button"
+            @click="
+              environmentSelection = target.name;
+              switchEnvironment();
+            "
+          >
+            <span>
+              <strong>{{ target.name }}</strong>
+              <small>{{ target.host }}</small>
+            </span>
+            <em>{{ target.protected ? "geschützt" : "auswählen" }}</em>
+          </button>
+        </div>
+      </section>
+
+      <template v-else-if="view === 'overview' && !loading">
         <section class="hero-card">
           <div>
             <p class="eyebrow">{{ project?.protected ? "Geschütztes Environment" : "Bereit zur Prüfung" }}</p>

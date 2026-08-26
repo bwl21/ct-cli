@@ -30,6 +30,28 @@ afterEach(() => {
 });
 
 describe("web API adapter", () => {
+  it("loads the server-owned workspace without sending browser paths", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          process: { name: "process", configPath: "ct.config.ts", environmentsPath: "ct.envs.json" },
+          environments: [],
+          selectedEnvironment: null,
+          requiresEnvironment: false,
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await api.workspace();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/workspace",
+      expect.objectContaining({ body: "{}", method: "POST" }),
+    );
+  });
+
   it("translates prepare and execute without adding project paths", async () => {
     const fetch = vi
       .fn()

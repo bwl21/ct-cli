@@ -8,6 +8,7 @@ import type {
 import type { CoverageRequest, CoverageResult } from "../../src/application/operations/coverage.js";
 import type { PlanRequest, PlanResult } from "../../src/application/operations/plan.js";
 import type { StateListResult } from "../../src/application/operations/state.js";
+import type { WorkspaceResult } from "../../src/application/operations/workspace.js";
 import type { ProjectRequest } from "../../src/application/contracts.js";
 import type { OperationEvent } from "../../src/application/contracts.js";
 
@@ -50,6 +51,7 @@ export async function establishSession(): Promise<void> {
 }
 
 export const api = {
+  workspace: () => post<WorkspaceResult>("/api/workspace", {}),
   authStatus: (request: Pick<ProjectRequest, "environment"> = {}) =>
     post<AuthStatusResult>("/api/auth/status", request),
   plan: (request: PlanRequest = {}) => post<PlanResult>("/api/plan", request),

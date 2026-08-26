@@ -206,8 +206,8 @@ h1 {
   font-weight: 700;
   text-transform: uppercase;
 }
-.environment input {
-  width: 130px;
+.environment select {
+  min-width: 250px;
   height: 38px;
   padding: 0 12px;
   border: 1px solid #ccd4cc;
@@ -215,7 +215,7 @@ h1 {
   outline: none;
   background: white;
 }
-.environment input:focus {
+.environment select:focus {
   border-color: var(--green);
   box-shadow: 0 0 0 3px #16644718;
 }
@@ -228,6 +228,58 @@ h1 {
   color: white;
   background: var(--green);
   font-weight: 600;
+}
+.environment button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.selection-panel {
+  max-width: 760px;
+  padding: 38px 42px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: white;
+  box-shadow: 0 18px 48px #24463810;
+}
+.selection-panel > p:not(.eyebrow) {
+  max-width: 620px;
+  margin: 12px 0 28px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.environment-cards {
+  display: grid;
+  gap: 10px;
+}
+.environment-cards button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  background: #f8faf6;
+  text-align: left;
+}
+.environment-cards button:hover {
+  border-color: var(--lime);
+  background: #f3f8e9;
+}
+.environment-cards span,
+.environment-cards small {
+  display: block;
+}
+.environment-cards small {
+  margin-top: 4px;
+  color: var(--muted);
+}
+.environment-cards em {
+  color: var(--green);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
 }
 
 .hero-card {
@@ -884,8 +936,9 @@ h1 {
   .environment label {
     display: none;
   }
-  .environment input {
-    width: 95px;
+  .environment select {
+    min-width: 155px;
+    max-width: 42vw;
   }
   .hero-card {
     min-height: 155px;
