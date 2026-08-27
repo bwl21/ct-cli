@@ -3,6 +3,8 @@ import { Command } from "commander";
 import { authCommand } from "./commands/auth.js";
 import { getCommand } from "./commands/get.js";
 import { adoptCommand } from "./commands/adopt.js";
+import { useCommand } from "./commands/use.js";
+import { ownershipCommand } from "./commands/ownership.js";
 import { stateCommand } from "./commands/state.js";
 import { coverageCommand } from "./commands/coverage.js";
 import { permissionsCommand } from "./commands/permissions.js";
@@ -33,6 +35,8 @@ export function buildProgram(): Command {
   program.addCommand(authCommand());
   program.addCommand(getCommand());
   program.addCommand(adoptCommand());
+  program.addCommand(useCommand());
+  program.addCommand(ownershipCommand());
   program.addCommand(stateCommand());
   program.addCommand(coverageCommand());
   program.addCommand(permissionsCommand());

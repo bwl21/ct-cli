@@ -9,7 +9,7 @@
  * removal.
  */
 
-import type { State } from "../state/state.js";
+import { externalResources, type State } from "../state/state.js";
 import type { DesiredResource } from "./types.js";
 
 export interface HierarchyEntry {
@@ -71,6 +71,9 @@ export function applyHierarchy(
     if (managed.type === "group") {
       groupIdToKey.set(managed.id, managed.key);
     }
+  }
+  for (const external of Object.values(externalResources(state))) {
+    if (external.type === "group") groupIdToKey.set(external.id, external.key);
   }
 
   // Single pass over the desired opt-ins (one copy of the predicate, mirroring the desired-side
