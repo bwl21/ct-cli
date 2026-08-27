@@ -110,6 +110,9 @@ describe("checkOwnership", () => {
     expect(
       result.value.findings.find((finding) => finding.reason === "KEY_MISMATCH")?.remediation?.[0],
     ).toContain("ct state rekey group alias shared --env prod");
+    expect(
+      result.value.findings.find((finding) => finding.reason === "DUPLICATE_OWNER")?.remediation?.[0],
+    ).toContain("ct unadopt group alias --env prod");
   });
 
   it("does not search ignored build or node_modules directories", async () => {

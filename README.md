@@ -214,10 +214,12 @@ ct auth status                # who am I? (`--env <name>` asks on another instan
 
 ct get groups                 # JSON to stdout — pipe into jq (every page, not just the first)
 ct adopt campus 0             # bring ONE existing resource under management
+ct unadopt campus mainz --env prod # stop managing it; keep the live object
 ct use group 4711 --key shared_group # bind an existing object read-only
+ct unuse group shared_group --env prod # remove the binding; keep the live object
 ct coverage                   # what the instance has that the config does not manage
 ct state list                 # managed and external entries, explicitly labelled
-ct state rm campus mainz      # remove either state kind. Never touches ChurchTools.
+ct state rm campus mainz      # low-level repair escape hatch; typed confirmation required
 ct state rekey group old new  # rename a logical key; update every ref.* use too
 ct ownership check .. --env prod # validate visible owner/consumer projects
 ct plan                       # diff the config against ChurchTools (read-only)
@@ -235,14 +237,19 @@ printed — only the login token and its host reach the Keychain. There is delib
 Windows there is no Keychain to store anything in, so the prompt is not offered at all:
 export `CT_HOST` and `CT_LOGINTOKEN` there.
 
-`state rm` removes a managed or external entry from the state file, makes no
-HTTP call, and leaves the ChurchTools object in place. For managed entries it
-refuses a key the config still declares — that
-would make the next plan propose creating a resource that already exists — so
-delete the declaration first, or pass `--force` to do both in one change.
-"Declares" covers permission declarations too, not only resources: a key named
-by a `ct.groupRole` domain or a group scope is just as broken to remove, and the
-refusal is what keeps that from surfacing one command later as a plan error.
+Use `unuse` for external bindings and `unadopt` for managed ownership. Both
+commands make no HTTP call, leave the ChurchTools object in place, fail closed
+when the config cannot be inspected, and refuse a key that remains declared or
+referenced. They show a preview and require the environment name to be typed;
+automation must pass an exactly matching `--confirm-env <name>`. `--force`
+overrides only the config-reference guard, never the typed confirmation.
+
+`state rm` remains a low-level repair escape hatch for either state partition.
+It performs the same typed confirmation and a best-effort config-reference
+check, warning when a broken config cannot be inspected, and points at `unuse`
+or `unadopt` as the normal lifecycle command. A project without a named
+environment types the logical key instead (or supplies `--confirm-key <key>` in
+automation). `--dry-run` never needs confirmation and writes nothing.
 
 `apply` reconciles **creates and updates** only, saving state after each action
 (crash-safe / resumable). It **never deletes**: a resource dropped from the

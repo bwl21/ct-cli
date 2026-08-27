@@ -79,12 +79,14 @@ export function envStatePath(path: string, name: string): Promise<string | undef
  * `type` narrows them to the keys of that resource type, because `ct state rm <type>
  * <key>` rejects a key of any other type: offering it would only complete into an error.
  */
-export function stateKeys(path: string, type?: string): Promise<string[]> {
+export function stateKeys(path: string, type?: string, kind?: "managed" | "external"): Promise<string[]> {
   return offline(async () => {
     const state = JSON.parse(await readFile(path, "utf8"));
     const resources = objectField(state, "resources");
     const externals = objectField(state, "externals");
-    return Object.entries({ ...resources, ...externals })
+    const entries =
+      kind === "managed" ? resources : kind === "external" ? externals : { ...resources, ...externals };
+    return Object.entries(entries)
       .filter(([, entry]) => type === undefined || (isObject(entry) && entry.type === type))
       .map(([key]) => key);
   }, []);

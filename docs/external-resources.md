@@ -118,12 +118,28 @@ Inspect or maintain either state partition with the shared commands:
 ct state list --env prod             # managed and external, with explicit kind
 ct state list --managed --env prod
 ct state list --external --env prod
-ct state rm group ojahr_fuzzies --env prod
+ct unuse group ojahr_fuzzies --env prod
+ct unadopt group owned_group --env prod
 ct state rekey group old_key new_key --env prod
 ```
 
-Removal and rekeying never contact ChurchTools. Rekeying requires every config
-and `ref.*` use to be changed consistently.
+`unuse` removes only external bindings; `unadopt` removes only managed ownership.
+Neither contacts ChurchTools or deletes the live object. Both first check every
+known config declaration and `ref.*` position, show the exact entry and state
+file, then require the environment name to be typed. A referenced key blocks by
+default; `--force` overrides that check only when the config and state changes
+are deliberately made together. `--dry-run` previews without confirmation or a
+write. In non-interactive use, confirmation remains explicit:
+
+```bash
+ct unuse group ojahr_fuzzies --env prod --confirm-env prod
+```
+
+`ct state rm` remains the low-level repair escape hatch and carries the same
+typed confirmation plus a best-effort reference check; unlike the public
+lifecycle commands it can proceed with a warning when a broken config cannot be
+inspected. Prefer `unuse`/`unadopt`. Rekeying requires every config and `ref.*`
+use to be changed consistently.
 
 ## Planning and safety boundary
 
@@ -168,7 +184,8 @@ It recursively finds ct projects below that root, ignores `.git`,
 no network calls. It reports duplicate managed owners, missing or mismatching
 owner hints, different keys for the same `(type, id)`, conflicting bindings,
 and incompatible identity snapshots. Conflicts return a non-zero exit code for
-CI and include `ct state rekey`, `ct state rm`, or broader-scope remediation.
+CI and include `ct state rekey`, `ct unuse`, `ct unadopt`, or broader-scope
+remediation.
 
 The guarantee is intentionally scope-limited. Projects outside the supplied
 root remain unknowable; global atomic ownership would require a separate shared

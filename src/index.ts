@@ -4,6 +4,7 @@ import { authCommand } from "./commands/auth.js";
 import { getCommand } from "./commands/get.js";
 import { adoptCommand } from "./commands/adopt.js";
 import { useCommand } from "./commands/use.js";
+import { unadoptCommand, unuseCommand } from "./commands/release.js";
 import { ownershipCommand } from "./commands/ownership.js";
 import { stateCommand } from "./commands/state.js";
 import { coverageCommand } from "./commands/coverage.js";
@@ -35,7 +36,9 @@ export function buildProgram(): Command {
   program.addCommand(authCommand());
   program.addCommand(getCommand());
   program.addCommand(adoptCommand());
+  program.addCommand(unadoptCommand());
   program.addCommand(useCommand());
+  program.addCommand(unuseCommand());
   program.addCommand(ownershipCommand());
   program.addCommand(stateCommand());
   program.addCommand(coverageCommand());

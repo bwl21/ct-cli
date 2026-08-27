@@ -163,6 +163,13 @@ Remedy 2 is the normal consumer workflow. Numeric-id + `TODO` output remains an
 honest signal from adoption that the reference is not portable until explicitly
 bound; adoption never claims or writes the external object as a side effect.
 
+Lifecycle release is equally explicit and never means deletion. `ct unuse
+<type> <key> --env <env>` removes only a consumer binding; `ct unadopt <type>
+<key> --env <env>` relinquishes only managed ownership. Both leave the live
+ChurchTools object untouched, refuse config references by default, and require
+typed environment confirmation. Actual deletion remains exclusively `ct
+destroy` and is restricted to managed state.
+
 ### 5. Person-related data — permanently excluded
 
 Memberships, participants, registrations, attendance, and every other record

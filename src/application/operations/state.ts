@@ -38,6 +38,13 @@ export interface StateRemoveRequest extends ProjectRequest {
   key: string;
   force?: boolean;
   dryRun?: boolean;
+  /** Restrict a public lifecycle command to its own state partition. */
+  expectedKind?: "managed" | "external";
+  /** Refuse a stale prepare/confirm/execute sequence if any binding metadata changed meanwhile. */
+  expectedEntry?: ManagedResource | ExternalResource;
+  /** Safe public commands fail closed when their reference guard cannot load config. */
+  requireReadableConfig?: boolean;
+  operation?: "state" | "unuse" | "unadopt";
 }
 
 export type StateRemoveResult = OperationResult<{
@@ -88,6 +95,15 @@ async function declaredKeys(
     else if (ref.kind === "group-member-field") keys.add(ref.group);
     else keys.add(ref.key);
   };
+  // Resource fields and dynamic rulesets carry typed ref.* values; parent/dependsOn
+  // remain portable string keys. Walk all of them so unuse/unadopt cannot leave a
+  // config that only fails on the next plan.
+  for (const resource of resources) {
+    if (resource.parent) keys.add(resource.parent);
+    for (const key of resource.parents ?? []) keys.add(key);
+    for (const key of resource.dependsOn ?? []) keys.add(key);
+    for (const ref of collectRefs([resource.fields, resource.dynamic?.ruleset])) addRef(ref);
+  }
   for (const ref of collectRefs(permissions)) addRef(ref);
   for (const permission of permissions) {
     for (const grant of permission.grants) {
@@ -131,20 +147,40 @@ export async function removeStateEntry(
     }
 
     const kind = managed ? "managed" : "external";
+    if (request.expectedKind && kind !== request.expectedKind) {
+      const command = kind === "managed" ? "unadopt" : "unuse";
+      throw new Error(
+        `"${request.key}" is ${kind}, not ${request.expectedKind}. Use \`ct ${command} ${entry.type} ${request.key}\`.`,
+      );
+    }
+    if (request.expectedEntry && JSON.stringify(entry) !== JSON.stringify(request.expectedEntry)) {
+      throw new Error(
+        `${kind} ${entry.type}.${request.key} changed while confirmation was pending. Inspect it and retry.`,
+      );
+    }
     const warnings: CtWarning[] = [];
-    if (kind === "managed" && !request.force) {
+    if (!request.force) {
       try {
         const declared = await declaredKeys(project.configPath, dependencies);
         if (declared.has(request.key)) {
+          const consequence =
+            kind === "managed"
+              ? "the next plan could recreate the live object or fail to resolve one of its references"
+              : "the next plan would fail because the external prerequisite no longer resolves";
           throw new Error(
-            `"${request.key}" is still declared in the config, so removing it from state would make the next ` +
-              `plan propose CREATING a resource that already exists on this host. Remove the ` +
-              `declaration first, or pass --force if you are deleting both in the same change.`,
+            `"${request.key}" is still declared or referenced in the config; ${consequence}. ` +
+              `Remove every declaration/ref first, or pass --force only when both changes belong together.`,
           );
         }
       } catch (caught) {
-        if (caught instanceof Error && caught.message.includes("is still declared in the config"))
+        if (caught instanceof Error && caught.message.includes("is still declared or referenced"))
           throw caught;
+        if (request.requireReadableConfig) {
+          throw new Error(
+            `Could not read the config to verify that "${request.key}" is unused ` +
+              `(${caught instanceof Error ? caught.message : String(caught)}). Fix the config or pass --force after reviewing all references.`,
+          );
+        }
         warnings.push({
           code: "CONFIG_UNREADABLE",
           message:
@@ -160,7 +196,7 @@ export async function removeStateEntry(
       await (dependencies.saveState ?? saveState)(project.statePath, state);
     }
     return {
-      operation: "state",
+      operation: request.operation ?? "state",
       project,
       warnings,
       value: { kind, entry, removed: !request.dryRun, churchToolsContacted: false },

@@ -70,6 +70,65 @@ describe("state operations", () => {
     expect(state.resources.mainz).toBeDefined();
   });
 
+  it("fails closed when a safe removal cannot inspect config", async () => {
+    const state = emptyState(host);
+    state.externals!.shared = {
+      type: "group",
+      id: 7,
+      key: "shared",
+      identity: { name: "Shared", groupTypeId: 2 },
+      boundAt: "t",
+    };
+    await expect(
+      removeStateEntry(
+        { type: "group", key: "shared", expectedKind: "external", requireReadableConfig: true },
+        {
+          resolveProject: vi.fn(async () => project()),
+          loadState: vi.fn(async () => state),
+          loadConfig: vi.fn(async () => {
+            throw new Error("broken config");
+          }),
+          saveState: vi.fn(),
+        },
+      ),
+    ).rejects.toThrow(/Could not read the config/);
+    expect(state.externals?.shared).toBeDefined();
+  });
+
+  it("refuses to remove a binding that changed while confirmation was pending", async () => {
+    const state = emptyState(host);
+    state.externals!.shared = {
+      type: "group",
+      id: 8,
+      key: "shared",
+      identity: { name: "Changed", groupTypeId: 2 },
+      boundAt: "t",
+    };
+    await expect(
+      removeStateEntry(
+        {
+          type: "group",
+          key: "shared",
+          expectedKind: "external",
+          expectedEntry: {
+            type: "group",
+            id: 7,
+            key: "shared",
+            identity: { name: "Shared", groupTypeId: 2 },
+            boundAt: "t",
+          },
+        },
+        {
+          resolveProject: vi.fn(async () => project()),
+          loadState: vi.fn(async () => state),
+          loadConfig: vi.fn(async () => ({ resources: [], permissions: [], configDir: "/project" })),
+          saveState: vi.fn(),
+        },
+      ),
+    ).rejects.toThrow(/changed while confirmation was pending/);
+    expect(state.externals?.shared).toBeDefined();
+  });
+
   it("lists, removes and rekeys external entries through the shared key namespace", async () => {
     const state = emptyState(host);
     state.externals!.shared = {

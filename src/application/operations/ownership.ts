@@ -192,7 +192,7 @@ export async function checkOwnership(
             .slice(1)
             .map(
               (item) =>
-                `cd ${item.project.path} && ct state rm ${item.entry.type} ${item.entry.key} --env ${request.environment}`,
+                `cd ${item.project.path} && ct unadopt ${item.entry.type} ${item.entry.key} --env ${request.environment}`,
             ),
         });
       }
