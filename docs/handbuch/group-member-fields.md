@@ -1,5 +1,5 @@
 ---
-sources_hash: 984c67a4f952f9fc
+sources_hash: 740acdc4e12e5d8e
 title: Group member fields
 sources:
   - src/engine/member-fields.ts
@@ -7,10 +7,10 @@ sources:
   - src/config/context.ts
   - src/application/operations/adopt-group.ts
   - src/application/operations/destroy.ts
-reviewed: 2026-08-26
+reviewed: 2026-08-28
 ---
 
-# Group member fields (#135)
+# Group member fields (#135, #158)
 
 A ChurchTools group can ask its members for extra information — "Wahl",
 "Praktikumsplatz", a free-text note. Those are **group member fields**: field
@@ -60,8 +60,9 @@ ct.group({
   groupTypeId: 5,
   memberFields: [
     {
-      key: "wahl",
-      name: "Wahl",
+      key: "stand_bewerbung",
+      referenceName: "stand-bewerbung",
+      name: "Stand",
       fieldTypeCode: "text",
       requiredInRegistrationForm: true,
     },
@@ -77,8 +78,11 @@ ct.group({
 | `memberFields: []`    | managed, none declared — still never deletes an existing field   |
 | `memberFields: [ … ]` | these fields are created/updated; anything else is left in place |
 
-`key` is the group-local key and is unique within the group. Everything else is
-a ChurchTools member-field property.
+`key` is the group-local ct-cli key and is unique within the group.
+`referenceName` is the exact ChurchTools identity used by dynamic rulesets. The
+two are deliberately separate: `key: "stand_bewerbung"` may carry
+`referenceName: "stand-bewerbung"`. If `referenceName` is omitted it defaults
+to `key` for backwards compatibility.
 
 ### Managed properties
 
@@ -86,15 +90,17 @@ a ChurchTools member-field property.
 `noteInSignupForm`, `requiredInRegistrationForm`, `useInRegistrationForm`,
 `securityLevel`, `sortKey`.
 
-Two readable/writable properties are deliberately **not** managed:
+Two readable/writable properties need special handling:
 
 - **`id`** — host-specific; see above.
-- **`referenceName`** — this _is_ the local identity, not a diffable property.
-  It is what a create sends and, when no state-bound id exists, what a later run
-  matches on. Managing it would let a rename silently re-key the resource and
-  re-create the field instead of updating it. (A field created in the
-  ChurchTools UI, where CT may mint its own `referenceName`, is matched by its
-  slugged `name` as a fallback.)
+- **`referenceName`** — exact ChurchTools identity, kept separate from the local
+  key. It is sent unchanged on create and compared byte-for-byte on every later
+  plan; punctuation and case are significant, so `foo-bar` and `foo_bar` are
+  different. It is never silently PATCHed. A mismatch makes the plan
+  **INCOMPLETE** and tells the operator to perform an explicit replacement with
+  `ct destroy --member-field <group>::<local-key>` followed by plan/apply. A
+  name fallback is used only for legacy/UI rows that genuinely carry no
+  `referenceName`; an existing different value is never ignored.
 
 A property outside the managed list still passes through to ChurchTools
 unchanged — it only earns a warning, and it is never diffed.
@@ -108,7 +114,9 @@ ct adopt group --children-of ojbp_2025_26 --with-member-fields
 
 The emitted snippet carries a `memberFields:` block with every group-scoped
 field and **no ChurchTools ids** — paste it, re-key it for the next year, and
-`ct plan` proposes fresh groups and fresh fields.
+`ct plan` proposes fresh groups and fresh fields. Adoption keeps every non-empty
+live `referenceName` byte-for-byte in the snippet while deriving the separate
+local `key` as a portable slug.
 
 The same adoption stores each live field id in the owning group's
 instance-specific `memberFields` state map. This is deliberately separate from
@@ -154,9 +162,10 @@ already adopted in that run.
       memberField:wahl: {"name":"Wahl"} -> {"name":"Wahl (neu)"}
 ```
 
-The actual side is narrowed to exactly the properties the declaration names, so
-a server default ChurchTools returns can never make the two sides differ
-forever: **a clean apply re-plans as a no-op.**
+The actual side includes the exact `referenceName` and is otherwise narrowed to
+the mutable properties the declaration names, so a server default ChurchTools
+returns can never make the two sides differ forever: **a clean apply re-plans
+as a no-op.**
 
 The same projection applies inside `options`: ChurchTools assigns host-specific
 ids to select options, while a portable config can declare `{ name }`. Those
@@ -214,11 +223,12 @@ elsewhere, so a member field is referenced by its portable identity:
 ref.groupMemberField("ojbp_2026_27_praktikum_1", "wahl");
 ```
 
-Local keys are compared in their **normalised** form throughout — `"Wahl"` and
-`"wahl"` are the same field, whether they appear in a declaration, in a
-reference, in `ct destroy --member-field`, or as ChurchTools' own
-`referenceName` on the live row. Two declarations in one group that differ only
-in case are therefore rejected as duplicates.
+Local ct-cli keys are compared in their **normalised** form throughout —
+`"Wahl"` and `"wahl"` are the same local key in declarations, typed references,
+state and `ct destroy --member-field`. Two declarations in one group that
+differ only in case are therefore rejected as duplicates. ChurchTools
+`referenceName` is a separate value and is always compared exactly; local-key
+normalisation never applies to it.
 
 Three things follow:
 
