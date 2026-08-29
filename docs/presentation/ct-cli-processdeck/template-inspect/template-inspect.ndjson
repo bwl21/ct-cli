@@ -1,0 +1,53 @@
+{"kind":"slide","id":"sl/y90nupkv","slide":1,"title":"ct-cli · Fallstudie OJBP","textShapes":4}
+{"kind":"textbox","id":"sh/ts7md4r2","slide":1,"name":"s1-eyebrow","text":"ct-cli · Fallstudie OJBP","textPreview":"ct-cli · Fallstudie OJBP","textChars":24,"textLines":1,"bbox":[42,42,620,46]}
+{"kind":"shape","id":"sh/547294r6","slide":1,"name":"s1-accent","bbox":[42,132,190,8]}
+{"kind":"textbox","id":"sh/k3yl0zql","slide":1,"name":"s1-title","text":"ChurchTools\nConfiguration as Code","textPreview":"ChurchTools | Configuration as Code","textChars":33,"textLines":2,"bbox":[42,178,1030,270]}
+{"kind":"textbox","id":"sh/7qp4be9c","slide":1,"name":"s1-subtitle","text":"Terraform-Prinzipien für Gruppen, Hierarchien und Berechtigungen","textPreview":"Terraform-Prinzipien für Gruppen, Hierarchien und Berechtigungen","textChars":64,"textLines":1,"bbox":[42,505,930,78]}
+{"kind":"textbox","id":"sh/65g3298r","slide":1,"name":"s1-footer","text":"Eine Engineering-Journey in fünf Minuten","textPreview":"Eine Engineering-Journey in fünf Minuten","textChars":40,"textLines":1,"bbox":[42,625,600,30]}
+{"kind":"slide","id":"sl/hwbqtkby","slide":2,"title":"Ein Jahrgang war mehr als vier Gruppen","textShapes":5}
+{"kind":"textbox","id":"sh/r65knqtk","slide":2,"name":"slide-2-title","text":"Ein Jahrgang war mehr als vier Gruppen","textPreview":"Ein Jahrgang war mehr als vier Gruppen","textChars":38,"textLines":1,"bbox":[42,34,1170,90]}
+{"kind":"textbox","id":"sh/9072xkry","slide":2,"name":"slide-2-number","text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[1180,660,55,22]}
+{"kind":"shape","id":"sh/ozy1ofad","slide":2,"name":"s2-tree-panel","bbox":[42,186,555,405]}
+{"kind":"textbox","id":"sh/b29kza94","slide":2,"name":"s2-tree","text":"OJBP 2025/26\n│\n├─ 1. Praktikum\n├─ 2. Praktikum\n└─ 3. Praktikum","textPreview":"OJBP 2025/26 | │ | ├─ 1. Praktikum | ├─ 2. Praktikum | └─ 3. Praktikum","textChars":62,"textLines":5,"bbox":[78,222,480,315]}
+{"kind":"textbox","id":"sh/a10jqpsj","slide":2,"name":"s2-question","text":"„Wie bekomme ich das\nins nächste Jahr –\nohne alles neu zu klicken?“","textPreview":"„Wie bekomme ich das | ins nächste Jahr – | ohne alles neu zu klicken?“","textChars":67,"textLines":3,"bbox":[658,204,545,260]}
+{"kind":"shape","id":"sh/x4r21kru","slide":2,"name":"s2-question-accent","bbox":[658,500,160,7]}
+{"kind":"textbox","id":"sh/w3i1sfa9","slide":2,"name":"s2-context","text":"Manuell aufgebaut. Fachlich erprobt.\nAber über mehrere API-Flächen verteilt.","textPreview":"Manuell aufgebaut. Fachlich erprobt. | Aber über mehrere API-Flächen verteilt.","textChars":76,"textLines":2,"bbox":[658,530,540,82]}
+{"kind":"slide","id":"sl/ofy9wn61","slide":3,"title":"Vom Bestand zum überprüften Blueprint","textShapes":12}
+{"kind":"textbox","id":"sh/w7ulsvqp","slide":3,"name":"slide-3-title","text":"Vom Bestand zum überprüften Blueprint","textPreview":"Vom Bestand zum überprüften Blueprint","textChars":37,"textLines":1,"bbox":[42,34,1170,90]}
+{"kind":"textbox","id":"sh/cza94vmx","slide":3,"name":"slide-3-number","text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[1180,660,55,22]}
+{"kind":"shape","id":"sh/d0jax03i","slide":3,"name":"s3-timeline","bbox":[90,330,1085,2]}
+{"kind":"shape","id":"sh/298ryl4v","slide":3,"name":"s3-node-0","bbox":[120,316,28,28]}
+{"kind":"shape","id":"sh/3ah8rqlg","slide":3,"name":"s3-node-1","bbox":[475,316,28,28]}
+{"kind":"shape","id":"sh/obq90bml","slide":3,"name":"s3-node-2","bbox":[830,316,28,28]}
+{"kind":"textbox","id":"sh/pcjqtg36","slide":3,"name":"s3-label-0","text":"ERFASSEN","textPreview":"ERFASSEN","textChars":8,"textLines":1,"bbox":[82,252,290,34]}
+{"kind":"textbox","id":"sh/m5cra54z","slide":3,"name":"s3-head-0","text":"ct adopt","textPreview":"ct adopt","textChars":8,"textLines":1,"bbox":[82,382,300,54]}
+{"kind":"textbox","id":"sh/n6ls3alk","slide":3,"name":"s3-body-0","text":"Gruppen, Felder und Regeln\nals konkrete Deklarationen","textPreview":"Gruppen, Felder und Regeln | als konkrete Deklarationen","textChars":53,"textLines":2,"bbox":[82,448,300,100]}
+{"kind":"textbox","id":"sh/n2l4fq98","slide":3,"name":"s3-label-1","text":"ABSTRAHIEREN","textPreview":"ABSTRAHIEREN","textChars":12,"textLines":1,"bbox":[437,252,290,34]}
+{"kind":"textbox","id":"sh/m1c3mlsn","slide":3,"name":"s3-head-1","text":"Coding-Agent","textPreview":"Coding-Agent","textChars":12,"textLines":1,"bbox":[437,382,300,54]}
+{"kind":"textbox","id":"sh/943mhgre","slide":3,"name":"s3-body-1","text":"Invarianten, Parameter\nund logische Referenzen","textPreview":"Invarianten, Parameter | und logische Referenzen","textChars":46,"textLines":2,"bbox":[437,448,300,100]}
+{"kind":"textbox","id":"sh/83ulovat","slide":3,"name":"s3-label-2","text":"BEWEISEN","textPreview":"BEWEISEN","textChars":8,"textLines":1,"bbox":[792,252,290,34]}
+{"kind":"textbox","id":"sh/v6l4jq94","slide":3,"name":"s3-head-2","text":"ct plan","textPreview":"ct plan","textChars":7,"textLines":1,"bbox":[792,382,300,54]}
+{"kind":"textbox","id":"sh/a5c3ql8z","slide":3,"name":"s3-body-2","text":"Auswirkung gegen den\nLive-Zustand prüfen","textPreview":"Auswirkung gegen den | Live-Zustand prüfen","textChars":40,"textLines":2,"bbox":[792,448,300,100]}
+{"kind":"textbox","id":"sh/x8nml0ra","slide":3,"name":"s3-thesis","text":"Der Agent erzeugt den Entwurf. Der Plan bleibt die Vertrauensgrenze.","textPreview":"Der Agent erzeugt den Entwurf. Der Plan bleibt die Vertrauensgrenze.","textChars":68,"textLines":1,"bbox":[82,594,1030,48]}
+{"kind":"slide","id":"sl/jyx0ra1s","slide":4,"title":"Portabilität zeigt sich im zweiten System","textShapes":10}
+{"kind":"textbox","id":"sh/x8vaxsfe","slide":4,"name":"slide-4-title","text":"Portabilität zeigt sich im zweiten System","textPreview":"Portabilität zeigt sich im zweiten System","textChars":41,"textLines":1,"bbox":[42,34,1170,90]}
+{"kind":"textbox","id":"sh/1cj2d8b6","slide":4,"name":"slide-4-number","text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[1180,660,55,22]}
+{"kind":"shape","id":"sh/0ba143al","slide":4,"name":"s4-code-panel","bbox":[42,136,1196,112]}
+{"kind":"textbox","id":"sh/rm1k7yt4","slide":4,"name":"s4-code","text":"defineOjbp(ct, [\"26/27\"]);","textPreview":"defineOjbp(ct, [\"26/27\"]);","textChars":26,"textLines":1,"bbox":[76,169,900,52]}
+{"kind":"textbox","id":"sh/ql8jytsj","slide":4,"name":"s4-code-context","text":"4 Rulesets · neue IDs auf einer leeren Testinstanz","textPreview":"4 Rulesets · neue IDs auf einer leeren Testinstanz","textChars":50,"textLines":1,"bbox":[805,174,390,42]}
+{"kind":"shape","id":"sh/doj29oba","slide":4,"name":"s4-card-0","bbox":[42,290,374,310]}
+{"kind":"textbox","id":"sh/sna103ap","slide":4,"name":"s4-value-0","text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[76,340,300,120]}
+{"kind":"textbox","id":"sh/3ihk3et8","slide":4,"name":"s4-label-0","text":"neue Gruppen","textPreview":"neue Gruppen","textChars":12,"textLines":1,"bbox":[76,498,300,74]}
+{"kind":"shape","id":"sh/ih8ju9sn","slide":4,"name":"s4-card-1","bbox":[453,290,374,310]}
+{"kind":"textbox","id":"sh/kbm987y5","slide":4,"name":"s4-value-1","text":"36","textPreview":"36","textChars":2,"textLines":1,"bbox":[487,340,300,120]}
+{"kind":"textbox","id":"sh/5cva1cfq","slide":4,"name":"s4-label-1","text":"neue Mitgliedsfelder","textPreview":"neue Mitgliedsfelder","textChars":20,"textLines":1,"bbox":[487,498,300,74]}
+{"kind":"shape","id":"sh/i94r6xgz","slide":4,"name":"s4-card-2","bbox":[864,290,374,310]}
+{"kind":"textbox","id":"sh/jadsz2xk","slide":4,"name":"s4-value-2","text":"49","textPreview":"49","textChars":2,"textLines":1,"bbox":[898,340,300,120]}
+{"kind":"textbox","id":"sh/w72947yt","slide":4,"name":"s4-label-2","text":"No-ops im Folgeplan","textPreview":"No-ops im Folgeplan","textChars":19,"textLines":1,"bbox":[898,498,300,74]}
+{"kind":"slide","id":"sl/i107q5of","slide":5,"title":"Die eigentliche Erkenntnis","textShapes":4}
+{"kind":"textbox","id":"sh/032tgr6d","slide":5,"name":"s5-eyebrow","text":"Die eigentliche Erkenntnis","textPreview":"Die eigentliche Erkenntnis","textChars":26,"textLines":1,"bbox":[42,42,620,46]}
+{"kind":"textbox","id":"sh/dgbulwnm","slide":5,"name":"s5-main","text":"Der Agent abstrahiert.\nDer Plan beweist.","textPreview":"Der Agent abstrahiert. | Der Plan beweist.","textChars":40,"textLines":2,"bbox":[42,166,1040,292]}
+{"kind":"shape","id":"sh/cf2tcr61","slide":5,"name":"s5-accent","bbox":[42,492,210,8]}
+{"kind":"shape","id":"sh/z2tcnm5s","slide":5,"name":"s5-code-panel","bbox":[42,540,760,86]}
+{"kind":"textbox","id":"sh/yhkbe1o7","slide":5,"name":"s5-code","text":"defineOjbp(ct, [\"26/27\", \"27/28\"]);","textPreview":"defineOjbp(ct, [\"26/27\", \"27/28\"]);","textChars":35,"textLines":1,"bbox":[68,565,700,42]}
+{"kind":"textbox","id":"sh/l4bupwny","slide":5,"name":"s5-close","text":"Das nächste Jahr wird ein Parameter – nicht wieder Klickarbeit.","textPreview":"Das nächste Jahr wird ein Parameter – nicht wieder Klickarbeit.","textChars":63,"textLines":1,"bbox":[835,544,365,86]}

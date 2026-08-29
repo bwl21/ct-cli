@@ -1,0 +1,308 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/isysfl",
+    "id": "isysfl",
+    "slide": 1,
+    "layoutId": "c34629ba-f232-4da3-aa91-5b357ac3ce0d",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "4b11e02b-a8b9-4a35-b34b-6b295a321b86",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Helvetica Neue"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "c34629ba-f232-4da3-aa91-5b357ac3ce0d",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "4b11e02b-a8b9-4a35-b34b-6b295a321b86",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "4b11e02b-a8b9-4a35-b34b-6b295a321b86",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wfeho7at",
+      "id": "1",
+      "name": "s1-eyebrow",
+      "bbox": [
+        42,
+        42,
+        620,
+        46
+      ],
+      "geometry": "rect",
+      "text": "ct-cli · Fallstudie OJBP",
+      "textPreview": "ct-cli · Fallstudie OJBP",
+      "resolvedFontSize": 24,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 24,
+        "typeface": "Helvetica Neue",
+        "color": "#555B66",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 4.8,
+          "right": 9.6,
+          "bottom": 4.8,
+          "left": 9.6
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "ct-cli · Fallstudie OJBP"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "ct-cli · Fallstudie OJBP",
+          "resolvedTextStyle": {
+            "fontSize": 24,
+            "typeface": "Helvetica Neue",
+            "color": "#555B66",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "ct-cli · Fallstudie OJBP",
+              "fontSize": 24,
+              "typeface": "Helvetica Neue",
+              "color": "#555B66",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ve5gv298",
+      "id": "2",
+      "name": "s1-accent",
+      "bbox": [
+        42,
+        132,
+        190,
+        8
+      ],
+      "geometry": "rect",
+      "fillColor": "#3D8DFF",
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/adwzmxs3",
+      "id": "3",
+      "name": "s1-title",
+      "bbox": [
+        42,
+        178,
+        1030,
+        270
+      ],
+      "geometry": "rect",
+      "text": "ChurchTools\nConfiguration as Code",
+      "textPreview": "ChurchTools | Configuration as Code",
+      "resolvedFontSize": 78,
+      "resolvedTextStyle": {
+        "anchor": 3,
+        "fontSize": 78,
+        "typeface": "Helvetica Neue",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "bottom",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 4.8,
+          "right": 9.6,
+          "bottom": 4.8,
+          "left": 9.6
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "ChurchTools"
+          },
+          {
+            "index": 2,
+            "text": "Configuration as Code"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "ChurchTools",
+          "resolvedTextStyle": {
+            "fontSize": 78,
+            "typeface": "Helvetica Neue",
+            "color": "#000000",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "ChurchTools",
+              "fontSize": 78,
+              "typeface": "Helvetica Neue",
+              "color": "#000000",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 2,
+          "text": "Configuration as Code",
+          "resolvedTextStyle": {
+            "fontSize": 78,
+            "typeface": "Helvetica Neue",
+            "color": "#000000",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Configuration as Code",
+              "fontSize": 78,
+              "typeface": "Helvetica Neue",
+              "color": "#000000",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/9c3ytsri",
+      "id": "4",
+      "name": "s1-subtitle",
+      "bbox": [
+        42,
+        505,
+        930,
+        78
+      ],
+      "geometry": "rect",
+      "text": "Vom erprobten Prozess zum wiederholbaren Soll-Zustand",
+      "textPreview": "Vom erprobten Prozess zum wiederholbaren Soll-Zustand",
+      "resolvedFontSize": 30,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 30,
+        "typeface": "Helvetica Neue",
+        "color": "#555B66",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 4.8,
+          "right": 9.6,
+          "bottom": 4.8,
+          "left": 9.6
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Vom erprobten Prozess zum wiederholbaren Soll-Zustand"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Vom erprobten Prozess zum wiederholbaren Soll-Zustand",
+          "resolvedTextStyle": {
+            "fontSize": 30,
+            "typeface": "Helvetica Neue",
+            "color": "#555B66",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Vom erprobten Prozess zum wiederholbaren Soll-Zustand",
+              "fontSize": 30,
+              "typeface": "Helvetica Neue",
+              "color": "#555B66",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

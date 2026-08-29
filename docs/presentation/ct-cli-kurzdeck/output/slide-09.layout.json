@@ -1,0 +1,426 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/gd8ai5",
+    "id": "gd8ai5",
+    "slide": 9,
+    "layoutId": "c34629ba-f232-4da3-aa91-5b357ac3ce0d",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "4b11e02b-a8b9-4a35-b34b-6b295a321b86",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Helvetica Neue",
+      "Menlo"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "c34629ba-f232-4da3-aa91-5b357ac3ce0d",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "4b11e02b-a8b9-4a35-b34b-6b295a321b86",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "4b11e02b-a8b9-4a35-b34b-6b295a321b86",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/kbu5wv2t",
+      "id": "1",
+      "name": "s9-eyebrow",
+      "bbox": [
+        42,
+        42,
+        620,
+        46
+      ],
+      "geometry": "rect",
+      "text": "Die eigentliche Erkenntnis",
+      "textPreview": "Die eigentliche Erkenntnis",
+      "resolvedFontSize": 24,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 24,
+        "typeface": "Helvetica Neue",
+        "color": "#555B66",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 4.8,
+          "right": 9.6,
+          "bottom": 4.8,
+          "left": 9.6
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Die eigentliche Erkenntnis"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Die eigentliche Erkenntnis",
+          "resolvedTextStyle": {
+            "fontSize": 24,
+            "typeface": "Helvetica Neue",
+            "color": "#555B66",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Die eigentliche Erkenntnis",
+              "fontSize": 24,
+              "typeface": "Helvetica Neue",
+              "color": "#555B66",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/jalonal8",
+      "id": "2",
+      "name": "s9-main",
+      "bbox": [
+        42,
+        145,
+        1120,
+        315
+      ],
+      "geometry": "rect",
+      "text": "Adoptieren erfasst.\nAbstrahieren macht wiederholbar.\nPlanen schafft Vertrauen.",
+      "textPreview": "Adoptieren erfasst. | Abstrahieren macht wiederholbar. | Planen schafft Vertrauen.",
+      "resolvedFontSize": 55,
+      "resolvedTextStyle": {
+        "anchor": 3,
+        "fontSize": 55,
+        "typeface": "Helvetica Neue",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "bottom",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 4.8,
+          "right": 9.6,
+          "bottom": 4.8,
+          "left": 9.6
+        }
+      },
+      "textLayout": {
+        "lineCount": 3,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Adoptieren erfasst."
+          },
+          {
+            "index": 2,
+            "text": "Abstrahieren macht wiederholbar."
+          },
+          {
+            "index": 3,
+            "text": "Planen schafft Vertrauen."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Adoptieren erfasst.",
+          "resolvedTextStyle": {
+            "fontSize": 55,
+            "typeface": "Helvetica Neue",
+            "color": "#000000",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Adoptieren erfasst.",
+              "fontSize": 55,
+              "typeface": "Helvetica Neue",
+              "color": "#000000",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 2,
+          "text": "Abstrahieren macht wiederholbar.",
+          "resolvedTextStyle": {
+            "fontSize": 55,
+            "typeface": "Helvetica Neue",
+            "color": "#000000",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Abstrahieren macht wiederholbar.",
+              "fontSize": 55,
+              "typeface": "Helvetica Neue",
+              "color": "#000000",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 3,
+          "text": "Planen schafft Vertrauen.",
+          "resolvedTextStyle": {
+            "fontSize": 55,
+            "typeface": "Helvetica Neue",
+            "color": "#000000",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Planen schafft Vertrauen.",
+              "fontSize": 55,
+              "typeface": "Helvetica Neue",
+              "color": "#000000",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/i9cnu5kn",
+      "id": "3",
+      "name": "s9-accent",
+      "bbox": [
+        42,
+        492,
+        210,
+        8
+      ],
+      "geometry": "rect",
+      "fillColor": "#3D8DFF",
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/x836l03i",
+      "id": "4",
+      "name": "s9-code-panel",
+      "bbox": [
+        42,
+        540,
+        760,
+        86
+      ],
+      "geometry": "rect",
+      "fillColor": "#F6F6F6",
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/w7u5sv2x",
+      "id": "5",
+      "name": "s9-code",
+      "bbox": [
+        68,
+        565,
+        700,
+        42
+      ],
+      "geometry": "rect",
+      "text": "defineOjbp(ct, [\"26/27\", \"27/28\"]);",
+      "textPreview": "defineOjbp(ct, [\"26/27\", \"27/28\"]);",
+      "resolvedFontSize": 27,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 27,
+        "typeface": "Menlo",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 4.8,
+          "right": 9.6,
+          "bottom": 4.8,
+          "left": 9.6
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "defineOjbp(ct, [\"26/27\", \"27/28\"]);"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "defineOjbp(ct, [\"26/27\", \"27/28\"]);",
+          "resolvedTextStyle": {
+            "fontSize": 27,
+            "typeface": "Menlo",
+            "color": "#000000",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "defineOjbp(ct, [\"26/27\", \"27/28\"]);",
+              "fontSize": 27,
+              "typeface": "Menlo",
+              "color": "#000000",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/v6lojqlc",
+      "id": "6",
+      "name": "s9-close",
+      "bbox": [
+        835,
+        544,
+        365,
+        86
+      ],
+      "geometry": "rect",
+      "text": "Das nächste Jahr wird ein Parameter – nicht wieder Klickarbeit.",
+      "textPreview": "Das nächste Jahr wird ein Parameter – nicht wieder Klickarbeit.",
+      "resolvedFontSize": 23,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 23,
+        "typeface": "Helvetica Neue",
+        "color": "#555B66",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 4.8,
+          "right": 9.6,
+          "bottom": 4.8,
+          "left": 9.6
+        }
+      },
+      "textLayout": {
+        "lineCount": 3,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Das nächste Jahr wird ein"
+          },
+          {
+            "index": 2,
+            "text": "Parameter – nicht wieder"
+          },
+          {
+            "index": 3,
+            "text": "Klickarbeit."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Das nächste Jahr wird ein Parameter – nicht wieder Klickarbeit.",
+          "resolvedTextStyle": {
+            "fontSize": 23,
+            "typeface": "Helvetica Neue",
+            "color": "#555B66",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Das nächste Jahr wird ein Parameter – nicht wieder Klickarbeit.",
+              "fontSize": 23,
+              "typeface": "Helvetica Neue",
+              "color": "#555B66",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

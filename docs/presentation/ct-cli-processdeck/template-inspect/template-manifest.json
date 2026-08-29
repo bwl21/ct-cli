@@ -1,0 +1,86 @@
+{
+  "sourcePptx": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/ct-cli-kurzpraesentation.pptx",
+  "workspace": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck",
+  "outDir": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck/template-inspect",
+  "generatedAt": "2026-08-27T14:46:17.454Z",
+  "slideCount": 5,
+  "slideArtifacts": [
+    {
+      "slide": 1,
+      "previewPath": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck/template-inspect/source-slides/source-slide-01.png",
+      "previewRelativePath": "template-inspect/source-slides/source-slide-01.png",
+      "layoutPath": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck/template-inspect/layouts/source-slide-01.layout.json",
+      "layoutRelativePath": "template-inspect/layouts/source-slide-01.layout.json"
+    },
+    {
+      "slide": 2,
+      "previewPath": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck/template-inspect/source-slides/source-slide-02.png",
+      "previewRelativePath": "template-inspect/source-slides/source-slide-02.png",
+      "layoutPath": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck/template-inspect/layouts/source-slide-02.layout.json",
+      "layoutRelativePath": "template-inspect/layouts/source-slide-02.layout.json"
+    },
+    {
+      "slide": 3,
+      "previewPath": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck/template-inspect/source-slides/source-slide-03.png",
+      "previewRelativePath": "template-inspect/source-slides/source-slide-03.png",
+      "layoutPath": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck/template-inspect/layouts/source-slide-03.layout.json",
+      "layoutRelativePath": "template-inspect/layouts/source-slide-03.layout.json"
+    },
+    {
+      "slide": 4,
+      "previewPath": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck/template-inspect/source-slides/source-slide-04.png",
+      "previewRelativePath": "template-inspect/source-slides/source-slide-04.png",
+      "layoutPath": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck/template-inspect/layouts/source-slide-04.layout.json",
+      "layoutRelativePath": "template-inspect/layouts/source-slide-04.layout.json"
+    },
+    {
+      "slide": 5,
+      "previewPath": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck/template-inspect/source-slides/source-slide-05.png",
+      "previewRelativePath": "template-inspect/source-slides/source-slide-05.png",
+      "layoutPath": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck/template-inspect/layouts/source-slide-05.layout.json",
+      "layoutRelativePath": "template-inspect/layouts/source-slide-05.layout.json"
+    }
+  ],
+  "inspectPath": "/Users/beweiche/beweiche_noTimeMachine/ct-cli/.tmp/ct-cli-processdeck/template-inspect/template-inspect.ndjson",
+  "inspectRelativePath": "template-inspect/template-inspect.ndjson",
+  "inspectTruncated": false,
+  "inspectMetadata": {
+    "revision": "2a4t5n",
+    "target": {
+      "id": "pr/b3juw5"
+    },
+    "kind": {
+      "requested": "slide,textbox,shape,image,table,chart",
+      "tokens": [
+        "slide",
+        "textbox",
+        "shape",
+        "image",
+        "table",
+        "chart"
+      ]
+    },
+    "include": {
+      "tokens": []
+    },
+    "exclude": {
+      "tokens": []
+    },
+    "notices": []
+  },
+  "extractedMedia": [],
+  "fonts": [
+    "+mj-lt",
+    "+mn-lt",
+    "Calibri",
+    "Calibri Light",
+    "Helvetica Neue",
+    "Menlo"
+  ],
+  "packageParts": {
+    "mediaCount": 0,
+    "slideXmlCount": 5,
+    "chartCount": 0,
+    "tableSlideCount": 0
+  }
+}

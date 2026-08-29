@@ -1,0 +1,9 @@
+Internal sources used for the ct-cli short deck:
+
+- /Users/beweiche/beweiche_noTimeMachine/ct-cli/README.md
+- /Users/beweiche/beweiche_noTimeMachine/ct-cli/docs/vortrag-ct-cli-konzept.md
+- /Users/beweiche/beweiche_noTimeMachine/114_bgkt_ct_masterdata/churchtools-processes/docs/fallstudie-ojbp-vom-bestand-zum-blueprint.md
+- /Users/beweiche/beweiche_noTimeMachine/114_bgkt_ct_masterdata/churchtools-processes/processes/ojbp/README.md
+- /Users/beweiche/beweiche_noTimeMachine/114_bgkt_ct_masterdata/churchtools-processes/processes/ojbp/blueprint/ojbp.ts
+
+No external images or external factual claims were used.
