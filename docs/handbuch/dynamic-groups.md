@@ -6,8 +6,8 @@ sources:
   - src/engine/dynamic.ts
   - src/engine/synthetic.ts
   - src/application/operations/adopt-group.ts
-sources_hash: e38b8c0f6032d5cc
-reviewed: 2026-08-28
+sources_hash: efd69354990646f0
+reviewed: 2026-08-29
 ---
 
 # Auto-groups (dynamic groups)
