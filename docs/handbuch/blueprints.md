@@ -4,7 +4,7 @@ sources:
   - src/config/context.ts
   - src/engine/graph.ts
   - src/engine/hierarchy.ts
-sources_hash: 3effed6bfffdc517
+sources_hash: 56acba8415249650
 reviewed: 2026-08-29
 ---
 
@@ -58,6 +58,9 @@ resolves through that host's managed or explicitly external state, with no
 hardcoded `groupTypeId`. If another ct project owns it, bind it once per host
 with `ct use group-type <id> --key ministry_team`; plan never guesses from the
 live catalog.
+The group's lifecycle status is the read-only exception: `status: "active"` resolves
+through `/person/masterdata.groupStatuses`, whose numeric ids may differ by
+host. `groupStatusId` remains the numeric escape hatch (#157).
 
 ```ts
 function kidsArea(ct: ConfigContext, campus: string): void {
@@ -72,8 +75,8 @@ The **numeric escape hatch** stays available: pass `campusId: <existing id>`
 `groupTypeId: 2` to target one instance's id directly. `ct plan` diffs a campus
 assign/move/clear as a normal field update — see
 [`docs/group-field-decisions.md`](https://github.com/eqrm/ct-cli/blob/main/docs/group-field-decisions.md). Declaring both the
-logical and the numeric form for one field (`campus` + `campusId`) is a conflict
-and throws at eval time.
+logical and the numeric form for one field (`campus` + `campusId`, `status` +
+`groupStatusId`) is a conflict and throws at eval time.
 
 ## The loop-over-campuses pattern and `${campus}_`-prefixed keys
 

@@ -7,7 +7,7 @@ sources:
   - src/resolve/resolver.ts
   - src/resolve/refs.ts
   - src/config/context.ts
-sources_hash: 4d424efd9bf1b459
+sources_hash: ad0a103fa22d17dc
 reviewed: 2026-08-29
 ---
 
@@ -236,10 +236,12 @@ The two DSL functions manage two different ChurchTools "domain types," and
   check, not a truthiness one.
 
   > **Person status ≠ group status.** `groupStatusId` (`ct.group`) is a
-  > different dimension with **no** REST catalog at all (#67) and must always be
-  > written as a number. Person statuses do have one (`GET /statuses`, flat
-  > array of `{id, name}` — live-verified 2026-08-10 on eqrm prod), so they
-  > use the same logical-key binding model as campuses and group types.
+  > different dimension. Its read-only catalog is nested under
+  > `GET /person/masterdata` → `groupStatuses`, so `status: "active"` resolves
+  > by technical name (#157); numeric `groupStatusId` remains an escape hatch.
+  > Person statuses instead use `GET /statuses` (flat array of `{id, name}` —
+  > live-verified 2026-08-10 on eqrm prod) and use the same logical-key binding
+  > model as campuses and group types.
 
   Since #96 the status itself is also **declarable**, via `ct.personStatus`:
 

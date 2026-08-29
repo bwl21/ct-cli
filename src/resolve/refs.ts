@@ -217,9 +217,8 @@ export const ref = {
   }),
   /**
    * A PERSON status (`/statuses` — "0 - First", "3 - Group Active", …), the domain of a `status`
-   * permission declaration. Unrelated to {@link ref.status} (GROUP status, `groupStatusId`), which
-   * has no catalog at all (#67) — person statuses do, so this one resolves by name like any other
-   * master-data ref.
+   * permission declaration. Unrelated to {@link ref.status} (GROUP status, `groupStatusId`), whose
+   * separate catalog is nested under `/person/masterdata.groupStatuses` (#157).
    */
   personStatus: (key: string): SimpleRef => ({
     __ctRef: true,

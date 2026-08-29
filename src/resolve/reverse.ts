@@ -150,10 +150,10 @@ export class ReverseResolver {
 
   /**
    * Reverse-sugar a managed-field bag for emission (#52 item A): each numeric id field with a catalog
-   * match becomes its logical `campus`/`groupType` key (dropping the numeric field); an id with NO
-   * match stays numeric and is named in `todos` so the emitter can flag it. Every other field —
-   * including `groupStatusId`, which has no `REVERSE_ID_FIELDS` entry (#67) — passes through
-   * untouched in its original position (and a `null` id — "no campus" — is omitted by the emitter).
+   * match becomes its logical `campus`/`groupType`/`status` key (dropping the numeric field); an id
+   * with NO match stays numeric and is named in `todos` so the emitter can flag it. Every other
+   * field passes through untouched in its original position (and a `null` id — "no campus" — is
+   * omitted by the emitter).
    */
   async sugarFields(
     fields: Record<string, unknown>,

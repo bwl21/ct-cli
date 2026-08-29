@@ -6,7 +6,7 @@ sources:
   - src/engine/dynamic.ts
   - src/engine/synthetic.ts
   - src/application/operations/adopt-group.ts
-sources_hash: efd69354990646f0
+sources_hash: d916ad2a6a75aed1
 reviewed: 2026-08-29
 ---
 
@@ -158,9 +158,11 @@ no-op — it does not re-`PUT` on every apply). Two equivalent ways to author it
   ```
 
   Simple marker `kind`s carry a single logical `key`, including `campus`,
-  `group`, and `group-type`. The key resolves from managed state or a persisted
-  external binding; an unbound live catalog match is diagnostic only and blocks
-  plan until `ct use` records the binding. A **role** (`role.id`) uses the compound
+  `group`, `group-type`, and `group-status`. Registry-backed keys resolve from
+  managed state or a persisted external binding; an unbound live catalog match
+  is diagnostic only and blocks plan until `ct use` records the binding. A group
+  status is the read-only exception and resolves directly from
+  `/person/masterdata.groupStatuses` (#157). A **role** (`role.id`) uses the compound
   `group-type-role` marker instead — `{ "__ctRef": true, "kind":
 "group-type-role", "groupType": "<group-type-key>", "role": "<role-name>" }` —
   because a ruleset's `role.id` is a **groupTypeRoleId** (a role scoped to a
@@ -212,14 +214,15 @@ position that maps to a **managed** logical key is rewritten to its `{ __ctRef }
 marker; every other id is left numeric. The `var → RefKind` catalog it keys off
 (`VAR_REF_KINDS`) is:
 
-| ChurchQuery `var`     | marker `kind`     | source catalog / state                             |
-| --------------------- | ----------------- | -------------------------------------------------- |
-| `ctgroup.id`          | `group`           | managed state (no REST catalog)                    |
-| `ctgroup.campusId`    | `campus`          | `/campuses`                                        |
-| `person.campusId`     | `campus`          | `/campuses`                                        |
-| `ctgroup.groupTypeId` | `group-type`      | `/group/grouptypes`                                |
-| `role.id`             | `group-type-role` | `/group/roles` (by `groupTypeId` + name)           |
-| `role.id`             | `role-def`        | managed state — only when the pair collides (#125) |
+| ChurchQuery `var`       | marker `kind`     | source catalog / state                             |
+| ----------------------- | ----------------- | -------------------------------------------------- |
+| `ctgroup.id`            | `group`           | managed state (no REST catalog)                    |
+| `ctgroup.campusId`      | `campus`          | `/campuses`                                        |
+| `person.campusId`       | `campus`          | `/campuses`                                        |
+| `ctgroup.groupTypeId`   | `group-type`      | `/group/grouptypes`                                |
+| `ctgroup.groupStatusId` | `group-status`    | `/person/masterdata` → `groupStatuses`             |
+| `role.id`               | `group-type-role` | `/group/roles` (by `groupTypeId` + name)           |
+| `role.id`               | `role-def`        | managed state — only when the pair collides (#125) |
 
 The same `group-type-role` rewrite also covers the **out-of-query** integer
 field `process.*.handleMembership.groupTypeRoleId` (the target role a
@@ -307,7 +310,7 @@ At **capture** time (`ct adopt … --with-dynamic`) the state file and the
 ```text
 ! rulesets/jugend.json keeps 5 host-specific id(s) — NOT portable to another host:
     ctgroup.id: 1246 left numeric — not under management — `ct adopt group <id>` for each (then re-adopt) makes them portable
-    ctgroup.groupStatusId: 99 left numeric — no managed group-status on this host carries these ids
+    ctgroup.groupStatusId: 99 left numeric — no group-status catalog row on this host carries these ids
     person.id: 5703, 4389 left numeric — person ids are NEVER portable — ct does not manage people, so this ruleset names DIFFERENT people on another host. Remove the clause or accept the divergence
 ```
 
