@@ -133,36 +133,28 @@ describe("Resolver.resolve", () => {
     await expect(r.resolve(ref.personStatus("5_core"), "site")).rejects.toThrow(/5_core/);
   });
 
-  it("has no group-status catalog — a group-status ref is a hard error, never resolved against /group/memberstatus (#67)", async () => {
-    // /group/memberstatus IS mocked here (as a member-statuses catalog would be on a live host), to
-    // prove the resolver never even looks at it for a group-status ref — group statuses have no
-    // REST catalog to resolve against (a different, unrelated dimension from member statuses).
-    const client = fakeClient({
-      "/group/memberstatus": [
-        { id: 1, name: "Active" },
-        { id: 2, name: "Candidate" },
-      ],
+  it("resolves group statuses by technical name across hosts with different ids (#157)", async () => {
+    const clientA = fakeClient({
+      "/person/masterdata": { groupStatuses: [{ id: 41, name: "active", nameTranslated: "Aktiv" }] },
     });
-    const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED, host: "hostA" });
-    await expect(r.resolve(ref.status("candidate"), "site")).rejects.toThrow(
-      /Cannot resolve group-status:candidate referenced at site on hostA/,
-    );
-    expect(client.calls).toEqual({}); // /group/memberstatus never fetched for a group-status ref
+    const clientB = fakeClient({
+      "/person/masterdata": { groupStatuses: [{ id: 7, name: "active", nameTranslated: "Aktiv" }] },
+    });
+    const resolverA = new Resolver({ client: clientA, state: emptyState("hostA"), desired: NO_DESIRED });
+    const resolverB = new Resolver({ client: clientB, state: emptyState("hostB"), desired: NO_DESIRED });
+    expect(await resolverA.resolve(ref.status("active"), "site")).toBe(41);
+    expect(await resolverB.resolve(ref.status("active"), "site")).toBe(7);
+    expect(clientA.calls).toEqual({ "/person/masterdata": 1 });
+    expect(clientB.calls).toEqual({ "/person/masterdata": 1 });
   });
 
-  it("gives the same actionable no-catalog message as the eval-time guard, not the generic 'declare/adopt it' advice (#67 reviewer follow-up)", async () => {
-    // A `groupStatusId: ref.status(...)` value bypasses the eval-time guard in context.ts (the
-    // id-field escape hatch accepts any Ref) and reaches the resolver directly. The generic
-    // notFound() advice ("Declare/adopt it, fix the key/name, or use a numeric id") is wrong here —
-    // there is no group-status resource type and no catalog to adopt against — so this must be the
-    // SAME message context.ts's eval-time guard uses, not the generic one.
-    const client = fakeClient({});
+  it("keeps numeric ids as the backward-compatible escape hatch and errors on unknown logical names", async () => {
+    const client = fakeClient({ "/person/masterdata": { groupStatuses: [{ id: 1, name: "active" }] } });
     const r = new Resolver({ client, state: emptyState("h"), desired: NO_DESIRED, host: "hostA" });
     await expect(r.resolve(ref.status("candidate"), 'group "g".groupStatusId')).rejects.toThrow(
-      'Cannot resolve group-status:candidate referenced at group "g".groupStatusId on hostA: group statuses ' +
-        "have no REST catalog (GET /group/memberstatus is a different dimension: member statuses, string ids " +
-        '— verified 2026-07-10). Declare a numeric "groupStatusId" instead (e.g. "groupStatusId: 1").',
+      /no live group-status at \/person\/masterdata matches key "candidate"/,
     );
+    expect(await r.resolveValue(99, "site")).toBe(99);
   });
 
   it("returns a pending marker for a same-run-declared managed target (not yet in state)", async () => {

@@ -307,7 +307,7 @@ At **capture** time (`ct adopt … --with-dynamic`) the state file and the
 ```text
 ! rulesets/jugend.json keeps 5 host-specific id(s) — NOT portable to another host:
     ctgroup.id: 1246 left numeric — not under management — `ct adopt group <id>` for each (then re-adopt) makes them portable
-    ctgroup.groupStatusId: 1, 2 left numeric — group statuses have no REST catalog (#67) — no logical form exists
+    ctgroup.groupStatusId: 99 left numeric — no managed group-status on this host carries these ids
     person.id: 5703, 4389 left numeric — person ids are NEVER portable — ct does not manage people, so this ruleset names DIFFERENT people on another host. Remove the clause or accept the divergence
 ```
 
@@ -347,9 +347,9 @@ reason it never checked:
 
 The capture-time reasons are distinct because the fixes are: an **unmanaged**
 target (adopt it), a **role unknown to `/group/roles`**, a role whose **group
-type is unmanaged**, or a dimension with **no logical form at all**
-(`ctgroup.groupStatusId` — group statuses have no REST catalog, #67; this one
-needs no lookup, so the plan-time scan reports it too).
+type is unmanaged**, or an **unknown group-status id**. Group statuses normally
+resolve through `/person/masterdata.groupStatuses`; an id absent from that live
+catalog stays numeric and is reported.
 
 **`--strict-rulesets`** turns the warning into a refusal: adopt writes nothing
 if the ruleset would still contain a host-specific id. Use it in a repo that has

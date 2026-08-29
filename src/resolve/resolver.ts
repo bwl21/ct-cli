@@ -12,8 +12,9 @@
  *  3. Live catalog discovery for diagnostics only. A unique candidate still blocks until `ct use`
  *     persists the explicit host binding; ambiguous candidates each get a complete command. Catalog
  *     reads are cached so a resolver shared by resource and permission planning is concurrency-safe.
- *     Group status remains the specialised exception: ChurchTools exposes no corresponding REST
- *     catalog (#67), so its existing numeric-only error remains.
+ *     Group status is the specialised exception: it resolves directly from
+ *     `/person/masterdata.groupStatuses` because it has no manageable resource or external binding
+ *     type (#157).
  *
  * Unknown / ambiguous references THROW (a config error — distinct from the
  * degrade-and-continue fetchErrors path). Resolved ids are never written back to
@@ -35,7 +36,6 @@ import {
 import {
   collectRefs,
   deepMapRefs,
-  GROUP_STATUS_NO_CATALOG,
   isPendingRef,
   isRef,
   pendingRef,
@@ -58,7 +58,7 @@ import {
   type ExternalDiagnosticContext,
 } from "./external.js";
 
-/** ref kind → managed resource type (state/desired). group-status has neither: no catalog and never managed (#67). */
+/** ref kind → managed resource type (state/desired). Group-status is catalog-only (#157). */
 const REF_KIND_TYPE: Partial<Record<RefKind, string>> = Object.fromEntries(
   Object.entries(RESOURCES).map(([type, spec]) => [spec.external.refKind, type]),
 ) as Partial<Record<RefKind, string>>;
@@ -66,20 +66,17 @@ const REF_KIND_TYPE: Partial<Record<RefKind, string>> = Object.fromEntries(
 /**
  * ref kind → live catalog path. `group` has no catalog (managed-only); `group-role` is gated.
  *
- * `group-status` is deliberately ABSENT (#67, disproving the prior assumption documented here):
- * `GET /group/memberstatus` is NOT a group-status catalog — live-verified 2026-07-10 on eqrm prod,
- * it returns MEMBER statuses (`{id: "active", name: "Active"}, {id: "requested", ...}`, STRING ids),
- * a completely different dimension from `groupStatusId` (numeric — e.g. 1 = active, 4 = archived on
- * that instance). Further probing found no REST list endpoint for group statuses at all
- * (`/groups/statuses` parses as `/groups/{groupId}`, `/group/statuses` and `/groupstatuses` 404) —
- * neither read nor write. So `status:` sugar fails fast at eval time instead (src/config/context.ts)
- * rather than reaching this resolver and either resolving against the wrong dimension or landing
- * here as an unconditional hard error. If CT ever ships a real group-status endpoint, add it back
- * here and restore the `status` entry to `ID_SUGAR` in context.ts.
+ * Group statuses have no dedicated endpoint, but `GET /person/masterdata` contains them under
+ * `groupStatuses` (#157). That numeric-id/technical-name catalog is distinct from both
+ * `/group/memberstatus` (membership statuses with string ids) and `/statuses` (person statuses).
+ * The reader below special-cases the nested response shape.
  */
-const CATALOG_PATH: Partial<Record<RefKind, string>> = Object.fromEntries(
-  Object.values(RESOURCES).map((spec) => [spec.external.refKind, spec.collectionPath]),
-) as Partial<Record<RefKind, string>>;
+const CATALOG_PATH: Partial<Record<RefKind, string>> = {
+  ...Object.fromEntries(
+    Object.values(RESOURCES).map((spec) => [spec.external.refKind, spec.collectionPath]),
+  ),
+  "group-status": "/person/masterdata",
+};
 
 interface CatalogRecord {
   id: number;
@@ -231,7 +228,9 @@ export class Resolver {
       // (3) discovery is diagnostic only. It never supplies an ephemeral id.
       return this.requireExternalBinding(type, r, site);
     }
-    // Non-registry refs (group status and compound/owned structures) keep their specialised errors.
+    // Group statuses cannot be managed or bound, so their read-only master-data catalog resolves
+    // directly. Compound/owned structures keep their specialised errors.
+    if (r.kind === "group-status") return this.resolveFromCatalog(r, site);
     throw this.notFound(r, site);
   }
 
@@ -270,13 +269,31 @@ export class Resolver {
     let p = this.catalogs.get(kind);
     if (!p) {
       const path = CATALOG_PATH[kind]!;
-      const rows = this.client.getAll
-        ? this.client.getAll<CatalogRecord>(path).then((page) => page.data)
-        : this.client.get<CatalogRecord[]>(path);
+      const rows =
+        kind === "group-status"
+          ? this.client
+              .get<{ groupStatuses?: CatalogRecord[] }>(path)
+              .then((masterdata) => masterdata.groupStatuses ?? [])
+          : this.client.getAll
+            ? this.client.getAll<CatalogRecord>(path).then((page) => page.data)
+            : this.client.get<CatalogRecord[]>(path);
       p = rows.then((r) => (Array.isArray(r) ? r : []));
       this.catalogs.set(kind, p);
     }
     return p;
+  }
+
+  private async resolveFromCatalog(r: SimpleRef, site: string): Promise<number> {
+    const rows = await this.catalog(r.kind);
+    const pick = (candidates: CatalogRecord[]): number => {
+      if (candidates.length > 1) throw this.ambiguous(r, site, candidates);
+      return candidates[0]!.id;
+    };
+    const bySlug = rows.filter((row) => typeof row.name === "string" && slug(row.name) === r.key);
+    if (bySlug.length >= 1) return pick(bySlug);
+    const byExact = rows.filter((row) => row.name === r.key);
+    if (byExact.length >= 1) return pick(byExact);
+    throw this.notFound(r, site);
   }
 
   private async resolveBoundExternal(external: ExternalResource, site: string): Promise<number> {
@@ -727,17 +744,6 @@ export class Resolver {
   }
 
   private notFound(r: SimpleRef, site: string): Error {
-    // group-status (#67, reviewer follow-up): a `groupStatusId: ref.status(...)` value bypasses the
-    // eval-time guard in src/config/context.ts (the id-field escape hatch accepts any Ref) and lands
-    // here. The generic "declare/adopt it, fix the key" advice below is actively wrong for
-    // group-status — there is no such managed resource type and no catalog to adopt against — so
-    // give the same actionable message the eval-time guard uses instead (shared constant so the two
-    // sites can't drift).
-    if (r.kind === "group-status") {
-      return new Error(
-        `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: ${GROUP_STATUS_NO_CATALOG}`,
-      );
-    }
     const catalog = CATALOG_PATH[r.kind];
     // A catalog-only kind has no managed resource type, so "Declare/adopt it" is advice the tool
     // cannot honour (#96's exact complaint about the old person-status message). The message says
