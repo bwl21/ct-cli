@@ -30,6 +30,11 @@ const proofValid = computed(
 const resourceFailure = computed(() => props.result?.value.resources.failed ?? null);
 const permissionFailures = computed(() => props.result?.value.permissions.failed ?? []);
 const applyIncomplete = computed(() => resourceFailure.value !== null || permissionFailures.value.length > 0);
+const expiryTime = computed(() =>
+  props.prepared.expiresAt === null
+    ? null
+    : new Date(props.prepared.expiresAt).toLocaleTimeString("de-DE"),
+);
 
 function confirm(): void {
   const requirement = props.prepared.confirmation;
@@ -105,9 +110,8 @@ function eventLabel(event: OperationEvent): string {
             <p>Die angezeigten Änderungen werden auf {{ props.prepared.plan.project.host }} angewendet.</p>
           </template>
         </div>
-        <p class="expiry">
-          Vorbereitung gültig bis {{ new Date(props.prepared.expiresAt).toLocaleTimeString("de-DE") }} Uhr.
-        </p>
+        <p v-if="expiryTime" class="expiry">Vorbereitung gültig bis {{ expiryTime }} Uhr.</p>
+        <p v-else class="expiry">Vorbereitung ohne Zeitlimit gültig.</p>
         <div class="dialog-buttons">
           <button class="secondary" @click="$emit('close')">Abbrechen</button>
           <button class="danger-primary" :disabled="!proofValid" @click="confirm">Jetzt anwenden</button>
