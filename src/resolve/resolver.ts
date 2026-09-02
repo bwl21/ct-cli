@@ -30,6 +30,7 @@ import type { State } from "../state/state.js";
 import type { DesiredResource } from "../engine/types.js";
 import { slug } from "../resources/registry.js";
 import {
+  conflictingReferenceName,
   groupScopedRows,
   knownMemberFieldId,
   matchingMemberFieldRows,
@@ -216,11 +217,11 @@ export class Resolver {
    */
   private readonly declaredRoleDefTypes = new Map<string, (number | Ref)[]>();
   /**
-   * Group key → the slugged LOCAL member-field keys that group declares (#135). A member field is
-   * group-scoped, so "does this config declare it?" can only be answered per group — the same local
-   * key on two groups is two independent fields. Drives the pending decision below.
+   * Group key → slugged LOCAL member-field key → exact ChurchTools referenceName (#135/#158). A
+   * member field is group-scoped, so "does this config declare it?" can only be answered per group;
+   * the value keeps the normalised ct-cli lookup separate from exact API identity.
    */
-  private readonly declaredMemberFields = new Map<string, Set<string>>();
+  private readonly declaredMemberFields = new Map<string, Map<string, string>>();
   /** Per-group member-field list cache, keyed by group id, fetched at most once per run. */
   private readonly memberFieldLists = new Map<number, Promise<Record<string, unknown>[]>>();
 
@@ -246,7 +247,10 @@ export class Resolver {
         }
       }
       if (d.type === "group" && d.memberFields !== undefined) {
-        this.declaredMemberFields.set(d.key, new Set(d.memberFields.map((f) => slug(f.key))));
+        this.declaredMemberFields.set(
+          d.key,
+          new Map(d.memberFields.map((f) => [slug(f.key), f.referenceName])),
+        );
       }
     }
   }
@@ -499,7 +503,8 @@ export class Resolver {
    *     anything is written.
    */
   private async resolveGroupMemberField(r: GroupMemberFieldRef, site: string): Promise<number | PendingRef> {
-    const declaresField = this.declaredMemberFields.get(r.group)?.has(slug(r.field)) === true;
+    const declaredReferenceName = this.declaredMemberFields.get(r.group)?.get(slug(r.field));
+    const declaresField = declaredReferenceName !== undefined;
     const managed = this.state.resources[r.group];
     if (!managed || managed.type !== "group") {
       if (declaresField) return pendingRef(r);
@@ -515,7 +520,28 @@ export class Resolver {
     }
     const rows = await this.memberFieldList(managed.id);
     const knownId = knownMemberFieldId(this.state, r.group, r.field);
-    const matches = matchingMemberFieldRows(rows, r.field, knownId);
+    // Only a DECLARED field has an exact identity to hold the live row to. For a group that is
+    // adopted but declares no `memberFields`, the ref names a local ct-cli key and nothing in
+    // config states the ChurchTools spelling, so the pre-#158 local-key affinity still applies —
+    // otherwise `ref.groupMemberField("g", "stand_bewerbung")` would stop resolving the live
+    // `stand-bewerbung` it has always resolved.
+    const matches = matchingMemberFieldRows(rows, r.field, declaredReferenceName, knownId);
+    if (matches.length === 1 && declaredReferenceName !== undefined) {
+      const conflicting = conflictingReferenceName(matches[0]!, declaredReferenceName);
+      if (conflicting !== undefined) {
+        throw new Error(
+          `Cannot resolve ${refLabel(r)} referenced at ${site} on ${this.host}: ChurchTools field ` +
+            `#${String(memberFieldRowId(matches[0]!))} is the live match for ` +
+            `"${memberFieldIdentity(r.group, r.field)}", but its exact referenceName is ` +
+            `${JSON.stringify(conflicting)} instead of the declared ` +
+            `${JSON.stringify(declaredReferenceName)}. ` +
+            `ct will not rename an identity-bearing field silently. Either declare ` +
+            `\`referenceName: ${JSON.stringify(conflicting)}\` on that field, or replace it ` +
+            `(destructive) with \`ct destroy --member-field ${memberFieldIdentity(r.group, r.field)}\`, ` +
+            `then re-run plan/apply.`,
+        );
+      }
+    }
     if (matches.length > 1) {
       const list = matches
         .map((row) => `${JSON.stringify(row.name ?? row.referenceName)} (#${String(memberFieldRowId(row))})`)
