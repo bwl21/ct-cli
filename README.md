@@ -285,6 +285,19 @@ another instance.
 config does not manage, and which of it could be declared today (per group _and_
 role, with the blocking scope dimension named). `--json` makes it a CI gate.
 
+## Extension REST API
+
+Run ct-cli as the trusted execution service for a paired ChurchTools Extension:
+
+```bash
+ct server --workspace . --allow-origin chrome-extension://<extension-id>
+```
+
+The API is versioned below `/api/v1`, binds to loopback by default, publishes generated OpenAPI,
+and projects the same typed application operations as Commander. See
+[docs/rest-api.md](docs/rest-api.md) for pairing, process-input snapshots, trusted generators,
+prepared apply, progress and secure reverse-proxy operation.
+
 ## Environments and CI
 
 One config repo, several ChurchTools instances, no file edits when switching:

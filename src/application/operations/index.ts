@@ -10,3 +10,7 @@ export * from "./adopt-grants.js";
 export * from "./destroy.js";
 export * from "./use.js";
 export * from "./ownership.js";
+export * from "./release.js";
+export * from "./init.js";
+export * from "./environment.js";
+export * from "./input.js";

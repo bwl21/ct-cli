@@ -14,7 +14,10 @@ export type OperationName =
   | "state"
   | "refresh"
   | "destroy"
-  | "auth";
+  | "auth"
+  | "init"
+  | "environment"
+  | "input";
 
 /** Common project selection accepted by CLI and, later, HTTP adapters. */
 export interface ProjectRequest {

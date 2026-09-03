@@ -29,6 +29,7 @@ const resourcePlan: Plan = {
 function harness(options: { protected?: boolean; environment?: string | null } = {}) {
   let now = new Date("2026-08-25T20:00:00.000Z");
   let stateFile = "state-v1";
+  let configFile = "config-v1";
   const clock: Clock = { now: () => now };
   const store = new PreparedOperationStore<PreparedApplyExecution>(clock, {
     nextId: () => "prepared-1",
@@ -46,7 +47,7 @@ function harness(options: { protected?: boolean; environment?: string | null } =
   const dependencies: ApplyOperationDependencies = {
     clock,
     store,
-    readStateFile: async () => stateFile,
+    readStateFile: async (path) => (path === statePath ? stateFile : configFile),
     resolveProject: vi.fn(async () => ({
       cwd: "/project",
       configPath: "/project/ct.config.ts",
@@ -85,6 +86,9 @@ function harness(options: { protected?: boolean; environment?: string | null } =
     },
     changeState(value: string) {
       stateFile = value;
+    },
+    changeConfig(value: string) {
+      configFile = value;
     },
   };
 }
@@ -231,5 +235,19 @@ describe("prepared apply operation", () => {
     );
     expect(test.backup).not.toHaveBeenCalled();
     expect(test.execute).not.toHaveBeenCalled();
+  });
+
+  it("binds execution to the exact config digest", async () => {
+    const test = harness({ protected: false, environment: "dev" });
+    const prepared = await prepareApply({}, test.dependencies);
+    expect(prepared.bindings.configDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(prepared.bindings.planDigest).toMatch(/^[a-f0-9]{64}$/);
+    test.changeConfig("config-v2");
+
+    await expectCode(
+      executePreparedApply(prepared, { type: "yes" }, test.dependencies),
+      "PLAN_CONFIRMATION_MISMATCH",
+    );
+    expect(test.backup).not.toHaveBeenCalled();
   });
 });
