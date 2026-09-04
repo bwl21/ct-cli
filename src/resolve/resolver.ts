@@ -72,9 +72,7 @@ const REF_KIND_TYPE: Partial<Record<RefKind, string>> = Object.fromEntries(
  * The reader below special-cases the nested response shape.
  */
 const CATALOG_PATH: Partial<Record<RefKind, string>> = {
-  ...Object.fromEntries(
-    Object.values(RESOURCES).map((spec) => [spec.external.refKind, spec.collectionPath]),
-  ),
+  ...Object.fromEntries(Object.values(RESOURCES).map((spec) => [spec.external.refKind, spec.collectionPath])),
   "group-status": "/person/masterdata",
 };
 
