@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -186,6 +186,87 @@ describe("versioned REST API", () => {
       { headers: { Authorization: `Bearer ${token}` } },
     );
     expect(await fetched.json()).toMatchObject({ result: { value: document, persisted: true } });
+  });
+
+  it("projects external-reference ownership and release operations through HTTP", async () => {
+    const target = await start();
+    const token = await pair(target);
+    const workspace = target.api.workspaces[0]!;
+    const project = target.directory;
+    await writeFile(join(project, "ct.config.ts"), "export default () => {};\n");
+    await writeFile(
+      join(project, "ct.envs.json"),
+      JSON.stringify({
+        environments: {
+          prod: { host: "https://example.church.tools", state: "ct-state.prod.json" },
+        },
+      }),
+    );
+    await writeFile(
+      join(project, "ct-state.prod.json"),
+      JSON.stringify({
+        version: 2,
+        host: "https://example.church.tools",
+        resources: {},
+        externals: {
+          shared: {
+            type: "group",
+            key: "shared",
+            id: 7,
+            identity: { name: "Shared", groupTypeId: 2 },
+            boundAt: "2026-09-04T00:00:00.000Z",
+          },
+        },
+      }),
+    );
+
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const ownership = await fetch(`${target.base}/api/v1/workspaces/${workspace.id}/ownership/check`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ root: ".", environment: "prod" }),
+    });
+    expect(ownership.status).toBe(200);
+    expect(await ownership.json()).toMatchObject({
+      operation: "ownership.check",
+      result: { value: { projects: [{}] } },
+    });
+
+    const prepared = await fetch(
+      `${target.base}/api/v1/workspaces/${workspace.id}/releases/external/prepare/group/shared`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ environment: "prod", configPath: "ct.config.ts" }),
+      },
+    );
+    expect(prepared.status).toBe(201);
+    const preview = (await prepared.json()) as {
+      result: { id: string; confirmation: { type: string; expected: string } };
+    };
+    expect(preview.result.confirmation).toEqual({ type: "environment", expected: "prod" });
+
+    const executed = await fetch(
+      `${target.base}/api/v1/workspaces/${workspace.id}/releases/external/execute/${preview.result.id}`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          environment: "prod",
+          configPath: "ct.config.ts",
+          confirmation: { type: "environment", value: "prod" },
+        }),
+      },
+    );
+    expect(executed.status).toBe(200);
+    expect(await executed.json()).toMatchObject({
+      operation: "release.external",
+      result: { operation: "unuse", value: { removed: true, churchToolsContacted: false } },
+    });
+    const state = JSON.parse(await readFile(join(project, "ct-state.prod.json"), "utf8")) as {
+      externals: Record<string, unknown>;
+    };
+    expect(state.externals).toEqual({});
   });
 
   it("enforces request-size limits without reflecting request contents", async () => {

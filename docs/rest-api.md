@@ -128,10 +128,24 @@ The equivalent CLI projection is available through `ct input`, `ct plan --input-
 Mutating requests accept `Idempotency-Key`. A repeated key in the same session and operation returns
 the original response with `Idempotency-Replayed: true`.
 
-Apply and destroy are two-stage operations: prepare first, review the returned canonical proposal
-and confirmation requirement, then execute the opaque operation ID with the required proof. Apply
-is bound to the exact environment, config digest, state digest, plan digest and optional immutable
-input snapshot. Prepared operations expire, are single-use, and state-file mutations are serialized.
+Apply, destroy, `unadopt` and `unuse` are two-stage operations: prepare first, review the returned
+canonical proposal and confirmation requirement, then execute the opaque operation ID with the
+required proof. Apply is bound to the exact environment, config digest, state digest, plan digest
+and optional immutable input snapshot. Release operations retain the exact state entry that was
+reviewed and reject execution if it changed in the meantime. Prepared operations expire, are
+single-use, and state-file mutations are serialized.
+
+External-reference operations from #143 use the same catalog as their CLI commands:
+
+- `POST /api/v1/workspaces/{workspaceId}/external-bindings` projects `ct use`;
+- the `/releases/managed/...` prepare/execute pair projects `ct unadopt`;
+- the `/releases/external/...` prepare/execute pair projects `ct unuse`;
+- `POST /api/v1/workspaces/{workspaceId}/ownership/check` projects `ct ownership check`.
+
+`use` validates the exact live ChurchTools object before recording a read-only binding and never
+claims lifecycle ownership. `unuse` and `unadopt` only change the local state file; they never delete
+or otherwise modify the ChurchTools object. Ownership checks are offline and are confined to an
+explicit directory below the selected workspace root.
 
 Long-running routes return `X-Operation-Run-Id`. Send `Prefer: respond-async` to receive `202` and
 poll `GET /api/v1/runs/{runId}`. Progress is also available as shared application events at
