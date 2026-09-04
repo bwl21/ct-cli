@@ -55,6 +55,46 @@ Process input is JSON with a versioned envelope:
 }
 ```
 
+### What an input snapshot is for
+
+If the desired structure is written directly in `ct.config.ts`, input snapshots are not needed.
+The normal workflow stays:
+
+```bash
+ct plan
+ct apply
+```
+
+Snapshots support a different workflow in which a browser UI collects form data. For example, a
+UI could ask for a campus name and whether a kids group should be created:
+
+```json
+{
+  "schemaVersion": "1",
+  "clientRevision": "campus-form@42",
+  "payload": {
+    "campus": "Mainz",
+    "withKidsGroup": true
+  }
+}
+```
+
+The flow is:
+
+```text
+browser form → immutable JSON snapshot → trusted generator → normal ct desired model → plan/apply
+```
+
+Creating the snapshot stores exactly these form values and returns a SHA-256 `digest`, which is its
+content-based identifier. Passing that digest as `snapshotDigest` in REST or as
+`--input-snapshot <digest>` in the CLI selects this exact version. It prevents form data from being
+silently changed between reviewing a plan and executing an apply.
+
+The snapshot itself does not contain a `ct.config.ts` and cannot execute code. A trusted generator
+translates its JSON payload into the same resources and permissions that a normal config would
+produce. The usual planner and apply engine then take over; snapshots do not introduce a second
+reconciliation implementation.
+
 Snapshots are content-addressed by a canonical SHA-256 digest and persisted immutably under
 `.ct/process-input/snapshots/`. Input is data, never JavaScript supplied by the browser.
 
@@ -69,6 +109,16 @@ The module exports an object with `id`, `supportedSchemaVersions`, `validate(doc
 `generate(document)`. `generate` returns `{ resources, permissions }`. The module path is server
 configuration and cannot be selected or uploaded through the API. A plan or prepared apply can
 name `snapshotDigest`; both then use the same generator and application operation as the CLI.
+
+For REST, the browser sends only data and the snapshot digest. It never sends a generator path; the
+server operator fixes the trusted generator with `ct server --generator ...`. For the local CLI,
+`--input-snapshot` and `--generator` must be supplied together:
+
+```bash
+ct input snapshot process.json
+ct plan --input-snapshot <digest> --generator ./blueprint/process-generator.ts
+ct apply --input-snapshot <digest> --generator ./blueprint/process-generator.ts
+```
 
 The equivalent CLI projection is available through `ct input`, `ct plan --input-snapshot ...
 --generator ...` and `ct apply --input-snapshot ... --generator ...`.

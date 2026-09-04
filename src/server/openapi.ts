@@ -75,6 +75,7 @@ export function generateOpenApi(
       item[route.method.toLowerCase()] = {
         operationId: route.action ? `${definition.id}.${route.action}` : definition.id,
         summary: definition.summary,
+        ...(definition.description ? { description: definition.description } : {}),
         tags: [definition.id.split(".")[0]],
         parameters: routeParameters(definition, route.path),
         ...(body ? { requestBody: body } : {}),
@@ -100,7 +101,8 @@ export function generateOpenApi(
     info: {
       title: "ct-cli Extension API",
       version: `1.0.0+ct.${VERSION}`,
-      description: "Versioned transport projection of ct-cli application operations.",
+      description:
+        "Versioned transport projection of ct-cli application operations. Most CLI users continue to use ct.config.ts directly. Process-input snapshots are an optional browser-form workflow: immutable JSON input is selected by its SHA-256 digest, translated by an operator-installed trusted generator, and then processed by the same plan/apply engine.",
     },
     // Catalog routes already carry their full versioned path. Keeping the server at the origin
     // avoids clients composing URLs such as /api/v1/api/v1/health.

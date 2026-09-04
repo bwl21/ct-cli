@@ -24,6 +24,8 @@ export interface OperationHttpProjection {
 export interface OperationDefinition {
   id: string;
   summary: string;
+  /** Longer transport-neutral explanation shown by generated API documentation. */
+  description?: string;
   mutation: boolean;
   longRunning: boolean;
   capabilities: readonly ("read" | "plan" | "mutate" | "credentials")[];
@@ -37,6 +39,33 @@ export interface OperationDefinition {
 const stringSchema = { type: "string" } satisfies JsonSchema;
 const booleanSchema = { type: "boolean" } satisfies JsonSchema;
 const objectSchema = { type: "object", additionalProperties: true } satisfies JsonSchema;
+const snapshotDigestSchema = {
+  type: "string",
+  pattern: "^[a-f0-9]{64}$",
+  description: "SHA-256 digest returned when the immutable process-input snapshot was created",
+  examples: ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],
+} satisfies JsonSchema;
+const processInputSchema = {
+  type: "object",
+  required: ["schemaVersion", "clientRevision", "payload"],
+  properties: {
+    schemaVersion: {
+      type: "string",
+      description: "Version of the form/process data contract understood by the installed generator",
+      examples: ["1"],
+    },
+    clientRevision: {
+      type: "string",
+      description: "Revision of the UI or process definition that produced this input",
+      examples: ["campus-form@42"],
+    },
+    payload: {
+      description: "Pure JSON form data; never executable JavaScript",
+      examples: [{ campus: "Mainz", withKidsGroup: true }],
+    },
+  },
+  additionalProperties: false,
+} satisfies JsonSchema;
 const projectParameters: readonly OperationParameter[] = [
   {
     name: "workspaceId",
@@ -386,6 +415,8 @@ export const operationCatalog: readonly OperationDefinition[] = [
   {
     id: "input.validate",
     summary: "Validate versioned process input",
+    description:
+      "Checks form/process JSON before it is stored. This feature is optional: users who maintain ct.config.ts directly do not need process-input snapshots.",
     mutation: false,
     longRunning: false,
     capabilities: ["read"],
@@ -393,8 +424,8 @@ export const operationCatalog: readonly OperationDefinition[] = [
       workspaceParameter,
       {
         name: "document",
-        description: "Versioned process input",
-        schema: objectSchema,
+        description: "Versioned JSON form/process data to validate",
+        schema: processInputSchema,
         required: true,
         http: { in: "body" },
         cli: { kind: "argument", name: "file" },
@@ -407,6 +438,8 @@ export const operationCatalog: readonly OperationDefinition[] = [
   {
     id: "input.snapshot",
     summary: "Create an immutable process input snapshot",
+    description:
+      "Stores one exact version of browser form data and returns its SHA-256 digest. The digest lets plan and apply select the same unmodified input later.",
     mutation: true,
     longRunning: false,
     capabilities: ["mutate"],
@@ -414,8 +447,8 @@ export const operationCatalog: readonly OperationDefinition[] = [
       workspaceParameter,
       {
         name: "document",
-        description: "Versioned process input",
-        schema: objectSchema,
+        description: "Versioned JSON form/process data to store immutably",
+        schema: processInputSchema,
         required: true,
         http: { in: "body" },
         cli: { kind: "argument", name: "file" },
@@ -447,7 +480,7 @@ export const operationCatalog: readonly OperationDefinition[] = [
       {
         name: "digest",
         description: "Snapshot SHA-256 digest",
-        schema: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        schema: snapshotDigestSchema,
         required: true,
         cli: { kind: "argument", name: "digest" },
         http: { in: "path" },
@@ -460,6 +493,8 @@ export const operationCatalog: readonly OperationDefinition[] = [
   {
     id: "plan",
     summary: "Create a read-only desired-versus-actual plan",
+    description:
+      "Normally plan reads ct.config.ts. Supplying snapshotDigest instead selects immutable browser form data, which the trusted generator configured by the server operator translates into the normal desired ct model before the same planning logic runs.",
     mutation: false,
     longRunning: true,
     capabilities: ["plan"],
@@ -467,10 +502,18 @@ export const operationCatalog: readonly OperationDefinition[] = [
       ...projectParameters,
       {
         name: "snapshotDigest",
-        description: "Immutable process input snapshot to generate the desired config from",
-        schema: stringSchema,
+        description:
+          "Optional immutable form-input version. Omit it for the normal ct.config.ts workflow. When supplied, the server's trusted generator converts that exact snapshot into the desired ct model.",
+        schema: snapshotDigestSchema,
         http: { in: "body" },
         cli: { kind: "option", name: "--input-snapshot" },
+      },
+      {
+        name: "generatorPath",
+        description:
+          "CLI-only path to a trusted local generator; required together with --input-snapshot. REST clients cannot choose executable code: the server operator configures the generator when starting ct server.",
+        schema: stringSchema,
+        cli: { kind: "option", name: "--generator" },
       },
     ],
     resultSchema: operationResultSchema,
@@ -480,6 +523,8 @@ export const operationCatalog: readonly OperationDefinition[] = [
   {
     id: "apply",
     summary: "Prepare and explicitly execute an apply",
+    description:
+      "Normally apply reads ct.config.ts. An optional snapshotDigest binds preparation to one exact version of browser form data and its generated desired model, preventing the form input from changing unnoticed between review and execution.",
     mutation: true,
     longRunning: true,
     capabilities: ["plan", "mutate"],
@@ -487,10 +532,19 @@ export const operationCatalog: readonly OperationDefinition[] = [
       ...projectParameters,
       {
         name: "snapshotDigest",
-        description: "Exact process input snapshot binding",
-        schema: stringSchema,
+        description:
+          "Optional immutable form-input version. Omit it for the normal ct.config.ts workflow. The prepared apply remains bound to this exact digest through execution.",
+        schema: snapshotDigestSchema,
         http: { in: "body" },
         cli: { kind: "option", name: "--input-snapshot" },
+        actions: ["prepare"],
+      },
+      {
+        name: "generatorPath",
+        description:
+          "CLI-only path to a trusted local generator; required together with --input-snapshot. REST clients use the generator fixed by the server operator.",
+        schema: stringSchema,
+        cli: { kind: "option", name: "--generator" },
       },
       {
         name: "backupDir",
@@ -498,6 +552,7 @@ export const operationCatalog: readonly OperationDefinition[] = [
         schema: stringSchema,
         cli: { kind: "option", name: "--backup-dir" },
         http: { in: "body" },
+        actions: ["prepare"],
       },
       {
         name: "refresh",
@@ -505,6 +560,7 @@ export const operationCatalog: readonly OperationDefinition[] = [
         schema: booleanSchema,
         cli: { kind: "option", name: "--refresh" },
         http: { in: "body" },
+        actions: ["prepare"],
       },
       {
         name: "confirmation",

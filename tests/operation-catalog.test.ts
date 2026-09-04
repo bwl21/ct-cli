@@ -69,4 +69,43 @@ describe("transport-neutral operation catalog", () => {
       }
     }
   });
+
+  it("documents snapshot selection while keeping trusted generator paths out of REST", () => {
+    for (const id of ["plan", "apply"]) {
+      const operation = operationCatalog.find((candidate) => candidate.id === id)!;
+      const snapshot = operation.parameters.find((parameter) => parameter.name === "snapshotDigest")!;
+      const generator = operation.parameters.find((parameter) => parameter.name === "generatorPath")!;
+      expect(snapshot.schema.pattern).toBe("^[a-f0-9]{64}$");
+      expect(snapshot.http?.in).toBe("body");
+      expect(generator.cli?.name).toBe("--generator");
+      expect(generator.http).toBeUndefined();
+      expect(operation.description).toContain("ct.config.ts");
+    }
+
+    const document = generateOpenApi() as {
+      paths: Record<
+        string,
+        Record<
+          string,
+          {
+            description?: string;
+            requestBody?: {
+              content: { "application/json": { schema: { properties: Record<string, unknown> } } };
+            };
+          }
+        >
+      >;
+    };
+    const plan = document.paths["/api/v1/workspaces/{workspaceId}/plans"]?.post;
+    const prepare = document.paths["/api/v1/workspaces/{workspaceId}/applies"]?.post;
+    const execute = document.paths["/api/v1/workspaces/{workspaceId}/applies/{operationId}/execute"]?.post;
+    expect(plan?.description).toContain("immutable browser form data");
+    expect(plan?.requestBody?.content["application/json"].schema.properties).toHaveProperty("snapshotDigest");
+    expect(prepare?.requestBody?.content["application/json"].schema.properties).toHaveProperty(
+      "snapshotDigest",
+    );
+    expect(execute?.requestBody?.content["application/json"].schema.properties).not.toHaveProperty(
+      "snapshotDigest",
+    );
+  });
 });
