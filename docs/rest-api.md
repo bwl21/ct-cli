@@ -21,9 +21,14 @@ are never logged.
 
 Useful discovery endpoints:
 
+- `GET /api/docs` — interactive Scalar API reference (loads its pinned renderer from jsDelivr)
 - `GET /api/v1/health`
 - `GET /api/v1/capabilities`
 - `GET /api/v1/openapi.json`
+
+The documentation page is only a projection of the generated OpenAPI contract. It does not carry
+a second, manually maintained endpoint definition. Loading the Scalar renderer requires internet
+access; the API and its OpenAPI document remain available without it.
 
 Except for the OpenAPI document itself, successful JSON responses use
 `{ apiVersion, requestId, operation, result }`. Within `v1`, fields and operations may be added but

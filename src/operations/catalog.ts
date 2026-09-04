@@ -18,6 +18,7 @@ export interface OperationHttpProjection {
   path: string;
   action?: string;
   successStatus?: number;
+  responseMediaType?: "application/json" | "text/html";
 }
 
 export interface OperationDefinition {
@@ -114,6 +115,17 @@ export const operationCatalog: readonly OperationDefinition[] = [
     parameters: [],
     resultSchema: objectSchema,
     http: [{ method: "GET", path: "/api/v1/openapi.json" }],
+    adapterSpecific: "http",
+  },
+  {
+    id: "system.docs",
+    summary: "Browse the generated OpenAPI contract with Scalar",
+    mutation: false,
+    longRunning: false,
+    capabilities: [],
+    parameters: [],
+    resultSchema: { type: "string" },
+    http: [{ method: "GET", path: "/api/docs", responseMediaType: "text/html" }],
     adapterSpecific: "http",
   },
   {

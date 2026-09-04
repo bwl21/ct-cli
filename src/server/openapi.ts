@@ -71,6 +71,7 @@ export function generateOpenApi(
               },
               additionalProperties: false,
             };
+      const responseMediaType = route.responseMediaType ?? "application/json";
       item[route.method.toLowerCase()] = {
         operationId: route.action ? `${definition.id}.${route.action}` : definition.id,
         summary: definition.summary,
@@ -81,7 +82,7 @@ export function generateOpenApi(
         responses: {
           [String(route.successStatus ?? 200)]: {
             description: "Successful operation",
-            content: { "application/json": { schema: responseSchema } },
+            content: { [responseMediaType]: { schema: responseSchema } },
           },
           "400": { $ref: "#/components/responses/Problem" },
           "401": { $ref: "#/components/responses/Problem" },
@@ -101,7 +102,9 @@ export function generateOpenApi(
       version: `1.0.0+ct.${VERSION}`,
       description: "Versioned transport projection of ct-cli application operations.",
     },
-    servers: [{ url: "/api/v1" }],
+    // Catalog routes already carry their full versioned path. Keeping the server at the origin
+    // avoids clients composing URLs such as /api/v1/api/v1/health.
+    servers: [{ url: "/" }],
     paths,
     components: {
       securitySchemes: {

@@ -71,7 +71,26 @@ describe("versioned REST API", () => {
 
     const spec = await fetch(`${target.base}/api/v1/openapi.json`);
     expect(spec.status).toBe(200);
-    expect(await spec.json()).toMatchObject({ openapi: "3.1.0" });
+    expect(await spec.json()).toMatchObject({ openapi: "3.1.0", servers: [{ url: "/" }] });
+  });
+
+  it("serves a CSP-protected Scalar API reference backed by the generated contract", async () => {
+    const target = await start();
+    const response = await fetch(`${target.base}/api/docs`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("content-security-policy")).toContain("https://cdn.jsdelivr.net");
+
+    const html = await response.text();
+    expect(html).toContain("@scalar/api-reference@1.67.0");
+    expect(html).toContain("url: '/api/v1/openapi.json'");
+    expect(html).toContain("disabled: true");
+    expect(html).toContain("telemetry: false");
+
+    const spec = (await (await fetch(`${target.base}/api/v1/openapi.json`)).json()) as {
+      paths: Record<string, Record<string, { responses: Record<string, { content: object }> }>>;
+    };
+    expect(spec.paths["/api/docs"]?.get?.responses["200"]?.content).toHaveProperty("text/html");
   });
 
   it("exchanges the pairing code once and requires the scoped session", async () => {

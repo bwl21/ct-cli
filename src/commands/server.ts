@@ -91,6 +91,7 @@ export function serverCommand(): Command {
       const localUrl = `http://${opts.host.includes(":") ? `[${opts.host}]` : opts.host}:${actualPort}`;
       success(`ct REST API listening at ${opts.publicUrl ?? localUrl}/api/v1`);
       info(`Pairing code: ${api.pairingCode} (expires ${api.pairingExpiresAt})`);
+      info(`API docs: ${opts.publicUrl ?? localUrl}/api/docs`);
       info(`OpenAPI: ${opts.publicUrl ?? localUrl}/api/v1/openapi.json`);
       info(
         `Configured workspaces: ${api.workspaces.map((workspace) => `${workspace.name} (${workspace.id})`).join(", ")}`,

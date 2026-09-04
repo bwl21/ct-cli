@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer, type Server } from "node:http";
 import { authedSession } from "../api/session.js";
@@ -53,6 +53,7 @@ import {
 import { VERSION } from "../version.js";
 import { generateOpenApi } from "./openapi.js";
 import { OperationRunStore } from "./runs.js";
+import { renderScalarDocs } from "./scalar-docs.js";
 import { RateLimiter, SessionManager, type ApiSession } from "./session.js";
 import { WorkspaceRegistry, type Workspace } from "./workspaces.js";
 
@@ -229,6 +230,30 @@ function sendJson(
     "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
     "Referrer-Policy": "no-referrer",
     ...headers,
+  });
+  response.end(payload);
+}
+
+function sendScalarDocs(response: ServerResponse): void {
+  const nonce = randomBytes(18).toString("base64");
+  const payload = renderScalarDocs(nonce);
+  response.writeHead(200, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Content-Length": Buffer.byteLength(payload),
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": [
+      "default-src 'none'",
+      `script-src 'nonce-${nonce}' https://cdn.jsdelivr.net`,
+      "style-src 'unsafe-inline'",
+      "img-src data: https:",
+      "font-src data:",
+      "connect-src 'self'",
+      "frame-ancestors 'none'",
+      "base-uri 'none'",
+      "form-action 'none'",
+    ].join("; "),
+    "Referrer-Policy": "no-referrer",
   });
   response.end(payload);
 }
@@ -460,6 +485,11 @@ export async function createCtApiServer(options: ApiServerOptions): Promise<CtAp
         return;
       }
       if (session) assertCapabilities(session, matched.definition);
+
+      if (matched.definition.id === "system.docs") {
+        sendScalarDocs(response);
+        return;
+      }
 
       const body = ["POST", "DELETE"].includes(request.method ?? "")
         ? await readJson(request, options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT)
